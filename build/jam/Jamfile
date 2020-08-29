@@ -1,0 +1,7 @@
+SubDir ../.. ;
+
+Main hasei_server :
+	src/server/SemanticServer.cpp
+	: be localestub shared [ TargetLibstdc++ ]
+	: semantic_server.rdef
+;
