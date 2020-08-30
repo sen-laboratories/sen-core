@@ -18,13 +18,6 @@ virtual								~SemanticServer();
 
 virtual	void						MessageReceived(BMessage* message);
 
-private:
-		/*status_t					_ValidateRelations(boolean repair);
-
-		status_t					_FindRelations(const BFile& file);
-
-		status_t					_AddRelation(const BFile& sourceFile, const BString& relationAttrName, const BFile& targetFile);
-		status_t					_RemoveRelation(const BFile& file, const BString& relationAttrName);*/
 };
 
 

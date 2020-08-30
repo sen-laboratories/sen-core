@@ -5,6 +5,7 @@
  */
 
 #include "SemanticServer.h"
+#include "../relations/RelationService.h"
 #include "../SenDefs.h"
 
 #include <Directory.h>
@@ -13,9 +14,6 @@
 #include <Path.h>
 #include <Roster.h>
 #include <String.h>
-
-#include <new>
-
 #include <stdio.h>
 
 SemanticServer::SemanticServer()
@@ -40,7 +38,7 @@ SemanticServer::SemanticServer()
 	path.Append("relations");
 
 	//_ReadRelationsConfig();
-	
+	 
 	// setup node watcher for volume to keep relations up to date on creation/deletion
 	// https://www.haiku-os.org/docs/api/NodeMonitor_8h.html#a24336df118e76f00bd15b89fa863d299
 }
@@ -49,53 +47,56 @@ SemanticServer::~SemanticServer()
 {
 }
 
-
 void SemanticServer::MessageReceived(BMessage* message)
 {
-	BMessage reply;
+	BMessage* reply = new BMessage();
 	status_t result = B_UNSUPPORTED;
+	RelationService relationService;
 
 	switch (message->what) {
 		case SEN_CORE_INFO:
 		 {
 		 	// TODO: get from resource
 		 	result = B_OK;
-		 	reply.what = SEN_RESULT_INFO;
-		 	reply.AddString("info", "SEN Core v0.0.0-proto1");
+		 	reply->what = SEN_RESULT_INFO;
+		 	reply->AddString("info", "SEN Core v0.0.0-proto1");
 			
 		 	break;
 		 }
 		case SEN_CORE_STATUS:
 		 {
 		 	result = B_OK;
-		 	reply.what = SEN_RESULT_STATUS;
+		 	reply->what = SEN_RESULT_STATUS;
 		 	
-		 	reply.AddString("status", "operational");
-		 	reply.AddBool("healthy", true);
+		 	reply->AddString("status", "operational");
+		 	reply->AddBool("healthy", true);
 		 	
 		 	break;
 		 }
+		case SEN_RELATIONS_ADD:
+		{
+			result = relationService.AddRelation(message, reply);
+			break;
+		}
 		case SEN_RELATIONS_GET:
 		{
-			result = B_OK;
-			reply.what = SEN_RESULT_RELATIONS;
-			
-			BString source;
-			if (message->FindString("source", &source) != B_OK) {
-				result = B_BAD_VALUE;
-				break;
-			}
-			BString relation;
-			if (message->FindString("relation", &relation) != B_OK) {
-				result = B_BAD_VALUE;
-				break;
-			}
-			//TODO: if file found
-			if (result == B_OK) {
-				//TODO: add relations to reply
-				reply.AddString("relations", "foo,bar,baz");
-				break;
-			}
+			result = relationService.GetRelations(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_GET_TARGETS:
+		{
+			result = relationService.GetTargetsForRelation(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_REMOVE:
+		{
+			result = relationService.RemoveRelation(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_REMOVEALL:
+		{
+			result = relationService.RemoveAllRelations(message, reply);
+			break;
 		}
 		default:
 		{
@@ -105,8 +106,8 @@ void SemanticServer::MessageReceived(BMessage* message)
 		}
 	}
 
-	reply.AddInt32("result", result);
-	message->SendReply(&reply);
+	reply->AddInt32("result", result);
+	message->SendReply(reply);
 }
 
 int main(int argc, char* argv[])
