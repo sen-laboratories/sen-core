@@ -6,7 +6,7 @@
 
 #include "SemanticServer.h"
 #include "../relations/RelationService.h"
-#include "../SenDefs.h"
+#include "../Sen.h"
 
 #include <Directory.h>
 #include <Entry.h>

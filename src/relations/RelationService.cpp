@@ -6,7 +6,17 @@
  
 #include "RelationService.h"
 
+#include <Node.h>
+#include <Path.h>
+#include <Query.h>
+#include <stdio.h>
 #include <String.h>
+#include <StringList.h>
+#include <VolumeRoster.h>
+#include <Volume.h>
+
+# define LOG(x...)			printf(x);
+# define ERROR(x...)		fprintf(stderr, x);
 
 RelationService::RelationService()
 {
@@ -66,6 +76,8 @@ status_t RelationService::GetTargetsForRelation(const BMessage* message, BMessag
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("statusMessage", BString("get targets for relation ") << relation << " from " << source);
 	
+	GetRelationTargets(source, relation);
+	
 	return B_OK;
 }
 
@@ -101,6 +113,64 @@ status_t RelationService::RemoveAllRelations(const BMessage* message, BMessage* 
 
 // private methods
 
-status_t	_GetAllRelationsForFile(const BFile& file) { return B_OK; }
-status_t	_GetRelationForFile(const BFile& file) { return B_OK; }
-status_t	_WriteRelationToFile(const BFile& file) { return B_OK; }
+BObjectList<BEntry> RelationService::GetRelationTargets(const char *path, const char *relation)
+{
+	BNode node(path);
+	BObjectList<BEntry> result;
+	
+	if (node.InitCheck() != B_OK)
+		 return result;
+
+	BString relationTargets;
+	node.ReadAttrString(relation, &relationTargets);
+	
+	result = ResolveIds(relationTargets);
+	return result;
+}
+
+bool RelationService::QueryForId(const BString& id, void* result)
+{
+	BString predicate(BString("SEN:_id == ") << id);
+	// all relation queries currently assume we never leave the boot volume
+	BVolumeRoster volRoster;
+	BVolume bootVolume;
+	volRoster.GetBootVolume(&bootVolume);
+
+	BQuery query;
+	query.SetVolume(&bootVolume);
+	query.SetPredicate(predicate.String());
+	
+	if (query.Fetch() == B_OK)
+	{
+		LOG("Results of query \"%s\":\n", predicate.String());
+		BEntry entry;
+		
+		// if not while becaues result should always only contain a single id (inode)
+		// else, the relation references are corrupt and need to be repaired.
+		if (query.GetNextEntry(&entry) == B_OK)
+		{
+			BPath path;
+			entry.GetPath(&path);
+			LOG("\t%s\n",path.Path());
+			
+			reinterpret_cast<BObjectList<BEntry>*>(result)->AddItem(&entry);
+		}
+		else
+			ERROR("error resolving id %s", id);
+	}
+	
+	return false;
+}
+
+BObjectList<BEntry> RelationService::ResolveIds(const BString& idsStr)
+{
+	LOG("resolving targets for %s...\n", idsStr);
+	BObjectList<BEntry> targets;
+	BStringList ids;
+	
+	if (idsStr.Split(",", true, ids)) {
+		ids.DoForEach(QueryForId, &targets);
+	}
+	
+	return targets;
+}

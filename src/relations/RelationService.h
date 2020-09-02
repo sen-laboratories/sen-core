@@ -9,6 +9,7 @@
 
 #include <File.h>
 #include <Message.h>
+#include <ObjectList.h>
 
 class RelationService {
 
@@ -33,9 +34,9 @@ virtual
 		~RelationService();
 
 private:
-		status_t					_GetAllRelationsForFile	(const BFile& file);
-		status_t					_GetRelationForFile		(const BFile& file);
-		status_t					_WriteRelationToFile	(const BFile& file);
+		BObjectList<BEntry> GetRelationTargets(const char* path, const char* relation);
+		static BObjectList<BEntry> ResolveIds(const BString& targets);
+		static bool QueryForId(const BString& id, void* targets);
 };
 
 #endif // _RELATION_SERVICE_H
