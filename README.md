@@ -16,7 +16,7 @@ Haiku server process acting as the foundation of the semantic layer
 > dist/semantic_server &
 ```
 
-## Demo Proto2
+## Demo Proto1
 
 seg up index and attributes (until add relations is implemented):
 
@@ -28,14 +28,21 @@ seg up index and attributes (until add relations is implemented):
 > addattr -t string "SEN:referencedBy" $ID Makefile
 ```
 
-send message and get relation targets result:
+send message and get relation targets result (with local example IDs):
 
 ```bash
 > hey semantic_server 'SCrt' with source=Makefile and relation=SEN:referencedBy
-resolving targets for id 3210985
+resolving targets for file IDs 3210985,3670583...
 Results of query "SEN:_id == 3210985":
         /boot/home/Develop/SEN/sen-core/README.md
+Results of query "SEN:_id == 3670583":
+        /boot/home/Develop/SEN/sen-core/src
+Adding to result message:
+        /boot/home/Develop/SEN/sen-core/README.md
+        /boot/home/Develop/SEN/sen-core/src
 Reply BMessage('SCre'):
-   "statusMessage" (B_STRING_TYPE) : "get targets for relation SEN:referencedBy from Makefile"
+   "targets" (B_STRING_TYPE) : "/boot/home/Develop/SEN/sen-core/README.md"
+   "targets" (B_STRING_TYPE) : "/boot/home/Develop/SEN/sen-core/src"
+   "statusMessage" (B_STRING_TYPE) : "found 2 targets for relation SEN:referencedBy from Makefile"
    "result" (B_INT32_TYPE) : 0 (0x00000000)
 ```

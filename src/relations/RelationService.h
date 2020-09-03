@@ -36,7 +36,11 @@ virtual
 private:
 		BObjectList<BEntry> GetRelationTargets(const char* path, const char* relation);
 		static BObjectList<BEntry> ResolveIds(const BString& targets);
+		
+		// helper methods
 		static bool QueryForId(const BString& id, void* targets);
+		static BEntry* AddToMessage(BEntry* entry, void* message);
+
 };
 
 #endif // _RELATION_SERVICE_H
