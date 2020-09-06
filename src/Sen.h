@@ -7,9 +7,9 @@
 #ifndef _SEN_DEFS_H
 #define _SEN_DEFS_H
 
-const char* SEN_SERVER_SIGNATURE
-        = "application/x-vnd.crashandburn.sen-semantic_server";
+#define SEN_SERVER_SIGNATURE "application/x-vnd.crashandburn.sen-semantic_server"
 
+// to allow easy declaration AND reuse across sources
 enum {
 		//
 		// Requests
@@ -18,6 +18,7 @@ enum {
 		// core	
 		SEN_CORE_INFO 				= 'SCin',
 		SEN_CORE_STATUS 			= 'SCst',
+		SEN_CORE_CHECK				= 'SCck',		// validate and repair relation attributes
 		
 		// relations
 		SEN_RELATIONS_GET			= 'SCrg',
@@ -29,7 +30,7 @@ enum {
 
 		// Message Replies
 		SEN_RESULT_INFO				= 'SCri',
-		SEN_RESULT_STATUS			= 'SCrs',
+		SEN_RESULT_STATUS			= 'SCrs'
 };
 
 #endif // _SEN_DEFS_H

@@ -10,12 +10,17 @@
 #include <File.h>
 #include <Message.h>
 #include <ObjectList.h>
+#include <StringList.h>
 
 class RelationService {
 
-const char* SEN_RELATION_SOURCE = "source";
-const char* SEN_RELATION_NAME   = "relation";
-const char* SEN_RELATION_TARGET = "target";
+#define SEN_RELATION_SOURCE "source"
+#define SEN_RELATION_NAME   "relation"
+#define SEN_RELATION_TARGET "target"
+
+#define SEN_ATTRIBUTES_PREFIX		"SEN:"
+#define SEN_RELATION_ID				SEN_ATTRIBUTES_PREFIX "_id"
+#define SEN_RELATION_ID_SEPARATOR	","
 
 // Message Replies
 enum {
@@ -34,12 +39,15 @@ virtual
 		~RelationService();
 
 private:
-		BObjectList<BEntry> GetRelationTargets(const char* path, const char* relation);
-		static BObjectList<BEntry> ResolveIds(const BString& targets);
+		BStringList* 			GetRelationsFromAttrs(const char* path);
+		BStringList* 			GetRelationIds(const char *path, const char* relation);
+		BObjectList<BEntry>*	ResolveRelationTargets(BStringList* ids);
+		const char*		 		GetIdForFile(const char *path);
 		
 		// helper methods
 		static bool QueryForId(const BString& id, void* targets);
-		static BEntry* AddToMessage(BEntry* entry, void* message);
+		static bool AddRelationToMessage(const BString& relation, void* message);
+		static BEntry* AddTargetToMessage(BEntry* entry, void* message);
 
 };
 

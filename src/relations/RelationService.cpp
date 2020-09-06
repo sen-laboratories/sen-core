@@ -29,22 +29,26 @@ RelationService::~RelationService()
 status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
 {
 	BString source;
-	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
+	if (message->FindString(SEN_RELATION_SOURCE, &source)   != B_OK) {
 		return B_BAD_VALUE;
 	}
 	BString relation;
-	if (message->FindString(SEN_RELATION_NAME, &relation) != B_OK) {
+	if (message->FindString(SEN_RELATION_NAME,   &relation) != B_OK) {
 		return B_BAD_VALUE;
 	}
 	BString target;
-	if (message->FindString(SEN_RELATION_TARGET, &target) != B_OK) {
+	if (message->FindString(SEN_RELATION_TARGET, &target)   != B_OK) {
 		return B_BAD_VALUE;
 	}
 	
-	// TODO file attribute linking magic
-
+	const char* srcId  	 = GetIdForFile(source);
+	const char* targetId = GetIdForFile(target);
+	
+	LOG("creating relation from \"%s\"(\"%d\") -> \"%s\"(\"%d\")\n", source, srcId, target, targetId);
+	
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("created relation ") << relation << " from " << source << " -> "<<  target);
+	reply->AddString("statusMessage", BString("created relation ") << relation << " from "
+		<< source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]");
 	
 	return B_OK;
 }
@@ -55,9 +59,13 @@ status_t RelationService::GetRelations(const BMessage* message, BMessage* reply)
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
 		return B_BAD_VALUE;
 	}
+
+	BStringList* relations = GetRelationsFromAttrs(source);
+	LOG("Adding to result message:\n");
+	relations->DoForEach(AddRelationToMessage, reply);
 	
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("get relations for ")  << source);
+	reply->AddString("statusMessage", BString("got ") << relations->CountStrings() << " relations for " << source);
 	
 	return B_OK;
 }
@@ -73,12 +81,12 @@ status_t RelationService::GetTargetsForRelation(const BMessage* message, BMessag
 		return B_BAD_VALUE;
 	}
 	
-	BObjectList<BEntry> targetEntries = GetRelationTargets(source, relation);
+	BObjectList<BEntry>* targetEntries = ResolveRelationTargets(GetRelationIds(source, relation));
 	LOG("Adding to result message:\n");
-	targetEntries.EachElement(AddToMessage, reply);
+	targetEntries->EachElement(AddTargetToMessage, reply);
 
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("found ") << targetEntries.CountItems()
+	reply->AddString("statusMessage", BString("found ") << targetEntries->CountItems()
 		<< " targets for relation " << relation << " from " << source);
 		
 	return B_OK;
@@ -115,38 +123,67 @@ status_t RelationService::RemoveAllRelations(const BMessage* message, BMessage* 
 }
 
 // private methods
-
-BObjectList<BEntry> RelationService::GetRelationTargets(const char *path, const char *relation)
+BStringList* RelationService::GetRelationIds(const char *path, const char* relation)
 {
-	BNode node(path);
-	BObjectList<BEntry> result;
-	
-	if (node.InitCheck() != B_OK)
-		 return result;
-
 	BString relationTargets;
+	BNode	node;
+	
 	node.ReadAttrString(relation, &relationTargets);
 	
-	result = ResolveIds(relationTargets);
+	BStringList ids;
+	relationTargets.Split(SEN_RELATION_ID_SEPARATOR, true, ids);
+	
+	return new BStringList(ids);
+}
+
+BStringList* RelationService::GetRelationsFromAttrs(const char* path)
+{
+	BStringList* result = new BStringList();
+	
+	BNode node(path);
+	if (node.InitCheck() != B_OK)
+		return result;
+	
+	char *attrName = new char[B_ATTR_NAME_LENGTH];
+	
+	BString relation;
+	while (node.GetNextAttrName(attrName) == B_OK) {
+		relation = BString(attrName);
+		if (relation.StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+			result->Add(relation.Remove(0, 4));	// TODO: replace with real Relation name, for now we just cut the PREFIX
+		}
+	}
+	delete attrName;
+	
 	return result;
 }
 
-BObjectList<BEntry> RelationService::ResolveIds(const BString& idsStr)
+/**
+ * we use the inode as a stable file/dir reference (just like filesystem links, they have to stay on the same device)
+ */
+const char* RelationService::GetIdForFile(const char *path)
 {
-	LOG("resolving targets for file IDs %s...\n", idsStr.String());
-	BObjectList<BEntry> targets;
-	BStringList ids;
+	BNode node(path);
+	if (node.InitCheck() != B_OK)
+	 return NULL;
+
+	node_ref nodeInfo;
+	node.GetNodeRef(&nodeInfo);
 	
-	if (idsStr.Split(",", true, ids)) {
-		ids.DoForEach(QueryForId, &targets);
-	}
+	return (BString("") << nodeInfo.node).String();
+}
+
+BObjectList<BEntry>* RelationService::ResolveRelationTargets(BStringList* ids)
+{
+	BObjectList<BEntry>* targets = new BObjectList<BEntry>();
+	ids->DoForEach(QueryForId, targets);
 	
 	return targets;
 }
 
 bool RelationService::QueryForId(const BString& id, void* result)
 {
-	BString predicate(BString("SEN:_id == ") << id);
+	BString predicate(BString(SEN_RELATION_ID) << " == " << id);
 	// all relation queries currently assume we never leave the boot volume
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
@@ -178,7 +215,13 @@ bool RelationService::QueryForId(const BString& id, void* result)
 	return true;
 }
 
-BEntry* RelationService::AddToMessage(BEntry* entry, void* message)
+bool RelationService::AddRelationToMessage(const BString& relation, void* message)
+{
+	reinterpret_cast<BMessage*>(message)->AddString("relations", relation);
+	return true;
+}
+
+BEntry* RelationService::AddTargetToMessage(BEntry* entry, void* message)
 {
 	BPath path;
 	entry->GetPath(&path);
