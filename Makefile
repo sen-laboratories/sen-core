@@ -5,7 +5,7 @@
 ## architecture of Haiku.
 
 # The name of the binary.
-NAME = semantic_server
+NAME = sen_server
 ARCH = $(shell getarch)
 
 V_MAJOR = 0
@@ -25,7 +25,7 @@ PACKAGE = $(TARGET_DIR)/$(NAME)_$(VERSION)-$(ARCH).hpkg
 TYPE = APP
 
 # 	If you plan to use localization, specify the application's MIME signature.
-APP_MIME_SIG = application/x-vnd.crashandburn.sen-semantic_server
+APP_MIME_SIG = application/x-vnd.crashandburn.sen-server
 
 #	The following lines tell Pe and Eddie where the SRCS, RDEFS, and RSRCS are
 #	so that Pe and Eddie can fill them in for you.
@@ -43,7 +43,7 @@ SRCS := src/relations/RelationService.cpp \
 
 #	Specify the resource definition files to use. Full or relative paths can be
 #	used.
-RDEFS = src/resources/semantic_server.rdef
+RDEFS = src/resources/sen_server.rdef
 
 #	Specify the resource files to use. Full or relative paths can be used.
 #	Both RDEFS and RSRCS can be utilized in the same Makefile.

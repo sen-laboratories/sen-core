@@ -13,7 +13,7 @@
 
 class SemanticServer : public BApplication {
 public:
-										SemanticServer();
+									SemanticServer();
 virtual								~SemanticServer();
 
 virtual	void						MessageReceived(BMessage* message);

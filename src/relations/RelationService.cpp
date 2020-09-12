@@ -5,6 +5,7 @@
  */
  
 #include "RelationService.h"
+#include "../Sen.h"
 
 #include <Node.h>
 #include <Path.h>
@@ -15,6 +16,7 @@
 #include <VolumeRoster.h>
 #include <Volume.h>
 
+# define DEBUG(x...)		printf(x);
 # define LOG(x...)			printf(x);
 # define ERROR(x...)		fprintf(stderr, x);
 
@@ -28,15 +30,15 @@ RelationService::~RelationService()
 
 status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
 {
-	BString source;
+	const char* source = new char[B_FILE_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_SOURCE, &source)   != B_OK) {
 		return B_BAD_VALUE;
 	}
-	BString relation;
-	if (message->FindString(SEN_RELATION_NAME,   &relation) != B_OK) {
+	const char* relation = new char[B_ATTR_NAME_LENGTH];
+	if (message->FindString(SEN_RELATION_NAME, &relation) != B_OK) {
 		return B_BAD_VALUE;
 	}
-	BString target;
+	const char* target = new char[B_FILE_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_TARGET, &target)   != B_OK) {
 		return B_BAD_VALUE;
 	}
@@ -44,10 +46,35 @@ status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
 	const char* srcId  	 = GetIdForFile(source);
 	const char* targetId = GetIdForFile(target);
 	
-	LOG("creating relation from \"%s\"(\"%d\") -> \"%s\"(\"%d\")\n", source, srcId, target, targetId);
+	if (srcId == NULL || targetId == NULL) {
+		return B_ERROR;
+	}
+	
+	// get existing relation IDs for source file
+	BStringList* ids = ReadRelationIdsFromFile(source, relation);
+	if (ids == NULL) {
+		ERROR("failed to read relation ids from %s for relation %s!\n", source, relation);
+		return B_ERROR;
+	}
+	// write source File ID
+	if (WriteIdToFile(source, srcId) != B_OK) {
+		ERROR("failed to write source ID attr %s to file %s.\n", srcId, source);
+		return B_ERROR;
+	}
+	// update target IDs with new target if not already exists
+	if (! ids->HasString(targetId)) {
+		ids->Add(targetId);
+		WriteRelationIds(source, relation, ids);
+	}
+	
+	// store target ID in target file to make target reachable via relation
+	if (WriteIdToFile(target, targetId) != B_OK) {
+		ERROR("failed to write target ID attr %s to file %s.\n", targetId, target);
+		return B_ERROR;
+	}
 	
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("created relation ") << relation << " from "
+	reply->AddString("statusMessage", BString("created relation '") << relation << "' from "
 		<< source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]");
 	
 	return B_OK;
@@ -60,7 +87,7 @@ status_t RelationService::GetRelations(const BMessage* message, BMessage* reply)
 		return B_BAD_VALUE;
 	}
 
-	BStringList* relations = GetRelationsFromAttrs(source);
+	BStringList* relations = ReadRelationsFromAttrs(source);
 	LOG("Adding to result message:\n");
 	relations->DoForEach(AddRelationToMessage, reply);
 	
@@ -81,7 +108,7 @@ status_t RelationService::GetTargetsForRelation(const BMessage* message, BMessag
 		return B_BAD_VALUE;
 	}
 	
-	BObjectList<BEntry>* targetEntries = ResolveRelationTargets(GetRelationIds(source, relation));
+	BObjectList<BEntry>* targetEntries = ResolveRelationTargets(ReadRelationIdsFromFile(source, relation));
 	LOG("Adding to result message:\n");
 	targetEntries->EachElement(AddTargetToMessage, reply);
 
@@ -122,21 +149,45 @@ status_t RelationService::RemoveAllRelations(const BMessage* message, BMessage* 
 	return B_OK;
 }
 
-// private methods
-BStringList* RelationService::GetRelationIds(const char *path, const char* relation)
+/*
+ * private methods
+ */
+ 
+BStringList* RelationService::ReadRelationIdsFromFile(const char *path, const char* relation)
 {
 	BString relationTargets;
-	BNode	node;
+	BNode node(path);
+	if (node.InitCheck() != B_OK)
+		return NULL;
 	
 	node.ReadAttrString(relation, &relationTargets);
 	
 	BStringList ids;
-	relationTargets.Split(SEN_RELATION_ID_SEPARATOR, true, ids);
+	relationTargets.Split(SEN_FILE_ID_SEPARATOR, true, ids);
 	
 	return new BStringList(ids);
 }
 
-BStringList* RelationService::GetRelationsFromAttrs(const char* path)
+status_t RelationService::WriteRelationIds(const char *path, const char* relation, BStringList* ids)
+{
+	BNode node(path);
+	if (node.InitCheck() != B_OK)
+		return B_BAD_VALUE;
+	
+	BString *idStr = new BString();
+	ids->DoForEach(AppendIdToString, idStr);
+	
+	const BString* allIds = new BString(idStr->RemoveLast(SEN_FILE_ID_SEPARATOR));
+	DEBUG("writing target ids '%s' for relation '%s' to file %s", allIds->String(), relation, path);
+	
+	BString relationAttr(relation);
+	if (! relationAttr.StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+		relationAttr.Prepend(SEN_ATTRIBUTES_PREFIX);
+	}
+	return node.WriteAttrString(relationAttr.String(), allIds);
+}
+
+BStringList* RelationService::ReadRelationsFromAttrs(const char* path)
 {
 	BStringList* result = new BStringList();
 	
@@ -164,13 +215,31 @@ BStringList* RelationService::GetRelationsFromAttrs(const char* path)
 const char* RelationService::GetIdForFile(const char *path)
 {
 	BNode node(path);
-	if (node.InitCheck() != B_OK)
-	 return NULL;
+	if (node.InitCheck() != B_OK) {
+		ERROR("failed to initialize node for path %s\n", path);
+		return NULL;
+	}
 
 	node_ref nodeInfo;
 	node.GetNodeRef(&nodeInfo);
 	
-	return (BString("") << nodeInfo.node).String();
+	char* id=new char[sizeof(ino_t)];
+	if (snprintf(id, sizeof(id), "%d", nodeInfo.node) >= 0) {
+		DEBUG("got ID %s for path %s\n", id, path);
+		return id;
+	} else {
+		ERROR("failed to copy ID from node_info for path %s\n", path);
+		return NULL;
+	}
+}
+
+status_t RelationService::WriteIdToFile(const char *path, const char *id)
+{
+	BNode node(path);
+	if (node.InitCheck() != B_OK)
+		return B_BAD_VALUE;
+	
+	return node.WriteAttrString(SEN_FILE_ID, new BString(id));
 }
 
 BObjectList<BEntry>* RelationService::ResolveRelationTargets(BStringList* ids)
@@ -181,9 +250,14 @@ BObjectList<BEntry>* RelationService::ResolveRelationTargets(BStringList* ids)
 	return targets;
 }
 
+bool RelationService::AppendIdToString(const BString& id, void* result) {
+	reinterpret_cast<BString*>(result)->Append(id).Append(SEN_FILE_ID_SEPARATOR);
+	return true;
+}
+
 bool RelationService::QueryForId(const BString& id, void* result)
 {
-	BString predicate(BString(SEN_RELATION_ID) << " == " << id);
+	BString predicate(BString(SEN_FILE_ID) << " == " << id);
 	// all relation queries currently assume we never leave the boot volume
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
