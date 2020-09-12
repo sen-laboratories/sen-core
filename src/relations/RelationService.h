@@ -32,11 +32,12 @@ private:
 		const char*		 		GetIdForFile(const char *path);
 		// write
 		status_t 				WriteIdToFile(const char *path, const char *id);
-		status_t				WriteRelationIds(const char *path, const char* relation, BStringList* ids);
+		status_t				WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids);
 		
 		// helper methods
 		static bool AppendIdToString(const BString& id, void* result);
 		static bool QueryForId(const BString& id, void* targets);
+		static const char* GetRelationAttributeName(const char* relation);
 		static bool AddRelationToMessage(const BString& relation, void* message);
 		static BEntry* AddTargetToMessage(BEntry* entry, void* message);
 };

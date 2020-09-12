@@ -45,7 +45,7 @@ status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
 	
 	const char* srcId  	 = GetIdForFile(source);
 	const char* targetId = GetIdForFile(target);
-	
+	 
 	if (srcId == NULL || targetId == NULL) {
 		return B_ERROR;
 	}
@@ -64,7 +64,7 @@ status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
 	// update target IDs with new target if not already exists
 	if (! ids->HasString(targetId)) {
 		ids->Add(targetId);
-		WriteRelationIds(source, relation, ids);
+		WriteRelationIdsToFile(source, relation, ids);
 	}
 	
 	// store target ID in target file to make target reachable via relation
@@ -152,7 +152,15 @@ status_t RelationService::RemoveAllRelations(const BMessage* message, BMessage* 
 /*
  * private methods
  */
- 
+
+const char* RelationService::GetRelationAttributeName(const char* relation) {
+	BString* relationAttr = new BString(relation);
+	if (! relationAttr->StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+		relationAttr->Prepend(SEN_ATTRIBUTES_PREFIX);
+	}
+	return relationAttr->String();
+}
+
 BStringList* RelationService::ReadRelationIdsFromFile(const char *path, const char* relation)
 {
 	BString relationTargets;
@@ -160,7 +168,10 @@ BStringList* RelationService::ReadRelationIdsFromFile(const char *path, const ch
 	if (node.InitCheck() != B_OK)
 		return NULL;
 	
-	node.ReadAttrString(relation, &relationTargets);
+	const char* relationAttr = GetRelationAttributeName(relation);
+	node.ReadAttrString(relationAttr, &relationTargets);
+	
+	DEBUG("got relation targets %s for file %s\n", relationTargets.String(), path);
 	
 	BStringList ids;
 	relationTargets.Split(SEN_FILE_ID_SEPARATOR, true, ids);
@@ -168,7 +179,7 @@ BStringList* RelationService::ReadRelationIdsFromFile(const char *path, const ch
 	return new BStringList(ids);
 }
 
-status_t RelationService::WriteRelationIds(const char *path, const char* relation, BStringList* ids)
+status_t RelationService::WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids)
 {
 	BNode node(path);
 	if (node.InitCheck() != B_OK)
@@ -177,14 +188,12 @@ status_t RelationService::WriteRelationIds(const char *path, const char* relatio
 	BString *idStr = new BString();
 	ids->DoForEach(AppendIdToString, idStr);
 	
-	const BString* allIds = new BString(idStr->RemoveLast(SEN_FILE_ID_SEPARATOR));
-	DEBUG("writing target ids '%s' for relation '%s' to file %s", allIds->String(), relation, path);
-	
-	BString relationAttr(relation);
-	if (! relationAttr.StartsWith(SEN_ATTRIBUTES_PREFIX)) {
-		relationAttr.Prepend(SEN_ATTRIBUTES_PREFIX);
-	}
-	return node.WriteAttrString(relationAttr.String(), allIds);
+	const BString* allIds = new BString(idStr->RemoveLast(SEN_FILE_ID_SEPARATOR));	
+	const char* relationAttr = GetRelationAttributeName(relation);
+
+	DEBUG("writing target ids '%s' for relation '%s' to file %s", allIds->String(), relationAttr, path);
+
+	return node.WriteAttrString(relationAttr, allIds);
 }
 
 BStringList* RelationService::ReadRelationsFromAttrs(const char* path)
