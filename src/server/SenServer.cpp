@@ -4,7 +4,7 @@
  * Distributed under the terms of the MIT License.
  */
 
-#include "SemanticServer.h"
+#include "SenServer.h"
 #include "../relations/RelationService.h"
 #include "../Sen.h"
 

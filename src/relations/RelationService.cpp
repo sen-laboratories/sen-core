@@ -114,7 +114,7 @@ status_t RelationService::GetTargetsForRelation(const BMessage* message, BMessag
 
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("statusMessage", BString("found ") << targetEntries->CountItems()
-		<< " targets for relation " << relation << " from " << source);
+		<< " targets for relation '" << relation << "' from '" << source << "'");
 		
 	return B_OK;
 }
@@ -300,16 +300,18 @@ bool RelationService::QueryForId(const BString& id, void* result)
 
 bool RelationService::AddRelationToMessage(const BString& relation, void* message)
 {
+	// TODO: change to entry_refs with RelationTypes from config when ready -> additional icons e.g. in Tracker.SEN
 	reinterpret_cast<BMessage*>(message)->AddString("relations", relation);
 	return true;
 }
 
+/**
+ * add the entry_ref of the target to the message under standard "refs" property
+ */
 BEntry* RelationService::AddTargetToMessage(BEntry* entry, void* message)
 {
-	BPath path;
-	entry->GetPath(&path);
-	LOG("\t%s\n",path.Path());
-	reinterpret_cast<BMessage*>(message)->AddString("targets", path.Path());
-	
+	entry_ref *ref = new entry_ref;
+	entry->GetRef(ref);
+	reinterpret_cast<BMessage*>(message)->AddRef("refs", ref);	
 	return NULL;
 }
