@@ -88,7 +88,6 @@ status_t RelationService::GetRelations(const BMessage* message, BMessage* reply)
 	}
 
 	BStringList* relations = ReadRelationsFromAttrs(source);
-	LOG("Adding to result message:\n");
 	relations->DoForEach(AddRelationToMessage, reply);
 	
 	reply->what = SEN_RESULT_RELATIONS;
@@ -209,8 +208,8 @@ BStringList* RelationService::ReadRelationsFromAttrs(const char* path)
 	BString relation;
 	while (node.GetNextAttrName(attrName) == B_OK) {
 		relation = BString(attrName);
-		if (relation.StartsWith(SEN_ATTRIBUTES_PREFIX)) {
-			result->Add(relation.Remove(0, 4));	// TODO: replace with real Relation name, for now we just cut the PREFIX
+		if (relation.StartsWith(SEN_ATTRIBUTES_PREFIX) && ! (relation == SEN_FILE_ID) ) {
+			result->Add(relation.Remove(0, 4));	// TODO: replace with real Relation name from RelationConfig, for now we just cut the PREFIX
 		}
 	}
 	delete attrName;
