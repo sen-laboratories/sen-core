@@ -5,66 +5,58 @@
  */
 
 #include "SenServer.h"
-#include "../relations/RelationService.h"
 #include "../Sen.h"
 
-#include <Directory.h>
 #include <Entry.h>
-#include <FindDirectory.h>
-#include <Path.h>
 #include <Roster.h>
 #include <String.h>
-#include <stdio.h>
 
-SemanticServer::SemanticServer()
+SenServer::SenServer()
 	:
 	BApplication(SEN_SERVER_SIGNATURE)
 {
-	BPath path;
-	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
-		return;
-
-	BDirectory settingsDir(path.Path());
-	path.Append("sen");
-	if (!settingsDir.Contains(path.Path()))
-		settingsDir.CreateDirectory(path.Path(), NULL);
-
-	settingsDir.SetTo(path.Path());
-	path.Append("server");
-	if (!settingsDir.Contains(path.Path()))
-		settingsDir.CreateDirectory(path.Path(), NULL);
-
-	settingsDir.SetTo(path.Path());
-	path.Append("relations");
-
-	//_ReadRelationsConfig();
-	 
+	/*
+     * setup handlers
+     */
+    relationsHandler = new RelationsHandler();
+    senConfigHandler = new SenConfigHandler();
+    
+    AddHandler(relationsHandler);
+    AddHandler(senConfigHandler);
+    
+    // setup handler chain
+    SetNextHandler(relationsHandler);
+    relationsHandler->SetNextHandler(senConfigHandler);
+    
+    LOG("SEN server: registered %d service handlers.\n", CountHandlers());
+    
 	// setup node watcher for volume to keep relations up to date on creation/deletion
 	// https://www.haiku-os.org/docs/api/NodeMonitor_8h.html#a24336df118e76f00bd15b89fa863d299
 }
 
-SemanticServer::~SemanticServer()
+SenServer::~SenServer()
 {
 }
 
-void SemanticServer::MessageReceived(BMessage* message)
+void SenServer::MessageReceived(BMessage* message)
 {
 	BMessage* reply = new BMessage();
 	status_t result = B_UNSUPPORTED;
-	RelationService relationService;
+
+    LOG("in SEN Server::MessageReceived\n");
 
 	switch (message->what) {
 		case SEN_CORE_INFO:
-		 {
-		 	// TODO: get from resource
+		{
 		 	result = B_OK;
 		 	reply->what = SEN_RESULT_INFO;
+		 	// TODO: get info from resource
 		 	reply->AddString("info", "SEN Core v0.0.0-proto1");
 			
 		 	break;
-		 }
+		}
 		case SEN_CORE_STATUS:
-		 {
+		{
 		 	result = B_OK;
 		 	reply->what = SEN_RESULT_STATUS;
 		 	
@@ -72,47 +64,23 @@ void SemanticServer::MessageReceived(BMessage* message)
 		 	reply->AddBool("healthy", true);
 		 	
 		 	break;
-		 }
-		case SEN_RELATIONS_ADD:
-		{
-			result = relationService.AddRelation(message, reply);
-			break;
-		}
-		case SEN_RELATIONS_GET:
-		{
-			result = relationService.GetRelations(message, reply);
-			break;
-		}
-		case SEN_RELATIONS_GET_TARGETS:
-		{
-			result = relationService.GetTargetsForRelation(message, reply);
-			break;
-		}
-		case SEN_RELATIONS_REMOVE:
-		{
-			result = relationService.RemoveRelation(message, reply);
-			break;
-		}
-		case SEN_RELATIONS_REMOVEALL:
-		{
-			result = relationService.RemoveAllRelations(message, reply);
-			break;
 		}
 		default:
 		{
-			printf("unknown message received: %" B_PRIu32 " \"%.4s\"\n",
-				message->what, (const char*)&message->what);
-			break;
+            LOG("SEN Server: unknown message '%lu', passing on to services in Handler chain" B_UTF8_ELLIPSIS "\n", message->what);
+            BHandler::MessageReceived(message);
+            return;
 		}
 	}
 
+	LOG("SEN server sending result %d", result);
 	reply->AddInt32("result", result);
 	message->SendReply(reply);
 }
 
 int main(int argc, char* argv[])
 {
-	SemanticServer* app = new(std::nothrow) SemanticServer();
+	SenServer* app = new(std::nothrow) SenServer();
 	if (app == NULL)
 		return 1;
 

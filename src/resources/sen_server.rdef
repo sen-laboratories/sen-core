@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.crashandburn.sen-server";
+resource app_signature "application/x-vnd.sen-server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 
@@ -8,8 +8,8 @@ resource app_version {
 	 minor = 1,
 	 variety = B_APPV_ALPHA,
 	 internal = 0,
-	 short_info = "SEN server proccess",
-	 long_info = "Haiku server process acting as the foundation of the semantic layer"
+	 short_info = "SEN server",
+	 long_info = "Semantic ExteNsions server process providing an infrastructure for semantic relations and queries."
 };
 
 resource vector_icon array {

@@ -5,19 +5,25 @@
  * All Rights Reserved.
  * Distributed under the terms of the MIT License.
  */
-#ifndef _SEMANTIC_SERVER_H
-#define _SEMANTIC_SERVER_H
+#ifndef _SEN_SERVER_H
+#define _SEN_SERVER_H
+
+#include "../config/SenConfigHandler.h"
+#include "../relations/RelationsHandler.h"
 
 #include <Application.h>
 #include <File.h>
 
-class SemanticServer : public BApplication {
-public:
-									SemanticServer();
-virtual								~SemanticServer();
+class SenServer : public BApplication {
 
-virtual	void						MessageReceived(BMessage* message);
+public:		SenServer();
+virtual		~SenServer();
 
+virtual	void MessageReceived(BMessage* message);
+
+private:
+            RelationsHandler*       relationsHandler;
+            SenConfigHandler*       senConfigHandler;
 };
 
 

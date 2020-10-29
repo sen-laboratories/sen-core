@@ -4,7 +4,7 @@
  * Distributed under the terms of the MIT License.
  */
  
-#include "RelationService.h"
+#include "RelationsHandler.h"
 #include "../Sen.h"
 
 #include <Node.h>
@@ -16,19 +16,62 @@
 #include <VolumeRoster.h>
 #include <Volume.h>
 
-# define DEBUG(x...)		printf(x);
-# define LOG(x...)			printf(x);
-# define ERROR(x...)		fprintf(stderr, x);
-
-RelationService::RelationService()
+RelationsHandler::RelationsHandler()
+    : BHandler("SenRelationsHandler")
 {
 }
 
-RelationService::~RelationService()
+RelationsHandler::~RelationsHandler()
 {
 }
 
-status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
+void RelationsHandler::MessageReceived(BMessage* message)
+{
+	BMessage* reply = new BMessage();
+	status_t result = B_UNSUPPORTED;
+
+    LOG("in SEN RelationsHandler::MessageReceived\n");
+
+    switch(message->what)
+    {
+		case SEN_RELATIONS_ADD:
+		{
+			result = AddRelation(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_GET:
+		{
+			result = GetRelations(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_GET_TARGETS:
+		{
+			result = GetTargetsForRelation(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_REMOVE:
+		{
+			result = RemoveRelation(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_REMOVEALL:
+		{
+			result = RemoveAllRelations(message, reply);
+			break;
+		}
+        default:
+        {
+            LOG("RelationsHandler: unkown message received, handing over to parent: %lu\n", message->what);
+            BHandler::MessageReceived(message); 
+            return;
+        }
+    }
+    LOG("RelationsHandler sending reply %d", result);
+   	reply->AddInt32("result", result);
+	message->SendReply(reply);
+}
+
+status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 {
 	const char* source = new char[B_FILE_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_SOURCE, &source)   != B_OK) {
@@ -80,7 +123,7 @@ status_t RelationService::AddRelation(const BMessage* message, BMessage* reply)
 	return B_OK;
 }
 
-status_t RelationService::GetRelations(const BMessage* message, BMessage* reply)
+status_t RelationsHandler::GetRelations(const BMessage* message, BMessage* reply)
 {
 	BString source;
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
@@ -96,7 +139,7 @@ status_t RelationService::GetRelations(const BMessage* message, BMessage* reply)
 	return B_OK;
 }
 
-status_t RelationService::GetTargetsForRelation(const BMessage* message, BMessage* reply)
+status_t RelationsHandler::GetTargetsForRelation(const BMessage* message, BMessage* reply)
 {	
 	BString source;
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
@@ -118,7 +161,7 @@ status_t RelationService::GetTargetsForRelation(const BMessage* message, BMessag
 	return B_OK;
 }
 
-status_t RelationService::RemoveRelation(const BMessage* message, BMessage* reply)
+status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* reply)
 {
 	BString source;
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
@@ -135,7 +178,7 @@ status_t RelationService::RemoveRelation(const BMessage* message, BMessage* repl
 	return B_OK;
 }
 
-status_t RelationService::RemoveAllRelations(const BMessage* message, BMessage* reply)
+status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
 {
 	BString source;
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
@@ -152,7 +195,7 @@ status_t RelationService::RemoveAllRelations(const BMessage* message, BMessage* 
  * private methods
  */
 
-const char* RelationService::GetRelationAttributeName(const char* relation) {
+const char* RelationsHandler::GetRelationAttributeName(const char* relation) {
 	BString* relationAttr = new BString(relation);
 	if (! relationAttr->StartsWith(SEN_ATTRIBUTES_PREFIX)) {
 		relationAttr->Prepend(SEN_ATTRIBUTES_PREFIX);
@@ -160,7 +203,7 @@ const char* RelationService::GetRelationAttributeName(const char* relation) {
 	return relationAttr->String();
 }
 
-BStringList* RelationService::ReadRelationIdsFromFile(const char *path, const char* relation)
+BStringList* RelationsHandler::ReadRelationIdsFromFile(const char *path, const char* relation)
 {
 	BString relationTargets;
 	BNode node(path);
@@ -178,7 +221,7 @@ BStringList* RelationService::ReadRelationIdsFromFile(const char *path, const ch
 	return new BStringList(ids);
 }
 
-status_t RelationService::WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids)
+status_t RelationsHandler::WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids)
 {
 	BNode node(path);
 	if (node.InitCheck() != B_OK)
@@ -195,7 +238,7 @@ status_t RelationService::WriteRelationIdsToFile(const char *path, const char* r
 	return node.WriteAttrString(relationAttr, allIds);
 }
 
-BStringList* RelationService::ReadRelationsFromAttrs(const char* path)
+BStringList* RelationsHandler::ReadRelationsFromAttrs(const char* path)
 {
 	BStringList* result = new BStringList();
 	
@@ -220,7 +263,7 @@ BStringList* RelationService::ReadRelationsFromAttrs(const char* path)
 /**
  * we use the inode as a stable file/dir reference (just like filesystem links, they have to stay on the same device)
  */
-const char* RelationService::GetIdForFile(const char *path)
+const char* RelationsHandler::GetIdForFile(const char *path)
 {
 	BNode node(path);
 	if (node.InitCheck() != B_OK) {
@@ -241,7 +284,7 @@ const char* RelationService::GetIdForFile(const char *path)
 	}
 }
 
-status_t RelationService::WriteIdToFile(const char *path, const char *id)
+status_t RelationsHandler::WriteIdToFile(const char *path, const char *id)
 {
 	BNode node(path);
 	if (node.InitCheck() != B_OK)
@@ -250,7 +293,7 @@ status_t RelationService::WriteIdToFile(const char *path, const char *id)
 	return node.WriteAttrString(SEN_FILE_ID, new BString(id));
 }
 
-BObjectList<BEntry>* RelationService::ResolveRelationTargets(BStringList* ids)
+BObjectList<BEntry>* RelationsHandler::ResolveRelationTargets(BStringList* ids)
 {
 	BObjectList<BEntry>* targets = new BObjectList<BEntry>();
 	ids->DoForEach(QueryForId, targets);
@@ -258,12 +301,12 @@ BObjectList<BEntry>* RelationService::ResolveRelationTargets(BStringList* ids)
 	return targets;
 }
 
-bool RelationService::AppendIdToString(const BString& id, void* result) {
+bool RelationsHandler::AppendIdToString(const BString& id, void* result) {
 	reinterpret_cast<BString*>(result)->Append(id).Append(SEN_FILE_ID_SEPARATOR);
 	return true;
 }
 
-bool RelationService::QueryForId(const BString& id, void* result)
+bool RelationsHandler::QueryForId(const BString& id, void* result)
 {
 	BString predicate(BString(SEN_FILE_ID) << " == " << id);
 	// all relation queries currently assume we never leave the boot volume
@@ -297,7 +340,7 @@ bool RelationService::QueryForId(const BString& id, void* result)
 	return true;
 }
 
-bool RelationService::AddRelationToMessage(const BString& relation, void* message)
+bool RelationsHandler::AddRelationToMessage(const BString& relation, void* message)
 {
 	// TODO: change to entry_refs with RelationTypes from config when ready -> additional icons e.g. in Tracker.SEN
 	reinterpret_cast<BMessage*>(message)->AddString("relations", relation);
@@ -307,7 +350,7 @@ bool RelationService::AddRelationToMessage(const BString& relation, void* messag
 /**
  * add the entry_ref of the target to the message under standard "refs" property
  */
-BEntry* RelationService::AddTargetToMessage(BEntry* entry, void* message)
+BEntry* RelationsHandler::AddTargetToMessage(BEntry* entry, void* message)
 {
 	entry_ref *ref = new entry_ref;
 	entry->GetRef(ref);

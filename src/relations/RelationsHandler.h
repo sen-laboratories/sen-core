@@ -4,18 +4,31 @@
  * Distributed under the terms of the MIT License.
  */
 
-#ifndef _RELATION_SERVICE_H
-#define _RELATION_SERVICE_H
+#ifndef _RELATIONS_HANDLER_H
+#define _RELATIONS_HANDLER_H
 
+#include <Application.h>
 #include <File.h>
 #include <Message.h>
 #include <ObjectList.h>
 #include <StringList.h>
 
-class RelationService {
+#define SEN_RELATION_SOURCE "source"
+#define SEN_RELATION_NAME   "relation"
+#define SEN_RELATION_TARGET "target"
+
+#define SEN_RELATIONS_GET			'SCrg'
+#define SEN_RELATIONS_GET_TARGETS	'SCrt'
+#define SEN_RELATIONS_ADD			'SCra'
+#define SEN_RELATIONS_REMOVE		'SCrr'
+// e.g. when a related file is deleted; P = Purge
+#define SEN_RELATIONS_REMOVEALL		'SCrp'
+
+class RelationsHandler : public BHandler {
 
 public:
-		RelationService();
+		RelationsHandler();
+        
 		status_t					AddRelation				(const BMessage* message, BMessage* reply);
 		status_t					GetRelations			(const BMessage* message, BMessage* reply);
 		status_t					GetTargetsForRelation	(const BMessage* message, BMessage* reply);
@@ -23,7 +36,8 @@ public:
 		status_t					RemoveAllRelations		(const BMessage* message, BMessage* reply);		
 
 virtual
-		~RelationService();
+        void MessageReceived(BMessage* message);
+		~RelationsHandler();
 
 private:
 		BStringList* 			ReadRelationsFromAttrs(const char* path);
@@ -35,11 +49,11 @@ private:
 		status_t				WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids);
 		
 		// helper methods
-		static bool AppendIdToString(const BString& id, void* result);
-		static bool QueryForId(const BString& id, void* targets);
-		static const char* GetRelationAttributeName(const char* relation);
-		static bool AddRelationToMessage(const BString& relation, void* message);
-		static BEntry* AddTargetToMessage(BEntry* entry, void* message);
+		static bool             AppendIdToString(const BString& id, void* result);
+		static bool             QueryForId(const BString& id, void* targets);
+		static const char*      GetRelationAttributeName(const char* relation);
+		static bool             AddRelationToMessage(const BString& relation, void* message);
+		static BEntry*          AddTargetToMessage(BEntry* entry, void* message);
 };
 
 #endif // _RELATION_SERVICE_H
