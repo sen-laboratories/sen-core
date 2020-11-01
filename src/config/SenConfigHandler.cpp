@@ -77,50 +77,40 @@ void SenConfigHandler::MessageReceived(BMessage* message)
 	message->SendReply(reply);
 }
 
-status_t SenConfigHandler::InitConfig()
+status_t SenConfigHandler::InitConfig(bool clean)
 {
-    status_t result = InitRelationType();
+    status_t result = InitRelationType(clean);
     if (result == B_OK)
-        result = InitRelations();
+        result = InitRelations(clean);
         if (result == B_OK)
-            result = InitIndices();
+            result = InitIndices(clean);
     
     return result;
 }
 
-status_t SenConfigHandler::InitIndices()
+status_t SenConfigHandler::InitIndices(bool clean)
 {
     return B_OK;
 }
 
-status_t SenConfigHandler::InitRelationType()
+status_t SenConfigHandler::InitRelationType(bool clean)
 {
     LOG("setting up SEN Relation Type" B_UTF8_ELLIPSIS);
     
     BMimeType mime(SEN_CONFIG_RELATION_TYPE_NAME);
-    //if (! mime.IsInstalled()) {
-        status_t result = mime.Install();
-        if (result != B_OK) {
-            return result;
-        }
-    //}
+    if (clean && mime.IsInstalled()) {
+        mime.Delete();
+    }
+    status_t result = mime.Install();
+    if (result != B_OK) {
+        return result;
+    }
     mime.SetShortDescription("SEN Relation Definition");
     mime.SetLongDescription("Configures a relation for the SEN framework");
     mime.SetPreferredApp(SEN_SERVER_SIGNATURE);
     
     BMessage attrMsg;
     
-    // Display Name (e.g. in Tracker navmenu)
-    attrMsg.AddString("attr:public_name", "Name");
-    attrMsg.AddString("attr:name", "META:name");
-    attrMsg.AddInt32("attr:type", B_STRING_TYPE);
-    
-    attrMsg.AddBool("attr:viewable", true);
-    attrMsg.AddBool("attr:editable", true);
-    attrMsg.AddInt32("attr:width", 120);
-    attrMsg.AddInt32("attr:alignment", B_ALIGN_LEFT);
-    attrMsg.AddBool("attr:extra", false);
-
     // active flag
     attrMsg.AddString("attr:public_name", "Enabled");
     attrMsg.AddString("attr:name", "META:enabled");
@@ -140,6 +130,33 @@ status_t SenConfigHandler::InitRelationType()
     attrMsg.AddBool("attr:viewable", true);
     attrMsg.AddBool("attr:editable", true);
     attrMsg.AddInt32("attr:width", 86);
+    attrMsg.AddInt32("attr:alignment", B_ALIGN_LEFT);
+    attrMsg.AddBool("attr:extra", false);
+
+    // internal meta-relation to parent relation
+    attrMsg.AddString("attr:public_name", "Parent of");
+    attrMsg.AddString("attr:name", "META:parentOf");
+    attrMsg.AddInt32("attr:type", B_STRING_TYPE);
+
+    // internal meta-relation to parent relation
+    attrMsg.AddString("attr:public_name", "Child of");
+    attrMsg.AddString("attr:name", "META:childOf");
+    attrMsg.AddInt32("attr:type", B_STRING_TYPE);
+    
+    attrMsg.AddBool("attr:viewable", false);
+    attrMsg.AddBool("attr:editable", false);
+    attrMsg.AddInt32("attr:width", 0);
+    attrMsg.AddInt32("attr:alignment", B_ALIGN_LEFT);
+    attrMsg.AddBool("attr:extra", false);
+
+    // internal meta-relation to inverse relation
+    attrMsg.AddString("attr:public_name", "Inverse of");
+    attrMsg.AddString("attr:name", "META:inverseOf");
+    attrMsg.AddInt32("attr:type", B_STRING_TYPE);
+    
+    attrMsg.AddBool("attr:viewable", false);
+    attrMsg.AddBool("attr:editable", false);
+    attrMsg.AddInt32("attr:width", 0);
     attrMsg.AddInt32("attr:alignment", B_ALIGN_LEFT);
     attrMsg.AddBool("attr:extra", false);
 
@@ -170,10 +187,45 @@ status_t SenConfigHandler::InitRelationType()
     return mime.InitCheck();
 }
 
-status_t SenConfigHandler::InitRelations()
+status_t SenConfigHandler::InitRelations(bool clean)
 {
-    //if (!settingsDir->Contains(path.Path()))
-    //    settingsDir->CreateDirectory(path.Path(), NULL);
-
+    BDirectory relationsDir;
+    status_t relationsDirStatus = settingsDir->CreateDirectory("relations", &relationsDir);
+    if (relationsDirStatus != B_OK) {
+        if (relationsDirStatus == B_FILE_EXISTS) {
+            if (!clean) {
+                ERROR("configuration already exists, skipping - override with `clean=true`.");
+                return relationsDirStatus;
+            } else {
+                BEntry entry;
+                while (relationsDir.GetNextEntry(&entry) == B_OK) {
+                    if (entry.Remove() != B_OK) {
+                        const char* name = new char[B_FILE_NAME_LENGTH];
+                        ERROR("failed to remove relation %s\n", name);
+                    }
+                }
+            }
+        } else {
+            ERROR("failed to access relations config: %ld", relationsDirStatus);
+        }
+    }
+    // write relations
+    //TODO: setup builtin config map and create relations from there!
+    BFile relation;
+    status_t relationStatus = relationsDir.CreateFile("same", &relation, !clean);
+    if (relationStatus == B_OK) {
+        // set type
+        relation.WriteAttrString("BEOS:TYPE", new BString(SEN_CONFIG_RELATION_TYPE_NAME));
+        // set attributes
+        relation.WriteAttr("META:enabled", B_BOOL_TYPE, 0, "true", 1);
+        relation.WriteAttr("META:abstract", B_BOOL_TYPE, 0, "true", 1);
+        relation.WriteAttrString("META:inverseOf", new BString("same"));
+        // set configuration
+        //TODO
+    } else {
+        ERROR("failed to create relation: %ld\n", relationStatus);
+        // bail out, configuration must be all valid
+        return relationStatus;
+    }
     return B_OK;
 }

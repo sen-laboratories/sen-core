@@ -12,9 +12,9 @@
 #define SEN_SERVER_SIGNATURE "application/x-vnd.sen-server"
 
 // simple logging
-# define DEBUG(x...)		printf(x);
-# define LOG(x...)			printf(x);
-# define ERROR(x...)		fprintf(stderr, x);
+#define DEBUG(x...)		printf(x);
+#define LOG(x...)		printf(x);
+#define ERROR(x...)		fprintf(stderr, x);
 
 // core	
 

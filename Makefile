@@ -25,7 +25,7 @@ PACKAGE = $(TARGET_DIR)/$(NAME)_$(VERSION)-$(ARCH).hpkg
 TYPE = APP
 
 # 	If you plan to use localization, specify the application's MIME signature.
-APP_MIME_SIG = application/x-vnd.crashandburn.sen-server
+APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 
 #	The following lines tell Pe and Eddie where the SRCS, RDEFS, and RSRCS are
 #	so that Pe and Eddie can fill them in for you.
@@ -125,7 +125,7 @@ LINKER_FLAGS =
 #		-app 3 4 0 d 0 -short 340 -long "340 "`echo -n -e '\302\251'`"1999 GNU GPL"
 #	This may also be specified in a resource.
 VERSION = $(V_MAJOR).$(V_MIDDLE).$(V_MINOR)-$(V_BUILD)
-APP_VERSION := -app $(V_MAJOR) $(V_MIDDLE) $(V_MINOR) $(V_VARIETY) $(V_BUILD) -short "$(V_MAJOR).$(V_MIDDLE).$(V_MINOR)" -long "$(NAME) v$(VERSION) ©Fishpond 2017"
+APP_VERSION := -app $(V_MAJOR) $(V_MIDDLE) $(V_MINOR) $(V_VARIETY) $(V_BUILD) -short "$(V_MAJOR).$(V_MIDDLE).$(V_MINOR)" -long "$(NAME) v$(VERSION) ©Sen-Labs 2020"
 
 #	(Only used when "TYPE" is "DRIVER"). Specify the desired driver install
 #	location in the /dev hierarchy. Example:

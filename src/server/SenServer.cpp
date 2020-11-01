@@ -27,9 +27,7 @@ SenServer::SenServer()
     // setup handler chain
     SetNextHandler(relationsHandler);
     relationsHandler->SetNextHandler(senConfigHandler);
-    
-    LOG("SEN server: registered %d service handlers.\n", CountHandlers());
-    
+        
 	// setup node watcher for volume to keep relations up to date on creation/deletion
 	// https://www.haiku-os.org/docs/api/NodeMonitor_8h.html#a24336df118e76f00bd15b89fa863d299
 }

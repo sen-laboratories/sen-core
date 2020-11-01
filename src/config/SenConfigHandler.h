@@ -7,7 +7,7 @@
 
 #include <Application.h>
 
-#define SEN_CONFIG_RELATION_TYPE_NAME "application/x-vnd.sen-relation"
+#define SEN_CONFIG_RELATION_TYPE_NAME "application/x-vnd.sen-labs.sen-relation"
 
 class SenConfigHandler : public BHandler {
 
@@ -18,11 +18,11 @@ virtual         ~SenConfigHandler();
 virtual	void	MessageReceived(BMessage* message);
 
 private:
-			status_t			InitConfig();
+			status_t			InitConfig(bool clean=false);
             
-			status_t			InitIndices();
-			status_t			InitRelationType();
-			status_t			InitRelations();
+			status_t			InitIndices(bool clean);
+			status_t			InitRelationType(bool clean);
+			status_t			InitRelations(bool clean);
             
             BDirectory*         settingsDir;
 };
