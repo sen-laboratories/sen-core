@@ -28,7 +28,7 @@ SenConfigHandler::SenConfigHandler()
 
 	settingsDir->SetTo(path.Path());
     
-    LOG("\nSEN Config: using settings directory %s\n", path.Path());    
+    LOG("SEN Config: using settings directory %s\n", path.Path());    
 }
 
 SenConfigHandler::~SenConfigHandler()
@@ -90,6 +90,7 @@ status_t SenConfigHandler::InitConfig(bool clean)
 
 status_t SenConfigHandler::InitIndices(bool clean)
 {
+    // see https://github.com/grexe/haiku/blob/master/src/bin/lsindex.cpp
     return B_OK;
 }
 
@@ -110,6 +111,8 @@ status_t SenConfigHandler::InitRelationType(bool clean)
     mime.SetPreferredApp(SEN_SERVER_SIGNATURE);
     
     BMessage attrMsg;
+
+    //TODO: move to method
     
     // active flag
     attrMsg.AddString("attr:public_name", "Enabled");
@@ -209,23 +212,69 @@ status_t SenConfigHandler::InitRelations(bool clean)
             ERROR("failed to access relations config: %ld", relationsDirStatus);
         }
     }
-    // write relations
-    //TODO: setup builtin config map and create relations from there!
+    //
+    // create relations
+    //
+    BMessage* configMsg = new BMessage(SEN_CONFIG_MSG);
+    bool configOk;
+    
+    // same (base relation)
+    // configOk = B_OK && CreateRelation("same", clean, true, true, "same", NULL, NULL, configMsg);  // empty config for now here
+    
+    // same image size -> LATER
+    /*
+    configMsg->MakeEmpty();
+    LOG("msg type: %ld", configMsg->what);
+    configMsg->AddString(SEN_CONFIG_MSG_DISPLAY_NAME, "image size");
+    configMsg.AddString(SEN_CONFIG_MSG_SOURCE_TYPES, "image");
+    configMsg.AddString(SEN_CONFIG_MSG_TARGET_TYPES, "image");
+    relationStatus = CreateRelation("sameImageSize", clean, true, true, "sameImageSize", "", "", configMsg);
+    */
+    
+    // TODO: add placeholder for querying all indexed attributes of SOURCE so we don't need a relation for every possible attribute 
+    // NEEDS: Index API -> Haiku git code
+    
+    // LATER: similar
+    // NEEDS: formulae
+    // relationStatus = CreateRelation("similar", clean, true, true, "similar", "", "", new BMessage(SEN_CONFIG_MSG));
+    
+    // parentOf/childOf
+    configMsg->MakeEmpty();
+    LOG("empty msg type: %ld", configMsg->what);
+    configMsg.AddString(SEN_CONFIG_MSG_SOURCE_TYPES, "*/*");
+    configMsg.AddString(SEN_CONFIG_MSG_TARGET_TYPES, "*/*");
+    configOk = B_OK && CreateRelation("parentOf", "parent of", clean, true, false, "childOf", NULL, NULL, configMsg);  // empty config for now here
+    
+    // includes
+    
+    BMessage* configMsg = new BMessage(SEN_CONFIG_MSG);
+    configMsg->AddAll
+    configMsg.AddString(SEN_CONFIG_MSG_SOURCE_TYPES, "*/*");
+    configMsg.AddString(SEN_CONFIG_MSG_TARGET_TYPES, "*/*");
+    
+    return B_OK;
+}
+
+status_t SenConfigHandler::CreateRelation(const char* name, const char* displayName, bool clean, bool enabled, bool abstract,
+                                          const char* inverseOf, const char* childOf, const char* formula,
+                                          const BMessage* config) {
     BFile relation;
-    status_t relationStatus = relationsDir.CreateFile("same", &relation, !clean);
-    if (relationStatus == B_OK) {
-        // set type
-        relation.WriteAttrString("BEOS:TYPE", new BString(SEN_CONFIG_RELATION_TYPE_NAME));
-        // set attributes
-        relation.WriteAttr("META:enabled", B_BOOL_TYPE, 0, "true", 1);
-        relation.WriteAttr("META:abstract", B_BOOL_TYPE, 0, "true", 1);
-        relation.WriteAttrString("META:inverseOf", new BString("same"));
-        // set configuration
-        //TODO
-    } else {
-        ERROR("failed to create relation: %ld\n", relationStatus);
+    status_t relationStatus = relationsDir.CreateFile(name, &relation, !clean);
+    if (relationStatus != B_OK) {
+        ERROR("failed to create relation '%s': %ld\n", name, relationStatus);
         // bail out, configuration must be all valid
         return relationStatus;
     }
-    return B_OK;
+    // set type
+    relation.WriteAttrString("BEOS:TYPE", new BString(SEN_CONFIG_RELATION_TYPE_NAME));
+    
+    // set attributes
+    relation.WriteAttr("META:displayName", new BString(displayName));
+    relation.WriteAttr("META:enabled", B_BOOL_TYPE, 0, enabled ? "true" : "false", 1);
+    relation.WriteAttr("META:abstract", B_BOOL_TYPE, 0, abstract ? "true" : "false", 1);
+    relation.WriteAttrString("META:inverseOf", new BString(inverseOf));
+    relation.WriteAttrString("META:childOf", new BString(childOf));
+    
+    // set configuration
+    relation.WriteAttr("META:config", configMsg);
 }
