@@ -21,8 +21,7 @@
 #define SEN_RELATIONS_GET_TARGETS	'SCrt'
 #define SEN_RELATIONS_ADD			'SCra'
 #define SEN_RELATIONS_REMOVE		'SCrr'
-// e.g. when a related file is deleted; P = Purge
-#define SEN_RELATIONS_REMOVEALL		'SCrp'
+#define SEN_RELATIONS_REMOVEALL		'SCrd'
 
 class RelationsHandler : public BHandler {
 
@@ -33,6 +32,7 @@ public:
 		status_t					GetRelations			(const BMessage* message, BMessage* reply);
 		status_t					GetTargetsForRelation	(const BMessage* message, BMessage* reply);
 		status_t					RemoveRelation			(const BMessage* message, BMessage* reply);		
+        // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations		(const BMessage* message, BMessage* reply);		
 
 virtual

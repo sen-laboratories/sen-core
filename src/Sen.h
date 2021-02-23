@@ -9,7 +9,7 @@
 
 #include <stdio.h>
 
-#define SEN_SERVER_SIGNATURE "application/x-vnd.sen-server"
+#define SEN_SERVER_SIGNATURE "application/x-vnd.sen-labs.sen-server"
 
 // simple logging
 #define DEBUG(x...)		printf(x);

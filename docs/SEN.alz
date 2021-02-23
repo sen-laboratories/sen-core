@@ -1,0 +1,56 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<design version="1.20.0">
+ <color g="189" r="186" b="182"/>
+ <edge-color g="0" r="0" b="0"/>
+ <grid-color g="160" r="160" b="164"/>
+ <edge-width>2000</edge-width>
+ <text-size>11000</text-size>
+ <corner-radius>5000</corner-radius>
+ <graph>
+  <node w="200000" x="350000" y="-100980" h="75000" index="0">
+   <text>SEN</text>
+   <color g="255" r="255" b="255"/>
+   <text-color g="0" r="0" b="0"/>
+  </node>
+  <node w="200000" x="-980" y="7598" h="75000" index="1">
+   <text>Relations</text>
+   <color g="255" r="255" b="255"/>
+   <text-color g="0" r="0" b="0"/>
+  </node>
+  <node w="200000" x="563725" y="33088" h="75000" index="2">
+   <text>Configuration</text>
+   <color g="255" r="255" b="255"/>
+   <text-color g="0" r="0" b="0"/>
+  </node>
+  <node w="200000" x="354901" y="-304166" h="75000" index="3">
+   <text>Navigation</text>
+   <color g="255" r="255" b="255"/>
+   <text-color g="0" r="0" b="0"/>
+  </node>
+  <node w="200000" x="-271568" y="149754" h="75000" index="4">
+   <text>Rules</text>
+   <color g="255" r="255" b="255"/>
+   <text-color g="0" r="0" b="0"/>
+  </node>
+  <node w="200000" x="259803" y="142892" h="75000" index="5">
+   <text>Queries</text>
+   <color g="255" r="255" b="255"/>
+   <text-color g="0" r="0" b="0"/>
+  </node>
+  <edge index0="0" index1="1" reversed="0" arrow-mode="0">
+   <text></text>
+  </edge>
+  <edge index0="0" index1="2" reversed="0" arrow-mode="0">
+   <text></text>
+  </edge>
+  <edge index0="0" index1="3" reversed="0" arrow-mode="0">
+   <text></text>
+  </edge>
+  <edge index0="1" index1="4" reversed="0" arrow-mode="0">
+   <text></text>
+  </edge>
+  <edge index0="1" index1="5" reversed="0" arrow-mode="0">
+   <text></text>
+  </edge>
+ </graph>
+</design>

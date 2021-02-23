@@ -230,7 +230,7 @@ status_t RelationsHandler::WriteRelationIdsToFile(const char *path, const char* 
 	BString *idStr = new BString();
 	ids->DoForEach(AppendIdToString, idStr);
 	
-	const BString* allIds = new BString(idStr->RemoveLast(SEN_FILE_ID_SEPARATOR));	
+	const BString* allIds = new BString(idStr->RemoveLast(SEN_FILE_ID_SEPARATOR));
 	const char* relationAttr = GetRelationAttributeName(relation);
 
 	DEBUG("writing target ids '%s' for relation '%s' to file %s", allIds->String(), relationAttr, path);
