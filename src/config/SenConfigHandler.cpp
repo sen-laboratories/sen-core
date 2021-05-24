@@ -86,7 +86,7 @@ status_t SenConfigHandler::InitConfig(bool clean)
         result = InitRelations(clean);
         if (result == B_OK) {
             result = InitIndices(clean);
-            if (result == B_OK) {
+            if (result != B_OK) {
                 ERROR("failed to setup indices: %d\n", result);
             }
         } else {
@@ -110,14 +110,18 @@ status_t SenConfigHandler::InitRelationType(bool clean)
     LOG("setting up SEN Relation Type '" SEN_CONFIG_RELATION_TYPE_NAME "'" B_UTF8_ELLIPSIS "\n");
     
     BMimeType mime(SEN_CONFIG_RELATION_TYPE_NAME);
-    if (status_t initialised = mime.InitCheck() != B_OK) {
-        LOG("error setting MIME Type!\n");
-        return initialised;
-    }
     
+    if (status_t status = mime.InitCheck() != B_OK) {
+        LOG("error setting MIME Type!\n");
+        return status;
+    }
+
     if (clean && mime.IsInstalled()) {
         LOG("replacing old MIME type" B_UTF8_ELLIPSIS "\n");
-        mime.Delete();
+        if (status_t status = mime.Delete() != B_OK) {
+            LOG("failed to delete MIME type " SEN_CONFIG_RELATION_TYPE_NAME "\n");
+            return status;
+        }
     }
     
     BMessage* attrMsg = new BMessage();
@@ -127,32 +131,31 @@ status_t SenConfigHandler::InitRelationType(bool clean)
 
     // relation description, may be used for display purposes (think Tracker Relations menu)
     AddMimeInfo(attrMsg, "displayName", "Display name", B_STRING_TYPE, true, true);
-    
-    // abstract or concrete instance flag -> LATER used for dynamic relations like 
-    // "same", "similar", where children may be concrete relations and leafs contain relation targets
-    AddMimeInfo(attrMsg, "abstract", "Abstract", B_BOOL_TYPE, true, false);
-    
-    // internal meta-relation to child relation
+        
+    // specialization of another relation (e.g. restricting MIME types for source/target)
     AddMimeInfo(attrMsg, "childOf", "Child of", B_STRING_TYPE, true, false);
 
     // internal meta-relation to inverse relation
     AddMimeInfo(attrMsg, "inverseOf", "Inverse of", B_STRING_TYPE, true, false);
 
-    // internal meta-relation to parent relation
+    // used for relation configuration like applicable MIME types
     AddMimeInfo(attrMsg, "config", "Configuration", B_MESSAGE_TYPE, false, false);
 
-    // internal meta-relation to parent relation
+    // supported relation properties
     AddMimeInfo(attrMsg, "properties", "Properties", B_MESSAGE_TYPE, false, false);
-
-    status_t result = mime.SetAttrInfo(attrMsg);
-    if (result != B_OK) {
-        LOG("internal error setting up MIME Type: %ld", result);
-        return result;
-    }
     
     mime.SetShortDescription("SEN Relation Definition");
     mime.SetLongDescription("Configures a relation for the SEN framework");
     mime.SetPreferredApp(SEN_SERVER_SIGNATURE);
+    mime.SetAttrInfo(attrMsg);
+
+    status_t result = mime.Install();
+    // buggy? always returns an error
+    if (result != B_OK) {
+        LOG("(ignoring) internal error setting up MIME Type: %ld", result);
+     //   return result;
+        result = B_OK;
+    }
 
     LOG("successfully created Relation FileType " SEN_CONFIG_RELATION_TYPE_NAME "\n");
     
@@ -167,8 +170,9 @@ void SenConfigHandler::AddMimeInfo(BMessage* attrMsg, const char* name, const ch
     
     attrMsg->AddBool("attr:viewable", viewable);
     attrMsg->AddBool("attr:editable", editable);
-    //attrMsg->AddInt32("attr:width", (type == B_BOOL_TYPE ? 76 : 128);
-    //attrMsg->AddInt32("attr:alignment", B_ALIGN_LEFT);
+    attrMsg->AddInt32("attr:width", (type == B_BOOL_TYPE ? 76 : 128));
+    attrMsg->AddInt32("attr:alignment", B_ALIGN_LEFT);
+    attrMsg->AddBool("attr:extra", false);
 }
 
 status_t SenConfigHandler::InitRelations(bool clean)
@@ -182,16 +186,21 @@ status_t SenConfigHandler::InitRelations(bool clean)
                 ERROR("configuration already exists, skipping - override with `clean=true`.");
                 return relationsDirStatus;
             } else {
+                LOG("removing old relations" B_UTF8_ELLIPSIS "\n");
+                
                 BEntry entry;
+                relationsDir->SetTo(settingsDir, "relations");
                 while (relationsDir->GetNextEntry(&entry) == B_OK) {
                     if (entry.Remove() != B_OK) {
-                        const char* name = new char[B_FILE_NAME_LENGTH];
+                        char* name = new char[B_FILE_NAME_LENGTH];
+                        entry.GetName(name);
                         ERROR("failed to remove relation %s\n", name);
+                        delete name;
                     }
                 }
             }
         } else {
-            ERROR("failed to access relations config: %ld", relationsDirStatus);
+            ERROR("failed to access relations config dir: %ld", relationsDirStatus);
             return relationsDirStatus;
         }
     }
@@ -211,12 +220,6 @@ status_t SenConfigHandler::InitRelations(bool clean)
     
     status_t configOk = B_OK;
         
-    // TODO: add placeholder for querying all indexed attributes of SOURCE so we don't need a relation for every possible attribute 
-    // NEEDS: Index API -> Haiku git code
-    
-    // LATER: similar
-    // NEEDS: formulae - BQuery based with placeholders?
-
     /*
      * generic relations
      */
@@ -225,28 +228,36 @@ status_t SenConfigHandler::InitRelations(bool clean)
     configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "*/*");
     configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "*/*");
     
-    propsMsg->AddString("role", "depending on related entities, may be similar, same as, family relation," B_UTF8_ELLIPSIS);
+    InitPropertiesMsg(propsMsg);
     
     // idiosynchratic relationship
     configOk = CreateRelation("relatedTo", "related to", "relatedTo", NULL,
                               "most generic relationship to be used when no specific relation is applicable.",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
     
-    // parentOf
+    // hierarchical top->down
     configOk = CreateRelation("parentOf", "parent of", "childOf", NULL,
                               "hierarchical relationship, superordinate side",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
 
-    // childOf
+    // hierarchical bottom->up
     configOk = CreateRelation("childOf", "child of", "parentOf", NULL,
                               "hierarchical relationship, subordinate side",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
+    if (configOk != B_OK) {
+        return configOk;
+    }
+
+    // similarity
+    configOk = CreateRelation("similarTo", "similar to", "similarTo", NULL,
+                              "similarity relation, reflexive.",
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
@@ -260,39 +271,76 @@ status_t SenConfigHandler::InitRelations(bool clean)
     // reference
     configOk = CreateRelation("references", "references", "referencedBy", NULL,
                               "general reference to anther entity with optional location specifier (book page, movie location, web anchor).",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
 
     configOk = CreateRelation("referencedBy", "referenced by", "references", NULL,
                               "general back-reference to anther entity with optional location specifier (book page, line, movie location, web anchor).",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
     
     // generic contains
     configOk = CreateRelation("contains", "contains", "containedBy", NULL, "generic part/whole relationship, parent end",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
 
     // generic containedBy
     configOk = CreateRelation("containedBy", "contained by", "contains", NULL, "generic part/whole relationship, child end", 
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
     
-    // source includes
+    // specialization of "contains" relation for geographic locations
+    configMsg->MakeEmpty();
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "application/gml+xml");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "application/vnd.google-earth.kml+xml");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "application/vnd.google-earth.kmz");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "*/*");
+    
+    configOk = CreateRelation("placeOf", "place of", "locatedIn", "contains", "locational relation that is home of a target entity",
+                              clean, true, configMsg, propsMsg);
+    if (configOk != B_OK) {
+        return configOk;
+    }
+
+    // specialization of "containedBy" relation for geographic locations
+    configMsg->MakeEmpty();
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "*/*");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "application/gml+xml");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "application/vnd.google-earth.kml+xml");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "application/vnd.google-earth.kmz");
+    
+    configOk = CreateRelation("locatedIn", "located in", "placeOf", "containedBy", "locational relation pointing to the source location",
+                              clean, true, configMsg, propsMsg);
+    if (configOk != B_OK) {
+        return configOk;
+    }
+
+    // specialization of "contains" relation for source includes
     configMsg->MakeEmpty();
     configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "text/x-source-code");
     configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "text/x-source-code");
     
     configOk = CreateRelation("includes", "includes", "includedBy", "contains", "source code include relation",
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
+    if (configOk != B_OK) {
+        return configOk;
+    }
+    
+    // specialization of "contains" relation for source includes
+    configMsg->MakeEmpty();
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "text/x-source-code");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "text/x-source-code");
+    
+    configOk = CreateRelation("includes", "includes", "includedBy", "contains", "source code include relation",
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
@@ -300,7 +348,7 @@ status_t SenConfigHandler::InitRelations(bool clean)
     // source includedBy
     propsMsg->AddString("line", "line number");     // location in referencing source code file
     configOk = CreateRelation("includedBy", "included by", "includes", "containedBy", "source code including this target", 
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
@@ -313,24 +361,46 @@ status_t SenConfigHandler::InitRelations(bool clean)
     propsMsg->AddString("page", "page number");
 
     configOk = CreateRelation("annotates", "annotates", "annotatedBy", "references", "annotation for another entity", 
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
     
     // annotatedBy
     configMsg->MakeEmpty();
-    propsMsg->MakeEmpty();
+    InitPropertiesMsg(propsMsg);
     
     configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "*/*");
     configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "text/*");     // inverse relation has it the other way around
 
     configOk = CreateRelation("annotatedBy", "annotated by", "annotates", "referencedBy", "points to an annotation for the source", 
-                              clean, true, false, configMsg, propsMsg);
+                              clean, true, configMsg, propsMsg);
     if (configOk != B_OK) {
         return configOk;
     }
-    
+   
+    // temporal relations
+    configMsg->MakeEmpty();    
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "*/*");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "text/calendar");
+
+    configOk = CreateRelation("existsAt", "exists at", "timeOf", NULL, "temporal relation that relates an entity to a period of or point in time", 
+                              clean, true, configMsg, propsMsg);
+    if (configOk != B_OK) {
+        return configOk;
+    }
+
+    configMsg->MakeEmpty();    
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_SOURCE_TYPES, "text/calendar");
+    configMsg->AddString(SEN_CONFIG_RELATION_MSG_TARGET_TYPES, "*/*");
+
+    configOk = CreateRelation("timeOf", "time of", "existsAt", NULL, "temporal relation that relates a period of or point in time to a thing", 
+                              clean, true, configMsg, propsMsg);
+    if (configOk != B_OK) {
+        return configOk;
+    }
+
+    // done, clean up
     delete configMsg;
     delete propsMsg;
     
@@ -338,7 +408,7 @@ status_t SenConfigHandler::InitRelations(bool clean)
 }
 
 status_t SenConfigHandler::CreateRelation(const char* name, const char* displayName, const char* inverseOf, const char* childOf, const char* description,
-                                          bool clean, bool enabled, bool abstract, const BMessage* config, const BMessage* configProps) {
+                                          bool clean, bool enabled, const BMessage* config, const BMessage* configProps) {
     
     DEBUG("creating relation %s in %s\n", name, BPath(relationsDir).Path());
 
@@ -359,7 +429,7 @@ status_t SenConfigHandler::CreateRelation(const char* name, const char* displayN
     relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "displayName", new BString(displayName));
     relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "description", new BString(description));
     relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "enabled", B_BOOL_TYPE, 0, &enabled, 1);
-    relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "abstract", B_BOOL_TYPE, 0, &abstract, 1);
+    
     if (inverseOf != NULL) {
         relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "inverseOf", new BString(inverseOf));
     }
@@ -388,4 +458,10 @@ status_t SenConfigHandler::CreateRelation(const char* name, const char* displayN
         LOG("created relation %s.\n", name);
         return B_OK;
     }
+}
+
+void SenConfigHandler::InitPropertiesMsg(BMessage *propsMsg) {
+    propsMsg->MakeEmpty();
+    propsMsg->AddString("role", "depending on related entities, may be similar, same as, family relation," B_UTF8_ELLIPSIS);
+    propsMsg->AddString("label", "descriptive label for annotating the relation.");
 }

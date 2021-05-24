@@ -32,7 +32,9 @@ private:
             BDirectory*         relationsDir;
             
             status_t            CreateRelation(const char* name, const char* displayName, const char* inverseOf, const char* childOf, const char* description,
-                                               bool clean, bool enabled, bool abstract, const BMessage* config, const BMessage* configProps);
+                                               bool clean, bool enabled, const BMessage* config, const BMessage* configProps);
+            
+            void                InitPropertiesMsg(BMessage *propMsg);
 };
 
 #endif // _SEN_CONFIG_HANDLER_H
