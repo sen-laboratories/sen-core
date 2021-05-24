@@ -119,9 +119,6 @@ status_t SenConfigHandler::InitRelationType(bool clean)
         LOG("replacing old MIME type" B_UTF8_ELLIPSIS "\n");
         mime.Delete();
     }
-    mime.SetShortDescription("SEN Relation Definition");
-    mime.SetLongDescription("Configures a relation for the SEN framework");
-    mime.SetPreferredApp(SEN_SERVER_SIGNATURE);
     
     BMessage* attrMsg = new BMessage();
     
@@ -153,6 +150,10 @@ status_t SenConfigHandler::InitRelationType(bool clean)
         return result;
     }
     
+    mime.SetShortDescription("SEN Relation Definition");
+    mime.SetLongDescription("Configures a relation for the SEN framework");
+    mime.SetPreferredApp(SEN_SERVER_SIGNATURE);
+
     LOG("successfully created Relation FileType " SEN_CONFIG_RELATION_TYPE_NAME "\n");
     
     return result;
@@ -355,28 +356,28 @@ status_t SenConfigHandler::CreateRelation(const char* name, const char* displayN
     relationNodeInfo.SetType(SEN_CONFIG_RELATION_TYPE_NAME);
     
     // set attributes
-    relation.WriteAttrString("displayName", new BString(displayName));
-    relation.WriteAttrString("description", new BString(description));
-    relation.WriteAttr("enabled", B_BOOL_TYPE, 0, &enabled, 1);
-    relation.WriteAttr("abstract", B_BOOL_TYPE, 0, &abstract, 1);
+    relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "displayName", new BString(displayName));
+    relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "description", new BString(description));
+    relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "enabled", B_BOOL_TYPE, 0, &enabled, 1);
+    relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "abstract", B_BOOL_TYPE, 0, &abstract, 1);
     if (inverseOf != NULL) {
-        relation.WriteAttrString("inverseOf", new BString(inverseOf));
+        relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "inverseOf", new BString(inverseOf));
     }
     if (childOf != NULL) {
-        relation.WriteAttrString("childOf", new BString(childOf));
+        relation.WriteAttrString(SEN_ATTRIBUTES_PREFIX "childOf", new BString(childOf));
     }
     
     // set configuration and properties message
     ssize_t msgSize = config->FlattenedSize();
     char* msgBuffer = new char[msgSize];
     config->Flatten(msgBuffer, msgSize);
-    relation.WriteAttr("config", B_MESSAGE_TYPE, 0, msgBuffer, msgSize);
+    relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "config", B_MESSAGE_TYPE, 0, msgBuffer, msgSize);
     delete msgBuffer;
     
     msgSize = configProps->FlattenedSize();
     msgBuffer = new char[msgSize];
     configProps->Flatten(msgBuffer, msgSize);
-    relation.WriteAttr("properties", B_MESSAGE_TYPE, 0, msgBuffer, msgSize);
+    relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "properties", B_MESSAGE_TYPE, 0, msgBuffer, msgSize);
     
     delete msgBuffer;
     
