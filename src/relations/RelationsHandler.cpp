@@ -130,10 +130,9 @@ status_t RelationsHandler::GetRelations(const BMessage* message, BMessage* reply
 		return B_BAD_VALUE;
 	}
 
-	BStringList* relations = ReadRelationsFromAttrs(source);
-	relations->DoForEach(AddRelationToMessage, reply);
-	
 	reply->what = SEN_RESULT_RELATIONS;
+	BStringList* relations = ReadRelationsFromAttrs(source);
+	reply->AddStrings("relations", *relations);
 	reply->AddString("statusMessage", BString("got ") << relations->CountStrings() << " relations for " << source);
 	
 	return B_OK;
@@ -151,7 +150,7 @@ status_t RelationsHandler::GetTargetsForRelation(const BMessage* message, BMessa
 	}
 	
 	BObjectList<BEntry>* targetEntries = ResolveRelationTargets(ReadRelationIdsFromFile(source, relation));
-	LOG("Adding to result message:\n");
+	LOG("Adding %d targetEntries to result message:\n", targetEntries->CountItems());
 	targetEntries->EachElement(AddTargetToMessage, reply);
 
 	reply->what = SEN_RESULT_RELATIONS;
@@ -215,10 +214,11 @@ BStringList* RelationsHandler::ReadRelationIdsFromFile(const char *path, const c
 	
 	DEBUG("got relation targets %s for file %s\n", relationTargets.String(), path);
 	
-	BStringList ids;
-	relationTargets.Split(SEN_FILE_ID_SEPARATOR, true, ids);
+	BStringList* ids = new BStringList();
+	relationTargets.Split(SEN_FILE_ID_SEPARATOR, true, *ids);
 	
-	return new BStringList(ids);
+	DEBUG("added %d strings to target list.\n", ids->CountStrings());
+	return ids;
 }
 
 status_t RelationsHandler::WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids)
@@ -295,9 +295,14 @@ status_t RelationsHandler::WriteIdToFile(const char *path, const char *id)
 
 BObjectList<BEntry>* RelationsHandler::ResolveRelationTargets(BStringList* ids)
 {
+	DEBUG("resolving ids from list with %d targets...\n", ids->CountStrings())
 	BObjectList<BEntry>* targets = new BObjectList<BEntry>();
-	ids->DoForEach(QueryForId, targets);
-	
+	//ids->DoForEach(QueryForId, targets);
+	while (!ids->IsEmpty()) {
+		BString id = ids->First();
+		QueryForId(id, targets);
+		ids->Remove(id);
+	}
 	return targets;
 }
 
@@ -308,6 +313,8 @@ bool RelationsHandler::AppendIdToString(const BString& id, void* result) {
 
 bool RelationsHandler::QueryForId(const BString& id, void* result)
 {
+	LOG("query for id %s\n", id);
+
 	BString predicate(BString(SEN_FILE_ID) << " == " << id);
 	// all relation queries currently assume we never leave the boot volume
 	BVolumeRoster volRoster;
@@ -336,7 +343,6 @@ bool RelationsHandler::QueryForId(const BString& id, void* result)
 		else
 			ERROR("error resolving id %s", id);
 	}
-	
 	return true;
 }
 

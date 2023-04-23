@@ -13,12 +13,12 @@ Haiku server process acting as the foundation of the semantic layer
 ## Run
 
 ```
-> dist/semantic_server &
+> dist/sen_server &
 ```
 
 ## Demo Proto1
 
-seg up index and attributes (until add relations is implemented):
+set up index and attributes (manually until installer and graphical support for adding relations is implemented):
 
 ```bash
 > ID=$(stat -c "%i" README.md)
@@ -31,7 +31,7 @@ seg up index and attributes (until add relations is implemented):
 send message and get relation targets result (with local example IDs):
 
 ```bash
-> hey semantic_server 'SCrt' with source=Makefile and relation=SEN:referencedBy
+> hey sen_server 'SCrt' with source=Makefile and relation=SEN:referencedBy
 resolving targets for file IDs 3210985,3670583...
 Results of query "SEN:_id == 3210985":
         /boot/home/Develop/SEN/sen-core/README.md
