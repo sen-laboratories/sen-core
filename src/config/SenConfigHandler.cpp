@@ -48,7 +48,7 @@ void SenConfigHandler::MessageReceived(BMessage* message)
     {
         case SEN_CORE_INIT:
         {
-            bool flagClean = true; //message->FindBool("clean", false);
+            bool flagClean = message->FindBool("clean", false);
             if (flagClean)
             {
                 LOG("cleaning old configuration" B_UTF8_ELLIPSIS "\n");
@@ -69,7 +69,7 @@ void SenConfigHandler::MessageReceived(BMessage* message)
         }
         default:
         {
-            LOG("SenConfigHandler: unknown message received, handing over to parent: %lu\n", message->what);
+            LOG("SenConfigHandler: unknown message received, handing over to parent: %u\n", message->what);
             BHandler::MessageReceived(message);
             return;
         }
@@ -125,7 +125,13 @@ status_t SenConfigHandler::InitRelationType(bool clean)
     }
     
     BMessage* attrMsg = new BMessage();
-    
+	
+	// test
+	mime.GetAttrInfo(attrMsg);
+	LOG("SEN RelationType version is %s\n", attrMsg->GetString("sen:version"));
+    return B_OK;
+	// test_end
+	
     // whether relation is active (e.g. shown in Tracker, evaluated at runtime, etc.)
     AddMimeInfo(attrMsg, "enabled", "Enabled", B_BOOL_TYPE, true, false);
 
@@ -152,7 +158,7 @@ status_t SenConfigHandler::InitRelationType(bool clean)
     status_t result = mime.Install();
     // buggy? always returns an error
     if (result != B_OK) {
-        LOG("(ignoring) internal error setting up MIME Type: %ld", result);
+        LOG("(ignoring) internal error setting up MIME Type: %d\n", result);
      //   return result;
         result = B_OK;
     }
@@ -173,6 +179,7 @@ void SenConfigHandler::AddMimeInfo(BMessage* attrMsg, const char* name, const ch
     attrMsg->AddInt32("attr:width", (type == B_BOOL_TYPE ? 76 : 128));
     attrMsg->AddInt32("attr:alignment", B_ALIGN_LEFT);
     attrMsg->AddBool("attr:extra", false);
+	attrMsg->AddString("sen:version", "1.0.0");
 }
 
 status_t SenConfigHandler::InitRelations(bool clean)
@@ -195,19 +202,19 @@ status_t SenConfigHandler::InitRelations(bool clean)
                         char* name = new char[B_FILE_NAME_LENGTH];
                         entry.GetName(name);
                         ERROR("failed to remove relation %s\n", name);
-                        delete name;
+                        delete[] name;
                     }
                 }
             }
         } else {
-            ERROR("failed to access relations config dir: %ld", relationsDirStatus);
+            ERROR("failed to access relations config dir: %u", relationsDirStatus);
             return relationsDirStatus;
         }
     }
 
     BPath path(relationsDir);
     if (status_t status = path.InitCheck() != B_OK) {
-        ERROR("failed to access relations config dir: %ld\n", status);
+        ERROR("failed to access relations config dir: %u\n", status);
     }
     LOG("setting up relations in %s\n", path.Path());
     
@@ -415,7 +422,7 @@ status_t SenConfigHandler::CreateRelation(const char* name, const char* displayN
     BFile relation;
     status_t relationStatus = relationsDir->CreateFile(name, &relation, !clean);
     if (relationStatus != B_OK) {
-        ERROR("failed to create relation '%s': %ld\n", name, relationStatus);
+        ERROR("failed to create relation '%s': %u\n", name, relationStatus);
         // bail out, configuration must be all valid
         return relationStatus;
     }
@@ -442,14 +449,14 @@ status_t SenConfigHandler::CreateRelation(const char* name, const char* displayN
     char* msgBuffer = new char[msgSize];
     config->Flatten(msgBuffer, msgSize);
     relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "config", B_MESSAGE_TYPE, 0, msgBuffer, msgSize);
-    delete msgBuffer;
+    delete[] msgBuffer;
     
     msgSize = configProps->FlattenedSize();
     msgBuffer = new char[msgSize];
     configProps->Flatten(msgBuffer, msgSize);
     relation.WriteAttr(SEN_ATTRIBUTES_PREFIX "properties", B_MESSAGE_TYPE, 0, msgBuffer, msgSize);
     
-    delete msgBuffer;
+    delete[] msgBuffer;
     
     if (status_t status = relation.Sync() != B_OK) {
         ERROR("error creating relation file!");

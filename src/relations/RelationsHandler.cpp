@@ -313,7 +313,7 @@ bool RelationsHandler::AppendIdToString(const BString& id, void* result) {
 
 bool RelationsHandler::QueryForId(const BString& id, void* result)
 {
-	LOG("query for id %s\n", id);
+	LOG("query for id %s\n", id.String());
 
 	BString predicate(BString(SEN_FILE_ID) << " == " << id);
 	// all relation queries currently assume we never leave the boot volume
@@ -341,7 +341,7 @@ bool RelationsHandler::QueryForId(const BString& id, void* result)
 			reinterpret_cast<BObjectList<BEntry>*>(result)->AddItem(entry);
 		}
 		else
-			ERROR("error resolving id %s", id);
+			ERROR("error resolving id %s", id.String());
 	}
 	return true;
 }

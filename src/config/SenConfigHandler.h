@@ -7,7 +7,7 @@
 
 #include <Application.h>
 
-#define SEN_CONFIG_RELATION_TYPE_NAME          "application/x-vnd.sen-labs.sen-relation"
+#define SEN_CONFIG_RELATION_TYPE_NAME          "application/x-vnd.sen.sen-relation"
 #define SEN_CONFIG_RELATION_MSG                'SCrc'
 #define SEN_CONFIG_RELATION_PROPERTIES_MSG     'SCrp'
 #define SEN_CONFIG_RELATION_MSG_SOURCE_TYPES   "sourceMimeTypes"
