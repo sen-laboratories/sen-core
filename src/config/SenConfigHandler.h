@@ -1,5 +1,5 @@
 /*
- * Copyright 2018, Your Name <your@email.address>
+ * Copyright 2023, Gregor B. Rosenauer <gregor.rosenauer@gmail.com>
  * All rights reserved. Distributed under the terms of the MIT license.
  */
 #ifndef _SEN_CONFIG_HANDLER_H
@@ -7,7 +7,7 @@
 
 #include <Application.h>
 
-#define SEN_CONFIG_RELATION_TYPE_NAME          "application/x-vnd.sen.sen-relation"
+#define SEN_CONFIG_RELATION_SUPERTYPE_NAME     "relation"
 #define SEN_CONFIG_RELATION_MSG                'SCrc'
 #define SEN_CONFIG_RELATION_PROPERTIES_MSG     'SCrp'
 #define SEN_CONFIG_RELATION_MSG_SOURCE_TYPES   "sourceMimeTypes"
@@ -25,7 +25,7 @@ private:
 			status_t			InitConfig(bool clean=false);
             void                AddMimeInfo(BMessage* attrMsg, const char* name, const char* displayName, int32 type, bool viewable, bool editable);
 			status_t			InitIndices(bool clean);
-			status_t			InitRelationType(bool clean);
+			status_t			InitRelationTypes(bool clean);
 			status_t			InitRelations(bool clean);
             
             BDirectory*         settingsDir;
