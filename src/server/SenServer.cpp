@@ -20,14 +20,14 @@ SenServer::SenServer()
      */
     relationsHandler = new RelationsHandler();
     senConfigHandler = new SenConfigHandler();
-    
+
     AddHandler(relationsHandler);
     AddHandler(senConfigHandler);
-    
+
     // setup handler chain
     SetNextHandler(relationsHandler);
     relationsHandler->SetNextHandler(senConfigHandler);
-        
+
 	// setup node watcher for volume to keep relations up to date on creation/deletion
 	// https://www.haiku-os.org/docs/api/NodeMonitor_8h.html#a24336df118e76f00bd15b89fa863d299
 }
@@ -50,22 +50,22 @@ void SenServer::MessageReceived(BMessage* message)
 		 	reply->what = SEN_RESULT_INFO;
 		 	// TODO: get info from resource
 		 	reply->AddString("info", "SEN Core v0.0.0-proto1");
-			
+
 		 	break;
 		}
 		case SEN_CORE_STATUS:
 		{
 		 	result = B_OK;
 		 	reply->what = SEN_RESULT_STATUS;
-		 	
+
 		 	reply->AddString("status", "operational");
 		 	reply->AddBool("healthy", true);
-		 	
+
 		 	break;
 		}
 		default:
 		{
-            LOG("SEN Server: unknown message '%lu', passing on to services in Handler chain" B_UTF8_ELLIPSIS "\n", message->what);
+            LOG("SEN Server: unknown message '%u', passing on to services in Handler chain" B_UTF8_ELLIPSIS "\n", message->what);
             BHandler::MessageReceived(message);
             return;
 		}

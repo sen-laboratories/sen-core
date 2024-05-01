@@ -13,47 +13,51 @@
 #include <ObjectList.h>
 #include <StringList.h>
 
-#define SEN_RELATION_SOURCE "source"
-#define SEN_RELATION_NAME   "relation"
-#define SEN_RELATION_TARGET "target"
+// used in file types
+#define SEN_RELATION_SUPERTYPE "relation/"
 
-#define SEN_RELATIONS_GET			'SCrg'
-#define SEN_RELATIONS_GET_TARGETS	'SCrt'
-#define SEN_RELATIONS_ADD			'SCra'
-#define SEN_RELATIONS_REMOVE		'SCrr'
-#define SEN_RELATIONS_REMOVEALL		'SCrd'
+// used in messages
+#define SEN_RELATION_SOURCE "SEN:source"
+#define SEN_RELATION_NAME   "SEN:relation"
+#define SEN_RELATION_TARGET "SEN:target"
+
+#define SEN_RELATIONS_GET           'SCrg'
+#define SEN_RELATIONS_GET_ALL       'SCrl'
+#define SEN_RELATION_ADD	        'SCra'
+#define SEN_RELATION_REMOVE	    	'SCrr'
+#define SEN_RELATIONS_REMOVE_ALL    'SCrd'
 
 class RelationsHandler : public BHandler {
 
 public:
 		RelationsHandler();
-        
-		status_t					AddRelation				(const BMessage* message, BMessage* reply);
-		status_t					GetRelations			(const BMessage* message, BMessage* reply);
-		status_t					GetTargetsForRelation	(const BMessage* message, BMessage* reply);
-		status_t					RemoveRelation			(const BMessage* message, BMessage* reply);		
+
+		status_t					AddRelation (BMessage* message, BMessage* reply);
+		status_t					GetRelationsOfType  (const BMessage* message, BMessage* reply);
+		status_t					GetAllRelations     (const BMessage* message, BMessage* reply);
+		status_t					RemoveRelation      (const BMessage* message, BMessage* reply);
         // delete all relations of a given type, e.g. when a related file is deleted
-		status_t					RemoveAllRelations		(const BMessage* message, BMessage* reply);		
+		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
 
 virtual
         void MessageReceived(BMessage* message);
 		~RelationsHandler();
 
 private:
-		BStringList* 			ReadRelationsFromAttrs(const char* path);
-		BStringList* 			ReadRelationIdsFromFile(const char *path, const char* relation);
+		BMessage*               ReadRelationsOfType(const char* path, const char* relationType);
+		BStringList*            ReadRelationNames(const char* path);
 		BObjectList<BEntry>*	ResolveRelationTargets(BStringList* ids);
-		const char*		 		GetIdForFile(const char *path);
-		// write
-		status_t 				WriteIdToFile(const char *path, const char *id);
-		status_t				WriteRelationIdsToFile(const char *path, const char* relation, BStringList* ids);
-		
+		const char*		 		GetOrCreateId(const char *path);
+		// write/delete
+		status_t				WriteRelationToFile(const char *path, const char *relationType, const BMessage* relationConfig);
+		status_t                RemoveRelationForTypeAndTargetFromFile(const char* path, const char *relationType, const char *targetId);
+		status_t                RemoveAllRelationsFromFile(const char* path);
+
 		// helper methods
-		static bool             AppendIdToString(const BString& id, void* result);
+        const char*             GenerateId(BNode* node);
 		static bool             QueryForId(const BString& id, void* targets);
-		static const char*      GetRelationAttributeName(const char* relation);
-		static bool             AddRelationToMessage(const BString& relation, void* message);
-		static BEntry*          AddTargetToMessage(BEntry* entry, void* message);
+        const char*             GetAttributeNameForRelation(BString relationType);
+		static bool             AddOrUpdateRelationTarget(const char* relationType, BMessage* newRelationTarget, BMessage* existingRelation);
 };
 
 #endif // _RELATION_SERVICE_H
