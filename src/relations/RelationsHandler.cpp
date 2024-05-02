@@ -107,42 +107,39 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
 		return B_ERROR;
 	}
 
+    // prepare new relation properties with properties from message received
+    BMessage properties(*message);
+
+    // remove internal SEN properties
+	properties.RemoveData(SEN_RELATION_SOURCE);
+	properties.RemoveData(SEN_RELATION_TARGET);
+	properties.RemoveData(SEN_RELATION_NAME);
+
     // we allow multipe relations of the same type to the same target
-    // (e.g. a note for the same text referencing different locations)
-    // so we have a Message with targetId as key pointing to 1-N messages with relation properties.
+    // (e.g. a note for the same text referencing different locations in the referenced text).
+    // Hence, we have a Message with targetId as key pointing to 1-N messages with relation properties for that target.
     // since there is no method BMessage::FindMessages() to collect them all, we need to iterate.
     BMessage oldProperties;
     int index = 0;
     while (relations->FindMessage(targetId, index, &oldProperties) == B_OK) {
+        DEBUG("got existing relation properties at index %d:\n", index);
+        oldProperties.PrintToStream();
+
         // get existing relation properties for target if available and skip if already there
-        if (oldProperties.HasSameData(*relations)) {
-            DEBUG("skipping add relation, already there:\n");
+        if (oldProperties.HasSameData(properties)) {
+            DEBUG("skipping add relation %s for target %s, already there:\n", relation, targetId);
             oldProperties.PrintToStream();
 
             reply->what = SEN_RESULT_RELATIONS;
-            reply->AddString("statusMessage", BString("relation with same properties already exists: '")
-                << relation << "' from "
-                << source << " [" << srcId << "] -> "
-                <<  target << " [" << targetId << "]");
+            reply->AddString("statusMessage", BString("relation with same properties already exists"));
 
             return B_OK;
         }
         index++;
     }
-    // extend existing properties with new ones from ADD call
-    BMessage properties(oldProperties);
-    properties.Append(*message);
-
-    // add optional relation properties from the ADD message, remove SEN properties
-    // Note: we don't use a nested BMessage here to keep things simple and scriptable
-    // ('hey' does not support nested messages yet)
-	properties.RemoveData(SEN_RELATION_SOURCE);
-	properties.RemoveData(SEN_RELATION_TARGET);
-	properties.RemoveData(SEN_RELATION_NAME);
-
     // add new relation with properties
     relations->AddMessage(targetId, &properties);
-    DEBUG("new relation properties for relation %s and file %s:\n", relation, source);
+    DEBUG("new relation properties for relation %s and target %s:\n", relation, target);
     properties.PrintToStream();
 
     // write new relation to designated attribute
@@ -164,24 +161,24 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
         return B_ERROR;
     }
 
-    ssize_t relation_attr_status = node.WriteAttr(
+    ssize_t writeSizeStatus = node.WriteAttr(
             attrName,
             B_MESSAGE_TYPE,
             0,
             msgBuffer,
             msgSize);
 
-    if (relation_attr_status == 0) {
+    if (writeSizeStatus <= 0) {
         ERROR("failed to store relation %s for file %s\n", relation, source);
         	reply->what = SEN_RESULT_RELATIONS;
             reply->AddString("statusMessage", BString("failed to create relation '") << relation << "' from "
             << source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]: \n"
-            << relation_attr_status);
+            << writeSizeStatus);
         return B_ERROR;
     }
 
     DEBUG("created relation from src %s to target %s with properties:\n", srcId, targetId);
-    message->PrintToStream();
+    relations->PrintToStream();
 
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("statusMessage", BString("created relation '") << relation << "' from "
@@ -196,14 +193,29 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
 		return B_BAD_VALUE;
 	}
-    BStringList* relations = ReadRelationNames(source.String());
-    if (relations == NULL) {
+    bool withProperties = message->GetBool("withProperties");
+
+    BStringList* relationNames = ReadRelationNames(source.String());
+    if (relationNames == NULL) {
         return B_ERROR;
     }
+    if (withProperties) {
+        // add all properties of all relations found above and add to result per type for lookup
+        for (int i = 0; i < relationNames->CountStrings(); i++) {
+            BString relation = relationNames->StringAt(i);
+            DEBUG("adding properties of relation %s...\n", relation.String());
 
+            BMessage* relations = ReadRelationsOfType(source.String(), relation.String());
+            if (relations == NULL) {
+                return B_ERROR;
+            }
+            reply->AddMessage(relation.String(), relations);
+        }
+    }
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddStrings("result", *relations);
-    reply->AddString("statusMessage", BString("removed all relations from ") << source);
+    reply->AddStrings("relations", *relationNames);
+    reply->AddString("statusMessage", BString("got ")
+        << relationNames->CountStrings() << " relation(s) from " << source);
 
 	return B_OK;
 }
@@ -244,16 +256,12 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     // read relation config as message from respective relation attribute
     attr_info attrInfo;
     const char* attrName = GetAttributeNameForRelation(relationType);
+    BMessage *relationMsg = new BMessage();
 
     DEBUG("checking for relation %s in atttribute %s\n", relationType, attrName);
-    if (status_t result = node.GetAttrInfo(attrName, &attrInfo) != B_OK) {
-        if (result != B_ENTRY_NOT_FOUND) {
-            ERROR("failed to get attribute info for relation %s: %d\n", relationType, result);
-            //return NULL;
-        } else {
-            // bail out if no relation of this type is found
-            return new BMessage();
-        }
+
+    if (node.GetAttrInfo(attrName, &attrInfo) != B_OK) { // also if attribute not found, e.g. new relation
+        return new BMessage();
     }
     char* relation_attr_value = new char[attrInfo.size + 1];
     ssize_t result = node.ReadAttr(
@@ -266,14 +274,13 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     if (result == 0) {
         DEBUG("no relations of type %s found for path %s.\n", relationType, path);
         return new BMessage();
-    }
-    BMessage* relationMsg = new BMessage();
-    result = relationMsg->Unflatten(relation_attr_value);
-    if (result != B_OK) {
-        ERROR("could not extract relation %s from fiel %s", relationType, path);
+    } else if (result < 0) {
+        ERROR("failed to read relation %s of file %s.\n", relationType, path);
+        return NULL;
     }
 
-    DEBUG("read relations of type %s:\n", relationType);
+    relationMsg->Unflatten(relation_attr_value);
+    DEBUG("read %d relations of type %s:\n", relationMsg->CountNames(B_MESSAGE_TYPE), relationType);
     relationMsg->PrintToStream();
 
     return relationMsg;
@@ -366,24 +373,27 @@ const char* RelationsHandler::GetOrCreateId(const char *path)
 	}
 
     BString id;
-    status_t id_result = node.ReadAttrString(SEN_ID_ATTR, &id);
-    if (id_result != B_OK) {
-        if (id_result == B_ENTRY_NOT_FOUND) {
-            id = GenerateId(&node);
-            if (id != NULL) {
-                DEBUG("got ID %s for path %s\n", id.String(), path);
-                node.WriteAttrString(SEN_ID_ATTR, &id);
-            } else {
+    ssize_t result = node.ReadAttrString(SEN_ID_ATTR, &id);
+    if (result == B_ENTRY_NOT_FOUND) {
+        id = GenerateId(&node);
+        if (id != NULL) {
+            DEBUG("generated new ID %s for path %s\n", id.String(), path);
+            if (node.WriteAttrString(SEN_ID_ATTR, &id) != B_OK) {
                 ERROR("failed to create ID for path %s\n", path);
                 return NULL;
             }
-        }
-        else {
-            ERROR("error getting ID from path %s\n", path);
+            return id.String();
+        } else {
+            ERROR("failed to create ID for path %s\n", path);
             return NULL;
         }
+    } else if (result != B_OK && result < 0) {
+        ERROR("failed to read ID from path %s\n", path);
+        return NULL;
     }
-    return id.String();
+    DEBUG("got existing ID %s for path %s\n", id.String(), path);
+
+    return (new BString(id))->String();
 }
 
 const char* RelationsHandler::GenerateId(BNode* node) {
