@@ -8,16 +8,14 @@
 #include "../Sen.h"
 
 #include <Entry.h>
-#include <Roster.h>
+#include <NodeMonitor.h>
+#include <VolumeRoster.h>
+#include <Volume.h>
 #include <String.h>
 
-SenServer::SenServer()
-	:
-	BApplication(SEN_SERVER_SIGNATURE)
+SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 {
-	/*
-     * setup handlers
-     */
+	// setup handlers
     relationsHandler = new RelationsHandler();
     senConfigHandler = new SenConfigHandler();
 
@@ -28,8 +26,24 @@ SenServer::SenServer()
     SetNextHandler(relationsHandler);
     relationsHandler->SetNextHandler(senConfigHandler);
 
-	// setup node watcher for volume to keep relations up to date on creation/deletion
-	// https://www.haiku-os.org/docs/api/NodeMonitor_8h.html#a24336df118e76f00bd15b89fa863d299
+	// setup live query to keep SEN:ID unique when copying files
+	// https://www.haiku-os.org/legacy-docs/bebook/BQuery_Overview.html#id611851
+    BVolumeRoster volRoster;
+	BVolume bootVolume;
+	volRoster.GetBootVolume(&bootVolume);
+
+	BString predicate(BString(SEN_ID_ATTR) << "==**");
+
+    liveIdQuery = new BQuery();
+	liveIdQuery->SetVolume(&bootVolume);
+	liveIdQuery->SetPredicate(predicate.String());
+    liveIdQuery->SetTarget(this);
+
+    if (liveIdQuery->Fetch() != B_OK) {
+        ERROR("failed to initialize live query for %s!\n", SEN_ID_ATTR);
+    } else {
+        LOG("set up query handler for %s\n", SEN_ID_ATTR);
+    }
 }
 
 SenServer::~SenServer()
@@ -49,7 +63,7 @@ void SenServer::MessageReceived(BMessage* message)
 		 	result = B_OK;
 		 	reply->what = SEN_RESULT_INFO;
 		 	// TODO: get info from resource
-		 	reply->AddString("info", "SEN Core v0.0.0-proto1");
+		 	reply->AddString("info", "SEN Core v0.2.0-proto2");
 
 		 	break;
 		}
@@ -63,6 +77,53 @@ void SenServer::MessageReceived(BMessage* message)
 
 		 	break;
 		}
+        case B_QUERY_UPDATE:
+        {
+            int32 opcode;
+            if (message->FindInt32("opcode", &opcode) == B_OK) {
+                switch (opcode) {
+                    case B_ENTRY_CREATED:
+                    {
+                        int32 statFields;
+                        entry_ref ref;
+                        BString name;
+
+                        message->FindInt32("fields", &statFields);
+                        message->FindInt32("device", &ref.device);
+                        message->FindInt64("directory", &ref.directory);
+                        message->FindString("name", &name);
+
+                        ref.set_name(name);
+                        BNode node(&ref);
+
+                        BString senId;
+                        DEBUG("checking new node %s for existing SEN attributes...\n", name.String());
+
+                        node.ReadAttrString(SEN_ID_ATTR, &senId);
+                        if (! senId.IsEmpty()) {
+                            DEBUG("found new node %s with duplicate ID %s, stripping all SEN attributes...\n",
+                                name.String(), senId.String());
+                            // delete all SEN attributes of copy
+                            char attrName[B_ATTR_NAME_LENGTH];
+                            while (node.GetNextAttrName(attrName) != B_ENTRY_NOT_FOUND) {
+                                if (BString(attrName).StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+                                    if (node.RemoveAttr(attrName) != B_OK) {
+                                        ERROR("failed to remove SEN attribute %s from node %s\n",
+                                            attrName, name.String());
+                                    } else {
+                                        LOG("removed SEN attribute %s from node %s\n",
+                                            attrName, name.String());
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                result = B_OK;
+            }
+            break;
+        }
 		default:
 		{
             LOG("SEN Server: unknown message '%u', passing on to services in Handler chain" B_UTF8_ELLIPSIS "\n", message->what);
@@ -70,8 +131,7 @@ void SenServer::MessageReceived(BMessage* message)
             return;
 		}
 	}
-
-	LOG("SEN server sending result %d", result);
+	LOG("SEN server sending result %d\n", result);
 	reply->AddInt32("result", result);
 	message->SendReply(reply);
 }

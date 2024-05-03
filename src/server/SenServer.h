@@ -1,6 +1,6 @@
 /**
  * SEN Semantic Server
- * 
+ *
  * @author Gregor Rosenauer <gregor.rosenauer@gmail.com>
  * All Rights Reserved.
  * Distributed under the terms of the MIT License.
@@ -24,6 +24,8 @@ virtual	void MessageReceived(BMessage* message);
 private:
             RelationsHandler*       relationsHandler;
             SenConfigHandler*       senConfigHandler;
+
+            BQuery*                 liveIdQuery;
 };
 
 

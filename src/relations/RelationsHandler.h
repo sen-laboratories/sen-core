@@ -11,6 +11,7 @@
 #include <File.h>
 #include <Message.h>
 #include <ObjectList.h>
+#include <Query.h>
 #include <StringList.h>
 
 // used in file types

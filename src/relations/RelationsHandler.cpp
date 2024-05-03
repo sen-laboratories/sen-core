@@ -10,7 +10,6 @@
 #include <fs_attr.h>
 #include <Node.h>
 #include <Path.h>
-#include <Query.h>
 #include <stdio.h>
 #include <String.h>
 #include <StringList.h>
@@ -373,7 +372,7 @@ const char* RelationsHandler::GetOrCreateId(const char *path)
 	}
 
     BString id;
-    ssize_t result = node.ReadAttrString(SEN_ID_ATTR, &id);
+    status_t result = node.ReadAttrString(SEN_ID_ATTR, &id);
     if (result == B_ENTRY_NOT_FOUND) {
         id = GenerateId(&node);
         if (id != NULL) {
