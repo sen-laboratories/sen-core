@@ -39,6 +39,7 @@ public:
 		status_t					RemoveRelation      (const BMessage* message, BMessage* reply);
         // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
+		static bool                 QueryForId(const BString& id, BEntry* result);
 
 virtual
         void MessageReceived(BMessage* message);
@@ -47,7 +48,7 @@ virtual
 private:
 		BMessage*               ReadRelationsOfType(const char* path, const char* relationType);
 		BStringList*            ReadRelationNames(const char* path);
-		BObjectList<BEntry>*	ResolveRelationTargets(BStringList* ids);
+		status_t            	ResolveRelationTargets(BStringList* ids, BObjectList<BEntry*> *result);
 		const char*		 		GetOrCreateId(const char *path);
 		// write/delete
 		status_t				WriteRelationToFile(const char *path, const char *relationType, const BMessage* relationConfig);
@@ -56,7 +57,6 @@ private:
 
 		// helper methods
         const char*             GenerateId(BNode* node);
-		static bool             QueryForId(const BString& id, void* targets);
         const char*             GetAttributeNameForRelation(BString relationType);
 		static bool             AddOrUpdateRelationTarget(const char* relationType, BMessage* newRelationTarget, BMessage* existingRelation);
 };

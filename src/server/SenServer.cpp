@@ -9,6 +9,7 @@
 
 #include <Entry.h>
 #include <NodeMonitor.h>
+#include <Path.h>
 #include <VolumeRoster.h>
 #include <Volume.h>
 #include <String.h>
@@ -46,7 +47,6 @@ SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
     } else {
         LOG("set up query handler for %s\n", SEN_ID_ATTR);
     }
-    nodeCache = new unordered_map<const char*, const entry_ref*>();
 }
 
 SenServer::~SenServer()
@@ -86,7 +86,6 @@ void SenServer::MessageReceived(BMessage* message)
             if (message->FindInt32("opcode", &opcode) == B_OK) {
                 switch (opcode) {
                     case B_ENTRY_CREATED:
-                    case B_ENTRY_REMOVED:   // handle these 2 together to check for move vs copy node
                     {
                         int32 statFields;
                         entry_ref ref;
@@ -100,43 +99,61 @@ void SenServer::MessageReceived(BMessage* message)
                         BNode node(&ref);
 
                         BString senId;
-                        if (opcode == B_ENTRY_CREATED) {
-                            DEBUG("node %s created.", name.String());
-                        } else if (opcode == B_ENTRY_REMOVED) {
-                            DEBUG("node %s removed.", name.String());
-                        }
-                        DEBUG("checking node %s for existing SEN attributes...\n", name.String());
-
                         node.ReadAttrString(SEN_ID_ATTR, &senId);
                         if (! senId.IsEmpty()) {
-                            if (opcode == B_ENTRY_CREATED) {
-                                DEBUG("Storing reference to node for senId %s for possible removal...\n", senId.String());
-                                nodeCache->insert({senId.String(), &ref});
-                            } else if (opcode == B_ENTRY_REMOVED) {
-                                DEBUG("checking removed node %s for match with existing ID %s to identify copy vs. move...\n",
-                                    name.String(), senId.String());
-                                if (nodeCache->find(senId.String()) != nodeCache->end()) {
-                                    // remove key
-                                    nodeCache->erase(senId.String());
-                                    // delete all SEN attributes of copy
-                                    DEBUG("found senId %s with exising node, removing attributes (simulation)...", senId.String());
-                                    /*
-                                    char attrName[B_ATTR_NAME_LENGTH];
-                                    while (node.GetNextAttrName(attrName) != B_ENTRY_NOT_FOUND) {
-                                        if (BString(attrName).StartsWith(SEN_ATTRIBUTES_PREFIX)) {
-                                            if (node.RemoveAttr(attrName) != B_OK) {
-                                                ERROR("failed to remove SEN attribute %s from node %s\n",
-                                                    attrName, name.String());
-                                            } else {
-                                                LOG("removed SEN attribute %s from node %s\n",
-                                                    attrName, name.String());
-                                            }
+                            DEBUG("checking node %s for match with existing ID %s...\n",
+                                name.String(), senId.String());
+
+                            BEntry existingEntry;
+                            if (relationsHandler->QueryForId(senId, &existingEntry)) {
+                                BPath path;
+                                existingEntry.GetPath(&path);
+                                // delete all SEN attributes of copy
+                                DEBUG("found senId %s with exising node %s, removing attributes from copy...",
+                                    senId.String(), path.Path());
+
+                                char attrName[B_ATTR_NAME_LENGTH];
+                                while (node.GetNextAttrName(attrName) != B_ENTRY_NOT_FOUND) {
+                                    if (BString(attrName).StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+                                        if (node.RemoveAttr(attrName) != B_OK) {
+                                            ERROR("failed to remove SEN attribute %s from node %s\n",
+                                                attrName, name.String());
+                                        } else {
+                                            DEBUG("removed SEN attribute %s from node %s\n", attrName, name.String());
                                         }
-                                    }}*/
+                                    }
                                 }
+                            } else {
+                                DEBUG("ignoring possible move of %s, SEN:ID %s is still unique.",
+                                    name.String(), senId.String());
                             }
                         }
                         break;
+                    }
+                    case B_ENTRY_REMOVED:
+                    {
+                        int32 statFields;
+                        entry_ref ref;
+                        BString name;
+
+                        message->FindString("name", &name);
+                        message->FindInt32("device", &ref.device);
+                        message->FindInt64("directory", &ref.directory);
+
+                        ref.set_name(name);
+                        BNode node(&ref);
+
+                        BString senId;
+                        node.ReadAttrString(SEN_ID_ATTR, &senId);
+                        if (! senId.IsEmpty()) {
+                            DEBUG("checking if deleted node %s with ID %s is still referenced...\n",
+                                name.String(), senId.String());
+
+                            // TODO: we might need SEN:TO with cached targetIds after all
+                        } else {
+                            DEBUG("all good, node %s with ID %s can be deleted.",
+                                name.String(), senId.String());
+                        }
                     }
                 }
                 result = B_OK;

@@ -344,17 +344,20 @@ BStringList* RelationsHandler::ReadRelationNames(const char* path)
 	return result;
 }
 
-BObjectList<BEntry>* RelationsHandler::ResolveRelationTargets(BStringList* ids)
+status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<BEntry*> *result)
 {
 	DEBUG("resolving ids from list with %d targets...\n", ids->CountStrings())
-	BObjectList<BEntry>* targets = new BObjectList<BEntry>();
+	BEntry entry;
 
-	while (!ids->IsEmpty()) {
-		BString id = ids->First();
-		QueryForId(id, targets);
-		ids->Remove(id);
+    for (int i = 0; i < ids->CountStrings(); i++) {
+		if (QueryForId(ids->StringAt(i), &entry)) {
+            reinterpret_cast<BObjectList<BEntry>*>(result)->AddItem(new BEntry(entry));
+        } else {
+            return B_ERROR;
+        }
 	}
-	return targets;
+
+	return B_OK;
 }
 
 /**
@@ -415,7 +418,7 @@ const char* RelationsHandler::GetAttributeNameForRelation(BString relationType) 
     return BString(SEN_RELATION_ATTR_PREFIX).Append(relationType).String();
 }
 
-bool RelationsHandler::QueryForId(const BString& id, void* result)
+bool RelationsHandler::QueryForId(const BString& id, BEntry* result)
 {
 	LOG("query for id %s\n", id.String());
 
@@ -433,20 +436,27 @@ bool RelationsHandler::QueryForId(const BString& id, void* result)
 	if (query.Fetch() == B_OK)
 	{
 		LOG("Results of query \"%s\":\n", predicate.String());
-		BEntry* entry = new BEntry();
 
-		// if not while becaues result should always only contain a single id (inode)
+		// result should always only contain a single id (inode)
 		// else, the relation references are corrupt and need to be repaired.
-		if (query.GetNextEntry(entry) == B_OK)
+        if (query.CountEntries() > 1) {
+            ERROR("multiple SEN:IDs found, please repair.\n");
+            return false;
+        }
+		BEntry entry;
+		if (query.GetNextEntry(&entry) == B_OK)
 		{
 			BPath path;
-			entry->GetPath(&path);
-			LOG("\t%s\n", path.Path());
+			entry.GetPath(&path);
+			LOG("found entry with path %s\n", path.Path());
 
-			reinterpret_cast<BObjectList<BEntry>*>(result)->AddItem(entry);
+			result->SetTo(path.Path());
 		}
 		else
+        {
 			ERROR("error resolving id %s\n", id.String());
+            return false;
+        }
 	}
 	return true;
 }
