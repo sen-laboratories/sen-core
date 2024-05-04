@@ -13,6 +13,9 @@
 
 #include <Application.h>
 #include <File.h>
+#include <unordered_map>
+
+using namespace std;
 
 class SenServer : public BApplication {
 
@@ -26,6 +29,7 @@ private:
             SenConfigHandler*       senConfigHandler;
 
             BQuery*                 liveIdQuery;
+            unordered_map<const char*, const entry_ref*> *nodeCache;
 };
 
 
