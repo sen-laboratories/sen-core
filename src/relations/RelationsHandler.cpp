@@ -350,7 +350,7 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<
 	BEntry entry;
 
     for (int i = 0; i < ids->CountStrings(); i++) {
-		if (QueryForId(ids->StringAt(i), &entry)) {
+		if (QueryForId(ids->StringAt(i), &entry) == 1) {    // we expect a unique result here!
             reinterpret_cast<BObjectList<BEntry>*>(result)->AddItem(new BEntry(entry));
         } else {
             return B_ERROR;
@@ -418,7 +418,7 @@ const char* RelationsHandler::GetAttributeNameForRelation(BString relationType) 
     return BString(SEN_RELATION_ATTR_PREFIX).Append(relationType).String();
 }
 
-bool RelationsHandler::QueryForId(const BString& id, BEntry* result)
+int32 RelationsHandler::QueryForId(const BString& id, BEntry* result)
 {
 	LOG("query for id %s\n", id.String());
 
@@ -433,30 +433,29 @@ bool RelationsHandler::QueryForId(const BString& id, BEntry* result)
 	query.SetVolume(&bootVolume);
 	query.SetPredicate(predicate.String());
 
-	if (query.Fetch() == B_OK)
-	{
-		LOG("Results of query \"%s\":\n", predicate.String());
+	if (query.Fetch() != B_OK) {
+        return -1;
+    }
+    LOG("Results of query \"%s\":\n", predicate.String());
 
-		// result should always only contain a single id (inode)
-		// else, the relation references are corrupt and need to be repaired.
-        if (query.CountEntries() > 1) {
-            ERROR("multiple SEN:IDs found, please repair.\n");
-            return false;
-        }
-		BEntry entry;
-		if (query.GetNextEntry(&entry) == B_OK)
-		{
-			BPath path;
-			entry.GetPath(&path);
-			LOG("found entry with path %s\n", path.Path());
+    // result should always only contain a single id (inode)
+    // else, the relation references are corrupt and need to be repaired.
+    int32 resultCount = query.CountEntries();
+    if (resultCount > 1) {
+        DEBUG("multiple SEN:IDs found (%d), if not called from SEN, repair is needed!\n", resultCount);
+        return resultCount;
+    }
+    BEntry entry;
+    if (query.GetNextEntry(&entry) == B_OK) {
+        BPath path;
+        entry.GetPath(&path);
+        LOG("found entry with path %s\n", path.Path());
 
-			result->SetTo(path.Path());
-		}
-		else
-        {
-			ERROR("error resolving id %s\n", id.String());
-            return false;
-        }
-	}
-	return true;
+        result->SetTo(path.Path());
+    }
+    else {
+        ERROR("error resolving id %s\n", id.String());
+        return -1;
+    }
+    return resultCount;
 }

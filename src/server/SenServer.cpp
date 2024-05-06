@@ -82,12 +82,12 @@ void SenServer::MessageReceived(BMessage* message)
 		}
         case B_QUERY_UPDATE:
         {
+            DEBUG("query_update received.\n");
             int32 opcode;
             if (message->FindInt32("opcode", &opcode) == B_OK) {
                 switch (opcode) {
                     case B_ENTRY_CREATED:
                     {
-                        int32 statFields;
                         entry_ref ref;
                         BString name;
 
@@ -98,14 +98,23 @@ void SenServer::MessageReceived(BMessage* message)
                         ref.set_name(name);
                         BNode node(&ref);
 
+                        DEBUG("ENTRY_CREATED: node %s...\n", name.String());
+
                         BString senId;
                         node.ReadAttrString(SEN_ID_ATTR, &senId);
                         if (! senId.IsEmpty()) {
+                            // watch new node for attribute changes to trigger enrichment
+                            // todo: handle this via message sending to Enricher,not here
+                            DEBUG("adding node attribute watcher for %s.\n", name.String());
+                            node_ref nref;
+                            node.GetNodeRef(&nref);
+                            watch_node(&nref, B_WATCH_ATTR, this);
+
                             DEBUG("checking node %s for match with existing ID %s...\n",
                                 name.String(), senId.String());
 
                             BEntry existingEntry;
-                            if (relationsHandler->QueryForId(senId, &existingEntry)) {
+                            if (relationsHandler->QueryForId(senId, &existingEntry) > 1) {
                                 BPath path;
                                 existingEntry.GetPath(&path);
                                 // delete all SEN attributes of copy
@@ -113,6 +122,7 @@ void SenServer::MessageReceived(BMessage* message)
                                     senId.String(), path.Path());
 
                                 char attrName[B_ATTR_NAME_LENGTH];
+                                int attrCount = 0;
                                 while (node.GetNextAttrName(attrName) != B_ENTRY_NOT_FOUND) {
                                     if (BString(attrName).StartsWith(SEN_ATTRIBUTES_PREFIX)) {
                                         if (node.RemoveAttr(attrName) != B_OK) {
@@ -120,9 +130,11 @@ void SenServer::MessageReceived(BMessage* message)
                                                 attrName, name.String());
                                         } else {
                                             DEBUG("removed SEN attribute %s from node %s\n", attrName, name.String());
+                                            attrCount++;
                                         }
                                     }
                                 }
+                                DEBUG("removed %d attributes from node %s\n", attrCount, path.Path());
                             } else {
                                 DEBUG("ignoring possible move of %s, SEN:ID %s is still unique.",
                                     name.String(), senId.String());
@@ -132,7 +144,6 @@ void SenServer::MessageReceived(BMessage* message)
                     }
                     case B_ENTRY_REMOVED:
                     {
-                        int32 statFields;
                         entry_ref ref;
                         BString name;
 
@@ -143,27 +154,83 @@ void SenServer::MessageReceived(BMessage* message)
                         ref.set_name(name);
                         BNode node(&ref);
 
+                        DEBUG("ENTRY_REMOVED: node %s...\n", name.String());
+
                         BString senId;
                         node.ReadAttrString(SEN_ID_ATTR, &senId);
                         if (! senId.IsEmpty()) {
                             DEBUG("checking if deleted node %s with ID %s is still referenced...\n",
                                 name.String(), senId.String());
 
-                            // TODO: we might need SEN:TO with cached targetIds after all
-                        } else {
-                            DEBUG("all good, node %s with ID %s can be deleted.",
-                                name.String(), senId.String());
+                            // get all SEN:REL attributes and check for orphaned relations!
+                            int attrCount = 0;
+                            char attrName[B_ATTR_NAME_LENGTH];
+
+                            while (node.GetNextAttrName(attrName) != B_ENTRY_NOT_FOUND) {
+                                BString attribute(attrName);
+                                if (attribute.StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+                                    if (attribute.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
+                                        // todo: get targets and remove this nodes' ID from targets
+                                        int relation_prefix_len = BString(SEN_RELATION_ATTR_PREFIX).Length();
+                                        BString relation(attribute.Remove(0, relation_prefix_len));
+                                        DEBUG("removing relation %s\n", relation.String());
+                                    }
+                                    attrCount++;
+                                }
+                            }
+                            if (attrCount > 0) {
+                                DEBUG("deleted %d SEN attribute(s) from node %s.\n", attrCount, name.String());
+                            } else {
+                                DEBUG("node %s with ID %s had no relations, deleted.\n",
+                                    name.String(), senId.String());
+                            }
                         }
+                        break;
                     }
                 }
                 result = B_OK;
             }
             break;
         }
+        case B_NODE_MONITOR:
+        {
+            int32 opcode;
+            if (message->FindInt32("opcode", &opcode) == B_OK) {
+                entry_ref ref;
+                BString name;
+                BString attrName;
+                int32   cause;      // todo: look up enum
+
+                message->FindString("name", &name);
+                message->FindString("attr", &attrName);
+                message->FindInt32("cause", &cause);
+                message->FindInt32("device", &ref.device);
+                message->FindInt64("directory", &ref.directory);
+
+                ref.set_name(name);
+                BNode node(&ref);
+
+                switch (opcode) {
+                    case B_ATTR_CREATED:      // handle both the same way
+                    case B_ATTR_CHANGED:
+                    {
+
+                        BString attrNameCause(attrName << " with cause " << cause
+                            << (opcode == B_ATTR_CREATED ? " created" : " changed"));
+                        DEBUG("attribute %s for node %s\n", attrName.String(), name.String());
+                        break;
+                    }
+                    default:
+                    {
+                        DEBUG("ignoring node monitor message for node %s with opcode %d\n", name.String(), opcode);
+                    }
+                }
+            }
+            break;
+        }
 		default:
 		{
-            LOG("SEN Server: unknown message '%u', passing on to services in Handler chain" B_UTF8_ELLIPSIS "\n", message->what);
-            BHandler::MessageReceived(message);
+            LOG("SEN Server: unknown message '%u' received." B_UTF8_ELLIPSIS "\n", message->what);
             return;
 		}
 	}

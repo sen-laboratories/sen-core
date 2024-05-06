@@ -34,12 +34,12 @@ public:
 		RelationsHandler();
 
 		status_t					AddRelation (BMessage* message, BMessage* reply);
-		status_t					GetRelationsOfType  (const BMessage* message, BMessage* reply);
+		status_t		    		GetRelationsOfType  (const BMessage* message, BMessage* reply);
 		status_t					GetAllRelations     (const BMessage* message, BMessage* reply);
 		status_t					RemoveRelation      (const BMessage* message, BMessage* reply);
         // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
-		static bool                 QueryForId(const BString& id, BEntry* result);
+		static int32                QueryForId(const BString& id, BEntry* result);
 
 virtual
         void MessageReceived(BMessage* message);
