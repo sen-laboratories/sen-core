@@ -39,7 +39,8 @@ public:
 		status_t					RemoveRelation      (const BMessage* message, BMessage* reply);
         // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
-		static int32                QueryForId(const BString& id, BEntry* result);
+		const char*		     		GetOrCreateId(const char *path, bool createIfMissing = false);
+		int32                       QueryForId(const BString& id, BEntry* result);
 
 virtual
         void MessageReceived(BMessage* message);
@@ -49,7 +50,6 @@ private:
 		BMessage*               ReadRelationsOfType(const char* path, const char* relationType);
 		BStringList*            ReadRelationNames(const char* path);
 		status_t            	ResolveRelationTargets(BStringList* ids, BObjectList<BEntry*> *result);
-		const char*		 		GetOrCreateId(const char *path);
 		// write/delete
 		status_t				WriteRelationToFile(const char *path, const char *relationType, const BMessage* relationConfig);
 		status_t                RemoveRelationForTypeAndTargetFromFile(const char* path, const char *relationType, const char *targetId);

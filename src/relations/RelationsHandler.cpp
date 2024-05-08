@@ -84,7 +84,7 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
 		return B_BAD_VALUE;
 	}
 
-	const char* srcId = GetOrCreateId(source);
+	const char* srcId = GetOrCreateId(source, true);
 	if (srcId == NULL) {
 		return B_ERROR;
 	}
@@ -101,7 +101,7 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
     relations->PrintToStream();
 
     // prepare target
-	const char* targetId = GetOrCreateId(target);
+	const char* targetId = GetOrCreateId(target, true);
 	if (targetId == NULL) {
 		return B_ERROR;
 	}
@@ -364,7 +364,7 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<
  * we use the inode as a stable file/dir reference
  * (for now, just like filesystem links, they have to stay on the same device)
  */
-const char* RelationsHandler::GetOrCreateId(const char *path)
+const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissing)
 {
     DEBUG("init node for path %s\n", path);
 
@@ -377,6 +377,10 @@ const char* RelationsHandler::GetOrCreateId(const char *path)
     BString id;
     status_t result = node.ReadAttrString(SEN_ID_ATTR, &id);
     if (result == B_ENTRY_NOT_FOUND) {
+        if (!createIfMissing) {
+            DEBUG("no ID found for path %s\n", path);
+            return NULL;
+        }
         id = GenerateId(&node);
         if (id != NULL) {
             DEBUG("generated new ID %s for path %s\n", id.String(), path);
@@ -423,8 +427,8 @@ int32 RelationsHandler::QueryForId(const BString& id, BEntry* result)
 	LOG("query for id %s\n", id.String());
 
 	BString predicate(BString(SEN_ID_ATTR) << " == " << id);
-	// all relation queries currently assume we never leave the boot volume
-    // todo: integrate ID generator from TSID source
+	// TODO: all relation queries currently assume we never leave the boot volume
+    // TODO: integrate ID generator from TSID source
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
@@ -433,29 +437,22 @@ int32 RelationsHandler::QueryForId(const BString& id, BEntry* result)
 	query.SetVolume(&bootVolume);
 	query.SetPredicate(predicate.String());
 
-	if (query.Fetch() != B_OK) {
-        return -1;
-    }
-    LOG("Results of query \"%s\":\n", predicate.String());
-
-    // result should always only contain a single id (inode)
-    // else, the relation references are corrupt and need to be repaired.
-    int32 resultCount = query.CountEntries();
-    if (resultCount > 1) {
-        DEBUG("multiple SEN:IDs found (%d), if not called from SEN, repair is needed!\n", resultCount);
-        return resultCount;
+	if (status_t result = query.Fetch() != B_OK) {
+        return result;
     }
     BEntry entry;
-    if (query.GetNextEntry(&entry) == B_OK) {
+    if (status_t result = query.GetNextEntry(&entry) != B_OK) {
+        if (result == B_ENTRY_NOT_FOUND) {
+            DEBUG("no matching file found for ID %s\n", id.String());
+            return 0;
+        }
+        ERROR("error resolving id %s\n", id.String());
+        return result;
+    }
+    else {
         BPath path;
         entry.GetPath(&path);
         LOG("found entry with path %s\n", path.Path());
-
-        result->SetTo(path.Path());
     }
-    else {
-        ERROR("error resolving id %s\n", id.String());
-        return -1;
-    }
-    return resultCount;
+    return 1;
 }

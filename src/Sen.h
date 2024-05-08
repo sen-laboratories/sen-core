@@ -33,7 +33,6 @@
 #define SEN_RELATION_SRC_ATTR       SEN_RELATION_ATTR "ID"
 #define SEN_RELATION_TARGET_ATTR    SEN_RELATION_ATTR "TO"
 
-
 // Message Replies
 #define SEN_RESULT_INFO				'SCri'
 #define SEN_RESULT_STATUS			'SCrs'
