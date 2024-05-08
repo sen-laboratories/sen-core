@@ -26,13 +26,12 @@ SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
     BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
-    watch_volume(bootVolume.Device(), B_WATCH_NAME | B_WATCH_STAT | B_WATCH_ATTR, this);
-
-    nodesExcludedFromWatch = new unordered_map<const char*, const entry_ref*>();
+    watch_volume(bootVolume.Device(), B_WATCH_NAME, this);
 }
 
 SenServer::~SenServer()
 {
+    stop_watching(this);
 }
 
 void SenServer::MessageReceived(BMessage* message)
@@ -95,9 +94,6 @@ void SenServer::MessageReceived(BMessage* message)
                                     senId.String(), node.Dup());
                                 break;
                             }
-                            // exclude node from monitoring so it doesn't trigger ATTR_REMOVED handling
-                            nodesExcludedFromWatch->insert({senId.String(), &ref});
-
                             // delete all SEN attributes of copy
                             DEBUG("found senId %s with exising node %s, removing attributes from copy...\n",
                                 senId.String(), path.Path());
@@ -122,9 +118,6 @@ void SenServer::MessageReceived(BMessage* message)
                                 }
                             }
                             DEBUG("removed %d attribute(s) from node %s\n", attrCount, path.Path());
-
-                            // remove node from excluded nodes to free up space
-                            nodesExcludedFromWatch->erase(senId.String());
                         } else {
                             DEBUG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
                                 name.String(), senId.String());
