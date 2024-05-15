@@ -22,10 +22,8 @@ virtual		~SenServer();
 virtual	void MessageReceived(BMessage* message);
 
 private:
-            RelationsHandler*       relationsHandler;
-            SenConfigHandler*       senConfigHandler;
-
-            BQuery*                 liveIdQuery;
+            RelationsHandler*  relationsHandler;
+            SenConfigHandler*  senConfigHandler;
 };
 
 

@@ -4,11 +4,11 @@ resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 
 resource app_version {
 	 major = 0,
-	 middle = 0,
-	 minor = 2,
+	 middle = 2,
+	 minor = 0,
 	 variety = B_APPV_ALPHA,
 	 internal = 0,
-	 short_info = "SEN server",
+	 short_info = "SEN Server",
 	 long_info = "Semantic ExteNsions server process providing an infrastructure for semantic relations and queries."
 };
 

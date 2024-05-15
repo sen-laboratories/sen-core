@@ -6,10 +6,15 @@
 
 #include "SenServer.h"
 #include "../Sen.h"
+#include "../relations/RelationsHandler.h"
 
+#include <AppFileInfo.h>
 #include <Entry.h>
+#include <MimeType.h>
 #include <NodeMonitor.h>
 #include <Path.h>
+#include <Resources.h>
+#include <Roster.h>
 #include <VolumeRoster.h>
 #include <Volume.h>
 #include <String.h>
@@ -18,14 +23,17 @@ using namespace std;
 
 SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 {
-	// setup handlers
+	// setup feature-specific handlers for redirecting messages appropriately
     relationsHandler = new RelationsHandler();
+    Looper()->AddHandler(relationsHandler);
     senConfigHandler = new SenConfigHandler();
+    Looper()->AddHandler(senConfigHandler);
 
 	// see also https://www.haiku-os.org/legacy-docs/bebook/BQuery_Overview.html#id611851
     BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
+    // watch for move (rename) and copy operations to ensure our SEN ID stays unique.
     watch_volume(bootVolume.Device(), B_WATCH_NAME, this);
 }
 
@@ -46,9 +54,34 @@ void SenServer::MessageReceived(BMessage* message)
 		{
 		 	result = B_OK;
 		 	reply->what = SEN_RESULT_INFO;
-		 	// TODO: get info from resource
-		 	reply->AddString("info", "SEN Core v0.2.0-proto2");
+		 	// get info from resource
+            app_info appInfo;
+            be_app->GetAppInfo(&appInfo);
 
+            BFile file(&appInfo.ref, B_READ_ONLY);
+            BAppFileInfo appFileInfo(&file);
+
+            if (appFileInfo.InitCheck() == B_OK)
+            {
+                version_info versionInfo;
+                if (appFileInfo.GetVersionInfo(&versionInfo, B_APP_VERSION_KIND) == B_OK) {
+                    BString info(versionInfo.short_info);
+                    BString version;
+                    version << versionInfo.major << "." << versionInfo.middle << "." << versionInfo.minor;
+                    info << " " << version;
+
+                    reply->AddString("result", info.String());
+                    reply->AddString("shortDescription", versionInfo.short_info);
+                    reply->AddString("longDescription", versionInfo.long_info);
+                    reply->AddString("version", version);
+                    reply->AddInt32("versionMajor", versionInfo.major);
+                    reply->AddInt32("versionMiddle", versionInfo.middle);
+                    reply->AddInt32("versionVariety", versionInfo.variety);
+                    reply->AddInt32("versionInternal", versionInfo.internal);
+                    break;
+                }
+            }
+            reply->AddString("result", "Error retrieving appInfo from resource!");
 		 	break;
 		}
 		case SEN_CORE_STATUS:
@@ -103,7 +136,8 @@ void SenServer::MessageReceived(BMessage* message)
 
                             while (status_t result = node.GetNextAttrName(attrName) >= 0) {
                                 if (result < 0) {
-                                    ERROR("failed to get next attribute from file %s: %u, possible SEN attributes left!\n", name.String(), result);
+                                    ERROR("failed to get next attribute from file %s: %u, "
+                                            "possible SEN attributes left!\n", name.String(), result);
                                     break;
                                 }
                                 if (BString(attrName).StartsWith(SEN_ATTRIBUTES_PREFIX)) {
@@ -129,10 +163,23 @@ void SenServer::MessageReceived(BMessage* message)
             }
             break;
         }
+
+        // Relations - fallthrough: handle all in separate handler
+        case SEN_RELATIONS_GET:
+        case SEN_RELATIONS_GET_ALL:
+		case SEN_RELATION_ADD:
+		case SEN_RELATION_REMOVE:
+		case SEN_RELATIONS_REMOVE_ALL:
+        {
+            DEBUG("Relation message recceived in SenServer, forwarding to RelationHandler...\n");
+            if (PostMessage(message, relationsHandler) != B_OK) {
+                ERROR("failed to forward message %u to RelationHandler!\n", message->what);
+            }
+            return;
+        }
 		default:
 		{
             LOG("SEN Server: unknown message '%u' received." B_UTF8_ELLIPSIS "\n", message->what);
-            return;
 		}
 	}
 	LOG("SEN server sending result %d\n", result);

@@ -29,6 +29,7 @@ void RelationsHandler::MessageReceived(BMessage* message)
 {
 	BMessage* reply = new BMessage();
 	status_t result = B_UNSUPPORTED;
+    LOG("RelationsHandler got message %u\n", message->what);
 
     switch(message->what)
     {
@@ -59,9 +60,8 @@ void RelationsHandler::MessageReceived(BMessage* message)
 		}
         default:
         {
-            LOG("RelationsHandler: unkown message received, handing over to parent: %u\n", message->what);
-            BHandler::MessageReceived(message);
-            return;
+            LOG("RelationsHandler: unkown message received: %u\n", message->what);
+            reply->AddString("cause", "cannot handle this message.");
         }
     }
     LOG("RelationsHandler sending reply %d\n", result);
@@ -73,14 +73,17 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
 {
 	const char* source = new char[B_FILE_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_SOURCE, &source)   != B_OK) {
+        reply->AddString("cause", "missing required parameter " SEN_RELATION_SOURCE);
 		return B_BAD_VALUE;
 	}
 	const char* relation = new char[B_ATTR_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_NAME, &relation) != B_OK) {
+        reply->AddString("cause", "missing required parameter " SEN_RELATION_NAME);
 		return B_BAD_VALUE;
 	}
 	const char* target = new char[B_FILE_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_TARGET, &target)   != B_OK) {
+        reply->AddString("cause", "missing required parameter " SEN_RELATION_TARGET);
 		return B_BAD_VALUE;
 	}
 
@@ -130,7 +133,7 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
             oldProperties.PrintToStream();
 
             reply->what = SEN_RESULT_RELATIONS;
-            reply->AddString("statusMessage", BString("relation with same properties already exists"));
+            reply->AddString("status", BString("relation with same properties already exists"));
 
             return B_OK;
         }
@@ -154,7 +157,7 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
     if (flatten_status != B_OK) {
         ERROR("failed to store relation properties for relation %s in file %s\n", relation, source);
             reply->what = SEN_RESULT_RELATIONS;
-            reply->AddString("statusMessage", BString("failed to create relation '") << relation << "' from "
+            reply->AddString("status", BString("failed to create relation '") << relation << "' from "
             << source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]: \n"
             << flatten_status);
         return B_ERROR;
@@ -170,7 +173,7 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
     if (writeSizeStatus <= 0) {
         ERROR("failed to store relation %s for file %s\n", relation, source);
         	reply->what = SEN_RESULT_RELATIONS;
-            reply->AddString("statusMessage", BString("failed to create relation '") << relation << "' from "
+            reply->AddString("status", BString("failed to create relation '") << relation << "' from "
             << source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]: \n"
             << writeSizeStatus);
         return B_ERROR;
@@ -180,7 +183,7 @@ status_t RelationsHandler::AddRelation(BMessage* message, BMessage* reply)
     relations->PrintToStream();
 
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("created relation '") << relation << "' from "
+	reply->AddString("status", BString("created relation '") << relation << "' from "
 		<< source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]");
 
 	return B_OK;
@@ -190,9 +193,10 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
 {
 	BString source;
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
+        reply->AddString("cause", "missing required parameter " SEN_RELATION_SOURCE);
 		return B_BAD_VALUE;
 	}
-    bool withProperties = message->GetBool("withProperties");
+    bool withProperties = message->GetBool("properties");
 
     BStringList* relationNames = ReadRelationNames(source.String());
     if (relationNames == NULL) {
@@ -213,7 +217,7 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
     }
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings("relations", *relationNames);
-    reply->AddString("statusMessage", BString("got ")
+    reply->AddString("status", BString("got ")
         << relationNames->CountStrings() << " relation(s) from " << source);
 
 	return B_OK;
@@ -223,21 +227,24 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 {
 	BString source;
 	if (message->FindString(SEN_RELATION_SOURCE, &source) != B_OK) {
+        reply->AddString("cause", "missing required parameter " SEN_RELATION_SOURCE);
 		return B_BAD_VALUE;
 	}
     const char* relation = new char[B_ATTR_NAME_LENGTH];
 	if (message->FindString(SEN_RELATION_NAME, &relation) != B_OK) {
+        reply->AddString("cause", "missing required parameter " SEN_RELATION_NAME);
 		return B_BAD_VALUE;
 	}
 
     BMessage* relations = ReadRelationsOfType(source.String(), relation);
     if (relations == NULL) {
+        reply->AddString("cause", "failed to retrieve relations of given type.");
         return B_ERROR;
     }
 
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddMessage("result", relations);
-    reply->AddString("statusMessage", BString("retrieved ") << relations->CountNames(B_STRING_TYPE)
+    reply->AddString("status", BString("retrieved ") << relations->CountNames(B_STRING_TYPE)
         << " relations from " << source);
 
 	return B_OK;
@@ -297,7 +304,7 @@ status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* rep
 	}
 
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("removed relation ") << relation << " from " << source);
+	reply->AddString("status", BString("removed relation ") << relation << " from " << source);
 
 	return B_OK;
 }
@@ -310,7 +317,7 @@ status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage*
 	}
 
 	reply->what = SEN_RESULT_RELATIONS;
-	reply->AddString("statusMessage", BString("removed all relations from ") << source);
+	reply->AddString("status", BString("removed all relations from ") << source);
 
 	return B_OK;
 }
