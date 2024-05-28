@@ -17,17 +17,6 @@
 // used in file types
 #define SEN_RELATION_SUPERTYPE "relation/"
 
-// used in messages
-#define SEN_RELATION_SOURCE "SEN:source"
-#define SEN_RELATION_NAME   "SEN:relation"
-#define SEN_RELATION_TARGET "SEN:target"
-
-#define SEN_RELATIONS_GET           'SCrg'
-#define SEN_RELATIONS_GET_ALL       'SCrl'
-#define SEN_RELATION_ADD	        'SCra'
-#define SEN_RELATION_REMOVE	    	'SCrr'
-#define SEN_RELATIONS_REMOVE_ALL    'SCrd'
-
 class RelationsHandler : public BHandler {
 
 public:

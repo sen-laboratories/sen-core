@@ -17,12 +17,23 @@
 #define ERROR(x...)		fprintf(stderr, x);
 
 // core
-
 #define SEN_CORE_INFO 				'SCin'
 #define SEN_CORE_STATUS 			'SCst'
+// todo: obsolete
 #define SEN_CORE_INSTALL			'SCis'
 // validate and repair config
 #define SEN_CORE_CHECK				'SCck'
+
+// relations
+#define SEN_RELATION_SOURCE "SEN:source"
+#define SEN_RELATION_NAME   "SEN:relation"
+#define SEN_RELATION_TARGET "SEN:target"
+
+#define SEN_RELATIONS_GET           'SCrg'
+#define SEN_RELATIONS_GET_ALL       'SCrl'
+#define SEN_RELATION_ADD	        'SCra'
+#define SEN_RELATION_REMOVE	    	'SCrr'
+#define SEN_RELATIONS_REMOVE_ALL    'SCrd'
 
 #define SEN_ATTRIBUTES_PREFIX		"SEN:"
 // used on any linked file
