@@ -14,9 +14,6 @@
 #include <Query.h>
 #include <StringList.h>
 
-// used in file types
-#define SEN_RELATION_SUPERTYPE "relation"
-
 class RelationsHandler : public BHandler {
 
 public:

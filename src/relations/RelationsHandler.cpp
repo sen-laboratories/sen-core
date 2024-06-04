@@ -83,7 +83,7 @@ status_t RelationsHandler::GetMessageParameter(
 		return B_BAD_VALUE;
 	}
     // remove Relation supertype for relation params
-    if (BString(param) == SEN_RELATION_NAME) {
+    if (BString(param) == SEN_RELATION_TYPE) {
         if (StripSuperType(const_cast<char **>(buffer))) {
             DEBUG("removed supertype " SEN_RELATION_SUPERTYPE " into %s\n", *buffer);
         }
@@ -148,8 +148,9 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 
     // we allow multipe relations of the same type to the same target
     // (e.g. a note for the same text referencing different locations in the referenced text).
-    // Hence, we have a Message with targetId as key pointing to 1-N messages with relation properties for that target.
-    // since there is no method BMessage::FindMessages() to collect them all, we need to iterate.
+    // Hence, we have a Message with targetId as key pointing to 1-N messages with relation properties
+    // for that target.
+    // Since there is no method BMessage::FindMessages() to collect them all, we need to iterate.
     BMessage oldProperties;
     int index = 0;
     while (relations->FindMessage(targetId, index, &oldProperties) == B_OK) {
@@ -174,7 +175,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         DEBUG("adding new target %s for relation %s\n", targetId, relation);
         relations->AddString(SEN_TO_ATTR, targetId);
     }
-    // add new relation with properties
+    // add new relation properties for target
     relations->AddMessage(targetId, &properties);
     DEBUG("new relation properties for relation %s and target %s:\n", relation, target);
     properties.PrintToStream();
@@ -250,7 +251,8 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
         }
     }
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddStrings("relations", *relationNames);
+    reply->AddStrings(SEN_RELATIONS, *relationNames);
+    reply->AddString(SEN_ID_ATTR, GetOrCreateId(source));
     reply->AddString("status", BString("got ")
         << relationNames->CountStrings() << " relation(s) from " << source);
 
@@ -264,7 +266,7 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 		return B_BAD_VALUE;
 	}
     const char* relation = new char[B_ATTR_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_NAME, &relation)  != B_OK) {
+	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relation)  != B_OK) {
 		return B_BAD_VALUE;
 	}
 
@@ -275,7 +277,7 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
     }
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddMessage("relations", relations);
+    reply->AddMessage(SEN_RELATIONS, relations);
     reply->AddString("status", BString("retrieved ") << relations->CountNames(B_STRING_TYPE)
         << " relations from " << source);
 
@@ -323,20 +325,20 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     BStringList ids;
     BObjectList<BEntry> entries;
     resultMsg->FindStrings(SEN_TO_ATTR, &ids);
+    // copy all but SEN internal properties over as relation properties
+    BMessage relationProps(*resultMsg);
+    relationProps.RemoveName(SEN_TO_ATTR);
 
     if (ResolveRelationTargets(&ids, &entries) == B_OK) {
         DEBUG("got %d relation targets for type %s and file %s, resolving entries...\n",
             entries.CountItems(), relationType, path);
 
         for (int32 i = 0; i < entries.CountItems(); i++) {
-            LOG("adding entry #%d\n", i);
             entry_ref ref;
             BEntry entry = *entries.ItemAt(i);
             if (entry.InitCheck() == B_OK) {
-                LOG("got entry %s\n", entry.Name());
                 if (entry.GetRef(&ref) == B_OK) {
                     reply->AddRef("refs", &ref);
-                    LOG("adding path %s for relation %s of file %s.\n", ref.name, relationType, path);
                 } else {
                     ERROR("failed to resolve ref for target %s of relation %s and file %s.\n",
                         ids.StringAt(i).String(), relationType, path);
@@ -484,10 +486,6 @@ const char* RelationsHandler::GenerateId(BNode* node) {
 }
 
 const char* RelationsHandler::GetAttributeNameForRelation(BString relationType) {
-    // cut supertype "relation" if present
-    if (relationType.StartsWith(SEN_RELATION_SUPERTYPE)) {
-        relationType.Remove(0, BString(SEN_RELATION_ATTR_PREFIX).Length());
-    }
     return BString(SEN_RELATION_ATTR_PREFIX).Append(relationType).String();
 }
 
