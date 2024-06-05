@@ -75,46 +75,46 @@ void RelationsHandler::MessageReceived(BMessage* message)
 
 status_t RelationsHandler::GetMessageParameter(
     const BMessage* message, BMessage* reply,
-    const char* param, const char** buffer,
+    const char* param, BString* buffer,
     bool mandatory) {
 
     if (message->FindString(param, buffer) != B_OK) {
-        reply->AddString("cause", "missing required parameter " SEN_RELATION_SOURCE);
+        reply->AddString("cause", (new BString("missing required parameter "))->Append(param).String());
 		return B_BAD_VALUE;
 	}
-    // remove Relation supertype for relation params
+    // remove Relation supertype for relation params for internal handling
     if (BString(param) == SEN_RELATION_TYPE) {
-        if (StripSuperType(const_cast<char **>(buffer))) {
-            DEBUG("removed supertype " SEN_RELATION_SUPERTYPE " into %s\n", *buffer);
-        }
+        buffer = StripSuperType(buffer);
     }
     return B_OK;
 }
 
-bool RelationsHandler::StripSuperType(char** type) {
-    BString mimeType(*type);
-    if (mimeType.StartsWith(SEN_RELATION_SUPERTYPE "/")) {
-        mimeType.Remove(0, sizeof(SEN_RELATION_SUPERTYPE));
-        *type = const_cast<char *>(mimeType.String());
-        return true;
+BString* RelationsHandler::StripSuperType(BString* mimeType) {
+    if (mimeType->StartsWith(SEN_RELATION_SUPERTYPE "/")) {
+        mimeType->Remove(0, sizeof(SEN_RELATION_SUPERTYPE));
     }
-    return false;
+    return mimeType;
 }
 
 status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 {
-	const char* source = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &source)  != B_OK) {
+	BString sourceParam;
+	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
 		return B_BAD_VALUE;
 	}
-	const char* relation = new char[B_ATTR_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_NAME, &relation)  != B_OK) {
+    const char* source = sourceParam.String();
+
+	BString relationType;
+	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType)  != B_OK) {
 		return B_BAD_VALUE;
 	}
-	const char* target = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_TARGET, &target)  != B_OK) {
+    const char* relation = relationType.String();
+
+	BString targetParam;
+	if (GetMessageParameter(message, reply, SEN_RELATION_TARGET, &targetParam)  != B_OK) {
 		return B_BAD_VALUE;
 	}
+    const char* target = targetParam.String();
 
 	const char* srcId = GetOrCreateId(source, true);
 	if (srcId == NULL) {
@@ -144,7 +144,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     // remove internal SEN properties
 	properties.RemoveData(SEN_RELATION_SOURCE);
 	properties.RemoveData(SEN_RELATION_TARGET);
-	properties.RemoveData(SEN_RELATION_NAME);
+	properties.RemoveData(SEN_RELATION_TYPE);
 
     // we allow multipe relations of the same type to the same target
     // (e.g. a note for the same text referencing different locations in the referenced text).
@@ -215,7 +215,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         return B_ERROR;
     }
 
-    DEBUG("created relation from src %s to target %s with properties:\n", srcId, targetId);
+    DEBUG("created relation %s from src %s to target %s with properties:\n", relation, srcId, targetId);
     relations->PrintToStream();
 
 	reply->what = SEN_RESULT_RELATIONS;
@@ -227,10 +227,11 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 
 status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
-	const char* source = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &source)  != B_OK) {
+	BString sourceParam;
+	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
 		return B_BAD_VALUE;
 	}
+    const char* source = sourceParam.String();
     bool withProperties = message->GetBool("properties");
 
     BStringList* relationNames = ReadRelationNames(source);
@@ -261,14 +262,17 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
 
 status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage* reply)
 {
-	const char* source = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &source)  != B_OK) {
+	BString sourceParam;
+	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
 		return B_BAD_VALUE;
 	}
-    const char* relation = new char[B_ATTR_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relation)  != B_OK) {
+    const char* source = sourceParam.String();
+
+	BString relationType;
+	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType)  != B_OK) {
 		return B_BAD_VALUE;
 	}
+    const char* relation = relationType.String();
 
     BMessage* relations = ReadRelationsOfType(source, relation, reply);
     if (relations == NULL) {
@@ -325,9 +329,6 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     BStringList ids;
     BObjectList<BEntry> entries;
     resultMsg->FindStrings(SEN_TO_ATTR, &ids);
-    // copy all but SEN internal properties over as relation properties
-    BMessage relationProps(*resultMsg);
-    relationProps.RemoveName(SEN_TO_ATTR);
 
     if (ResolveRelationTargets(&ids, &entries) == B_OK) {
         DEBUG("got %d relation targets for type %s and file %s, resolving entries...\n",
@@ -357,14 +358,17 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
 
 status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* reply)
 {
-	const char* source = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &source)  != B_OK) {
+	BString sourceParam;
+	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
 		return B_BAD_VALUE;
 	}
-	const char* relation = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_NAME, &relation)  != B_OK) {
+    const char* source = sourceParam.String();
+
+	BString relationType;
+	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType)  != B_OK) {
 		return B_BAD_VALUE;
 	}
+    const char* relation = relationType.String();
 
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("status", BString("removed relation ") << relation << " from " << source);
@@ -374,10 +378,11 @@ status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* rep
 
 status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
 {
-	const char* source = new char[B_FILE_NAME_LENGTH];
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &source)  != B_OK) {
+	BString sourceParam;
+	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
 		return B_BAD_VALUE;
 	}
+    const char* source = sourceParam.String();
 
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("status", BString("removed all relations from ") << source);
@@ -485,8 +490,12 @@ const char* RelationsHandler::GenerateId(BNode* node) {
 	}
 }
 
-const char* RelationsHandler::GetAttributeNameForRelation(BString relationType) {
-    return BString(SEN_RELATION_ATTR_PREFIX).Append(relationType).String();
+const char* RelationsHandler::GetAttributeNameForRelation(const char* relationType) {
+    BString relationAttributeName(relationType);
+    if (! relationAttributeName.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
+        return relationAttributeName.Prepend(SEN_RELATION_ATTR_PREFIX).String();
+    }
+    return relationAttributeName.String();
 }
 
 int32 RelationsHandler::QueryForId(const BString& id, BEntry* entry)

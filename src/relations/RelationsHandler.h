@@ -44,11 +44,11 @@ private:
 		status_t            RemoveAllRelationsFromFile(const char* path);
 
 		// helper methods
-        bool                StripSuperType(char** type);
+        BString*            StripSuperType(BString* type);
         status_t            GetMessageParameter(const BMessage* message, BMessage* reply,
-                                const char* param, const char** buffer, bool mandatory = false);
+                                const char* param, BString* buffer, bool mandatory = false);
         const char*         GenerateId(BNode* node);
-        const char*         GetAttributeNameForRelation(BString relationType);
+        const char*         GetAttributeNameForRelation(const char* relationType);
 		static bool         AddOrUpdateRelationTarget(const char* relationType,
                                 BMessage* newRelationTarget, BMessage* existingRelation);
 };
