@@ -26,7 +26,7 @@ public:
         // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
 		const char*		     		GetOrCreateId(const char *path, bool createIfMissing = false);
-		int32                       QueryForId(const BString& id, BEntry* entry);
+		status_t                    QueryForId(const BString& id, BEntry* entry);
 
 virtual
         void MessageReceived(BMessage* message);

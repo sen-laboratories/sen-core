@@ -422,10 +422,10 @@ BStringList* RelationsHandler::ReadRelationNames(const char* path)
 status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<BEntry> *result)
 {
 	DEBUG("resolving ids from list with %d targets...\n", ids->CountStrings())
-	BEntry entry;
 
     for (int i = 0; i < ids->CountStrings(); i++) {
-		if (QueryForId(ids->StringAt(i), &entry) == 1) {    // we expect a unique result here!
+        BEntry entry;
+		if (QueryForId(ids->StringAt(i), &entry) == B_OK) {
             LOG("adding entry %s.\n", entry.Name());
             result->AddItem(new BEntry(entry));
         } else {
@@ -498,11 +498,11 @@ const char* RelationsHandler::GetAttributeNameForRelation(const char* relationTy
     return relationAttributeName.String();
 }
 
-int32 RelationsHandler::QueryForId(const BString& id, BEntry* entry)
+status_t RelationsHandler::QueryForId(const BString& id, BEntry* entry)
 {
 	LOG("query for id %s\n", id.String());
 
-	BString predicate(BString(SEN_ID_ATTR) << " == " << id);
+	BString predicate(BString(SEN_ID_ATTR) << "==" << id);
 	// TODO: all relation queries currently assume we never leave the boot volume
     // TODO: integrate ID generator from TSID source
 	BVolumeRoster volRoster;
@@ -514,20 +514,29 @@ int32 RelationsHandler::QueryForId(const BString& id, BEntry* entry)
 	query.SetPredicate(predicate.String());
 
 	if (status_t result = query.Fetch() != B_OK) {
+        ERROR("could not execute query for SEN:ID %s: %s\n", id.String(), strerror(result));
         return result;
     }
     if (status_t result = query.GetNextEntry(entry) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
             DEBUG("no matching file found for ID %s\n", id.String());
-            return 0;
+            return B_OK;
         }
-        ERROR("error resolving id %s\n", id.String());
+        // something other went wrong
+        ERROR("error resolving id %s: %s\n", id.String(), strerror(result));
         return result;
     }
     else {
+        entry_ref ref;
+        if (query.GetNextRef(&ref) == B_OK) {
+            // this should never happen as the SEN:ID MUST be unique!
+            ERROR("Critical error SEN:ID %s is NOT unique!\n", id.String());
+            return B_DUPLICATE_REPLY;
+        }
         BPath path;
         entry->GetPath(&path);
         LOG("found entry with path %s\n", path.Path());
+        query.Clear();
     }
-    return 1;
+    return B_OK;
 }

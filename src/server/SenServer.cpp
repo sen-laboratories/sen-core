@@ -19,8 +19,6 @@
 #include <Volume.h>
 #include <String.h>
 
-using namespace std;
-
 SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 {
 	// setup feature-specific handlers for redirecting messages appropriately
@@ -39,6 +37,7 @@ SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 
 SenServer::~SenServer()
 {
+    DEBUG("Goodbye:)\n");
     stop_watching(this);
 }
 
@@ -46,8 +45,6 @@ void SenServer::MessageReceived(BMessage* message)
 {
 	BMessage* reply = new BMessage();
 	status_t result = B_UNSUPPORTED;
-
-    LOG("in SEN Server::MessageReceived\n");
 
 	switch (message->what) {
 		case SEN_CORE_INFO:
@@ -99,8 +96,7 @@ void SenServer::MessageReceived(BMessage* message)
             int32 opcode;
             if (message->FindInt32("opcode", &opcode) == B_OK) {
                 switch (opcode) {
-                    case B_ENTRY_CREATED:
-                    {
+                    case B_ENTRY_CREATED: {
                         entry_ref ref;
                         BString name;
 
@@ -112,7 +108,6 @@ void SenServer::MessageReceived(BMessage* message)
                         BNode node(&ref);
                         BPath path(&ref);
 
-                        DEBUG("NodeMonitor::B_ENTRY_CREATED: %s\n", path.Path());
                         const char *id = relationsHandler->GetOrCreateId(path.Path());
                         if (id == NULL) {
                             break;
@@ -120,15 +115,16 @@ void SenServer::MessageReceived(BMessage* message)
 
                         BString senId(id);
                         BEntry existingEntry;
-                        if (relationsHandler->QueryForId(senId, &existingEntry) == 1) {
+
+                        if (relationsHandler->QueryForId(senId, &existingEntry) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
-                                DEBUG("senId %s refers to same node %d, nothing to do.",
+                                DEBUG("SEN:ID %s refers to same node %d, nothing to do.",
                                     senId.String(), node.Dup());
                                 break;
                             }
                             // delete all SEN attributes of copy
-                            DEBUG("found senId %s with exising node %s, removing attributes from copy...\n",
+                            DEBUG("found SEN:ID %s with exising node %s, removing attributes from copy...\n",
                                 senId.String(), path.Path());
 
                             char attrName[B_ATTR_NAME_LENGTH];
@@ -171,7 +167,6 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL:
         {
-            DEBUG("Relation message recceived in SenServer, forwarding to RelationHandler...\n");
             if (PostMessage(message, relationsHandler) != B_OK) {
                 ERROR("failed to forward message %u to RelationHandler!\n", message->what);
             }
