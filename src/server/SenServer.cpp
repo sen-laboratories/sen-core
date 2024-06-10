@@ -91,6 +91,21 @@ void SenServer::MessageReceived(BMessage* message)
 
 		 	break;
 		}
+        case SEN_QUERY_ID:
+        {
+            BString id;
+            BEntry entry;
+            if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
+                if ((result = relationsHandler->QueryById(id.String(), &entry)) == B_OK) {
+                    if ((result = entry.InitCheck()) == B_OK) {
+                        entry_ref* ref = new entry_ref;
+                        entry.GetRef(ref);
+                        reply->AddRef("ref", ref);
+                    }
+                }
+            }
+            break;
+        }
         case B_NODE_MONITOR:
         {
             int32 opcode;
@@ -113,19 +128,18 @@ void SenServer::MessageReceived(BMessage* message)
                             break;
                         }
 
-                        BString senId(id);
                         BEntry existingEntry;
 
-                        if (relationsHandler->QueryForId(senId, &existingEntry) == B_OK) {
+                        if (relationsHandler->QueryById(id, &existingEntry) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
                                 DEBUG("SEN:ID %s refers to same node %d, nothing to do.",
-                                    senId.String(), node.Dup());
+                                    id, node.Dup());
                                 break;
                             }
                             // delete all SEN attributes of copy
                             DEBUG("found SEN:ID %s with exising node %s, removing attributes from copy...\n",
-                                senId.String(), path.Path());
+                                id, path.Path());
 
                             char attrName[B_ATTR_NAME_LENGTH];
                             int attrCount = 0;
@@ -150,7 +164,7 @@ void SenServer::MessageReceived(BMessage* message)
                             DEBUG("removed %d attribute(s) from node %s\n", attrCount, path.Path());
                         } else {
                             DEBUG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
-                                name.String(), senId.String());
+                                name.String(), id);
                         }
                         break;
                     }

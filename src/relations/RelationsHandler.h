@@ -26,7 +26,7 @@ public:
         // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
 		const char*		     		GetOrCreateId(const char *path, bool createIfMissing = false);
-		status_t                    QueryForId(const BString& id, BEntry* entry);
+		status_t                    QueryById(const char* id, BEntry* entry);
 
 virtual
         void MessageReceived(BMessage* message);
@@ -46,7 +46,7 @@ private:
 		// helper methods
         BString*            StripSuperType(BString* type);
         status_t            GetMessageParameter(const BMessage* message, BMessage* reply,
-                                const char* param, BString* buffer, bool mandatory = false);
+                                const char* param, BString* buffer, bool mandatory = true);
         const char*         GenerateId(BNode* node);
         const char*         GetAttributeNameForRelation(const char* relationType);
 		static bool         AddOrUpdateRelationTarget(const char* relationType,

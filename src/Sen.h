@@ -23,6 +23,8 @@
 #define SEN_CORE_INSTALL			'SCis'
 // validate and repair config
 #define SEN_CORE_CHECK				'SCck'
+// core functionality
+#define SEN_QUERY_ID 			    'SCqi'
 
 // Actions for communication with clients
 #define SEN_ACTION_CMD		"SEN:action"
@@ -30,7 +32,9 @@
 // relations
 // used in file types
 #define SEN_RELATION_SUPERTYPE "relation"
-#define SEN_RELATION_SOURCE "SEN:source"
+#define SEN_RELATION_SOURCE    "SEN:source"
+#define SEN_RELATION_SOURCE_ID "SEN:sourceId"
+#define SEN_RELATION_TARGET_ID "SEN:targetId"
 // used for relations in messages
 #define SEN_RELATIONS "SEN:relations"
 // short name of the relation type
@@ -43,11 +47,11 @@
 #define SEN_RELATION_PROPERTIES "SEN:relationProps"
 
 // messages
-#define SEN_RELATIONS_GET           'SCrg'
-#define SEN_RELATIONS_GET_ALL       'SCrl'
-#define SEN_RELATION_ADD	        'SCra'
-#define SEN_RELATION_REMOVE	    	'SCrr'
-#define SEN_RELATIONS_REMOVE_ALL    'SCrd'
+#define SEN_RELATIONS_GET           'SRgo'
+#define SEN_RELATIONS_GET_ALL       'SRga'
+#define SEN_RELATION_ADD	        'SRad'
+#define SEN_RELATION_REMOVE	    	'SRrm'
+#define SEN_RELATIONS_REMOVE_ALL    'SRra'
 
 // Tracker integration
 #define SEN_OPEN_RELATION_VIEW		    'STor'
@@ -64,7 +68,7 @@
 #define SEN_RELATION_ATTR_PREFIX    SEN_ATTRIBUTES_PREFIX "REL:"
 // used only for ad-hoc created relation files pointing to the target
 #define SEN_RELATION_SOURCE_ATTR    SEN_RELATION_ATTR_PREFIX "ID"
-#define SEN_RELATION_TARGET_ATTR    SEN_RELATION_ATTR "TO"
+#define SEN_RELATION_TARGET_ATTR    SEN_RELATION_ATTR_PREFIX "TO"
 
 // Message Replies
 #define SEN_RESULT_INFO				'SCri'

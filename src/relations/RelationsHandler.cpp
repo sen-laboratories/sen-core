@@ -29,7 +29,8 @@ void RelationsHandler::MessageReceived(BMessage* message)
 {
 	BMessage* reply = new BMessage();
 	status_t result = B_UNSUPPORTED;
-    LOG("RelationsHandler got message %u\n", message->what);
+    LOG("RelationsHandler got message:\n");
+    message->PrintToStream();
 
     switch(message->what)
     {
@@ -78,7 +79,8 @@ status_t RelationsHandler::GetMessageParameter(
     const char* param, BString* buffer,
     bool mandatory) {
 
-    if (message->FindString(param, buffer) != B_OK) {
+    if (mandatory && (message->FindString(param, buffer) != B_OK)) {
+        ERROR("failed to read required param '%s'.\n", param);
         reply->AddString("cause", (new BString("missing required parameter "))->Append(param).String());
 		return B_BAD_VALUE;
 	}
@@ -425,7 +427,7 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<
 
     for (int i = 0; i < ids->CountStrings(); i++) {
         BEntry entry;
-		if (QueryForId(ids->StringAt(i), &entry) == B_OK) {
+		if (QueryById(ids->StringAt(i).String(), &entry) == B_OK) {
             LOG("adding entry %s.\n", entry.Name());
             result->AddItem(new BEntry(entry));
         } else {
@@ -442,8 +444,6 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<
  */
 const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissing)
 {
-    DEBUG("init node for path %s\n", path);
-
 	BNode node(path);
 	if (node.InitCheck() != B_OK) {
 		ERROR("failed to initialize node for path %s\n", path);
@@ -454,7 +454,6 @@ const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissi
     status_t result = node.ReadAttrString(SEN_ID_ATTR, &id);
     if (result == B_ENTRY_NOT_FOUND) {
         if (!createIfMissing) {
-            DEBUG("no ID found for path %s\n", path);
             return NULL;
         }
         id = GenerateId(&node);
@@ -498,9 +497,9 @@ const char* RelationsHandler::GetAttributeNameForRelation(const char* relationTy
     return relationAttributeName.String();
 }
 
-status_t RelationsHandler::QueryForId(const BString& id, BEntry* entry)
+status_t RelationsHandler::QueryById(const char* id, BEntry* entry)
 {
-	LOG("query for id %s\n", id.String());
+	LOG("query for id %s\n", id);
 
 	BString predicate(BString(SEN_ID_ATTR) << "==" << id);
 	// TODO: all relation queries currently assume we never leave the boot volume
@@ -514,23 +513,23 @@ status_t RelationsHandler::QueryForId(const BString& id, BEntry* entry)
 	query.SetPredicate(predicate.String());
 
 	if (status_t result = query.Fetch() != B_OK) {
-        ERROR("could not execute query for SEN:ID %s: %s\n", id.String(), strerror(result));
+        ERROR("could not execute query for SEN:ID %s: %s\n", id, strerror(result));
         return result;
     }
     if (status_t result = query.GetNextEntry(entry) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
-            DEBUG("no matching file found for ID %s\n", id.String());
+            DEBUG("no matching file found for ID %s\n", id);
             return B_OK;
         }
         // something other went wrong
-        ERROR("error resolving id %s: %s\n", id.String(), strerror(result));
+        ERROR("error resolving id %s: %s\n", id, strerror(result));
         return result;
     }
     else {
         entry_ref ref;
         if (query.GetNextRef(&ref) == B_OK) {
             // this should never happen as the SEN:ID MUST be unique!
-            ERROR("Critical error SEN:ID %s is NOT unique!\n", id.String());
+            ERROR("Critical error SEN:ID %s is NOT unique!\n", id);
             return B_DUPLICATE_REPLY;
         }
         BPath path;
