@@ -150,7 +150,7 @@ void SenServer::MessageReceived(BMessage* message)
                                             "possible SEN attributes left!\n", name.String(), result);
                                     break;
                                 }
-                                if (BString(attrName).StartsWith(SEN_ATTRIBUTES_PREFIX)) {
+                                if (BString(attrName).StartsWith(SEN_ATTR_PREFIX)) {
                                     DEBUG("checking SEN attribute %s of node %s\n", attrName, name.String());
                                     if (node.RemoveAttr(attrName) != B_OK) {
                                         ERROR("failed to remove SEN attribute %s from node %s\n",
@@ -181,18 +181,19 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL:
         {
-            if (PostMessage(message, relationsHandler) != B_OK) {
-                ERROR("failed to forward message %u to RelationHandler!\n", message->what);
+            if ((result = PostMessage(message, relationsHandler)) == B_OK) {
+                return; // done
             }
-            return;
+            ERROR("failed to forward message %u to RelationHandler!\n", message->what);
+            break;
         }
 		default:
 		{
             LOG("SEN Server: unknown message '%u' received." B_UTF8_ELLIPSIS "\n", message->what);
 		}
 	}
-	LOG("SEN server sending result %d\n", result);
-	reply->AddInt32("result", result);
+	reply->AddInt32("resultCode", result);
+	reply->AddString("result", strerror(result));
 	message->SendReply(reply);
 }
 

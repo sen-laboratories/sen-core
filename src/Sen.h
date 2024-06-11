@@ -61,11 +61,11 @@
 #define SEN_ID_LEN					32
 
 // used on any linked file
-#define SEN_ATTRIBUTES_PREFIX		"SEN:"
-#define SEN_ID_ATTR        			SEN_ATTRIBUTES_PREFIX "ID"
-#define SEN_TO_ATTR        			SEN_ATTRIBUTES_PREFIX "TO"
-#define SEN_META_ATTR               SEN_ATTRIBUTES_PREFIX "META"
-#define SEN_RELATION_ATTR_PREFIX    SEN_ATTRIBUTES_PREFIX "REL:"
+#define SEN_ATTR_PREFIX     		"SEN:"
+#define SEN_ID_ATTR        			SEN_ATTR_PREFIX "ID"
+#define SEN_TO_ATTR        			SEN_ATTR_PREFIX "TO"
+#define SEN_META_ATTR               SEN_ATTR_PREFIX "META"
+#define SEN_RELATION_ATTR_PREFIX    SEN_ATTR_PREFIX "REL:"
 // used only for ad-hoc created relation files pointing to the target
 #define SEN_RELATION_SOURCE_ATTR    SEN_RELATION_ATTR_PREFIX "ID"
 #define SEN_RELATION_TARGET_ATTR    SEN_RELATION_ATTR_PREFIX "TO"
