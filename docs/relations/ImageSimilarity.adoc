@@ -1,4 +1,0 @@
-# Example Extractor for Image Similarity
-
-using https://github.com/JohannesBuchner/imagehash/
-
