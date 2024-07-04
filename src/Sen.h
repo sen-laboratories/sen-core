@@ -49,6 +49,9 @@
 // messages
 #define SEN_RELATIONS_GET           'SRgo'
 #define SEN_RELATIONS_GET_ALL       'SRga'
+#define SEN_RELATIONS_GET_SELF      'SRsg'
+#define SEN_RELATIONS_GET_ALL_SELF  'SRsa'
+
 #define SEN_RELATION_ADD	        'SRad'
 #define SEN_RELATION_REMOVE	    	'SRrm'
 #define SEN_RELATIONS_REMOVE_ALL    'SRra'

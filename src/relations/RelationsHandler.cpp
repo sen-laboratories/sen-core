@@ -4,9 +4,6 @@
  * Distributed under the terms of the MIT License.
  */
 
-#include "RelationsHandler.h"
-#include "../Sen.h"
-
 #include <fs_attr.h>
 #include <Node.h>
 #include <Path.h>
@@ -15,6 +12,9 @@
 #include <StringList.h>
 #include <VolumeRoster.h>
 #include <Volume.h>
+
+#include "RelationsHandler.h"
+#include "../Sen.h"
 
 RelationsHandler::RelationsHandler()
     : BHandler("SenRelationsHandler")
@@ -42,6 +42,16 @@ void RelationsHandler::MessageReceived(BMessage* message)
         case SEN_RELATIONS_GET_ALL:
 		{
 			result = GetAllRelations(message, reply);
+			break;
+		}
+		case SEN_RELATIONS_GET_SELF:
+		{
+			result = GetSelfRelationsOfType(message, reply);
+			break;
+		}
+        case SEN_RELATIONS_GET_ALL_SELF:
+		{
+			result = GetSelfRelations(message, reply);
 			break;
 		}
 		case SEN_RELATION_ADD:

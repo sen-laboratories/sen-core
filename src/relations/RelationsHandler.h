@@ -19,19 +19,23 @@ class RelationsHandler : public BHandler {
 public:
 		RelationsHandler();
 
-		status_t					AddRelation (const BMessage* message, BMessage* reply);
-		status_t		    		GetRelationsOfType  (const BMessage* message, BMessage* reply);
-		status_t					GetAllRelations     (const BMessage* message, BMessage* reply);
-		status_t					RemoveRelation      (const BMessage* message, BMessage* reply);
+		status_t					AddRelation            (const BMessage* message, BMessage* reply);
+		status_t		    		GetRelationsOfType     (const BMessage* message, BMessage* reply);
+		status_t					GetAllRelations        (const BMessage* message, BMessage* reply);
+        status_t                    GetSelfRelations       (const BMessage* message, BMessage* reply);
+        status_t                    GetSelfRelationsOfType (const BMessage* message, BMessage* reply);
+		status_t					RemoveRelation         (const BMessage* message, BMessage* reply);
         // delete all relations of a given type, e.g. when a related file is deleted
-		status_t					RemoveAllRelations  (const BMessage* message, BMessage* reply);
-		const char*		     		GetOrCreateId(const char *path, bool createIfMissing = false);
-		status_t                    QueryById(const char* id, BEntry* entry);
+		status_t					RemoveAllRelations     (const BMessage* message, BMessage* reply);
+		const char*		     		GetOrCreateId          (const char *path, bool createIfMissing = false);
+		status_t                    QueryById              (const char* id, BEntry* entry);
 
 virtual
         void MessageReceived(BMessage* message);
 		~RelationsHandler();
 
+protected:
+        status_t            SearchPluginsOfType(const char* mimeType, BEntry* entry);
 private:
 		BMessage*           ReadRelationsOfType(const char* path, const char* relationType, BMessage* reply);
 		BStringList*        ReadRelationNames(const char* path);

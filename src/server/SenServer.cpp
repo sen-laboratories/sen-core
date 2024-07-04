@@ -177,6 +177,8 @@ void SenServer::MessageReceived(BMessage* message)
         // Relations - fallthrough: handle all in separate handler
         case SEN_RELATIONS_GET:
         case SEN_RELATIONS_GET_ALL:
+        case SEN_RELATIONS_GET_SELF:
+        case SEN_RELATIONS_GET_ALL_SELF:
 		case SEN_RELATION_ADD:
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL:
@@ -200,7 +202,7 @@ void SenServer::MessageReceived(BMessage* message)
 int main(int argc, char* argv[])
 {
 	SenServer* app = new(std::nothrow) SenServer();
-	if (app == NULL)
+	if (app->InitCheck() != B_OK)
 		return 1;
 
 	app->Run();
