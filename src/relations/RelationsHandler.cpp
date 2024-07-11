@@ -87,7 +87,7 @@ void RelationsHandler::MessageReceived(BMessage* message)
 status_t RelationsHandler::GetMessageParameter(
     const BMessage* message, BMessage* reply,
     const char* param, BString* buffer,
-    bool mandatory) {
+    bool mandatory, bool stripSuperType) {
 
     if (mandatory && (message->FindString(param, buffer) != B_OK)) {
         ERROR("failed to read required param '%s'.\n", param);
@@ -95,7 +95,7 @@ status_t RelationsHandler::GetMessageParameter(
 		return B_BAD_VALUE;
 	}
     // remove Relation supertype for relation params for internal handling
-    if (BString(param) == SEN_RELATION_TYPE) {
+    if (stripSuperType && BString(param) == SEN_RELATION_TYPE) {
         buffer = StripSuperType(buffer);
     }
     return B_OK;

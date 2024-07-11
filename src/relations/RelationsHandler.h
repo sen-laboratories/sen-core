@@ -35,7 +35,9 @@ virtual
 		~RelationsHandler();
 
 protected:
-        status_t            SearchPluginsOfType(const char* mimeType, BEntry* entry);
+        status_t            SearchPluginsForType(const char* mimeType, BMessage* typesPlugins);
+        status_t            GetSenseiOutputTypes(const BEntry* src, BStringList* outputTypes);
+
 private:
 		BMessage*           ReadRelationsOfType(const char* path, const char* relationType, BMessage* reply);
 		BStringList*        ReadRelationNames(const char* path);
@@ -49,8 +51,8 @@ private:
 
 		// helper methods
         BString*            StripSuperType(BString* type);
-        status_t            GetMessageParameter(const BMessage* message, BMessage* reply,
-                                const char* param, BString* buffer, bool mandatory = true);
+        status_t            GetMessageParameter(const BMessage* message, BMessage* reply, const char* param,
+                                BString* buffer, bool mandatory = true, bool stripSuperType = true);
         const char*         GenerateId(BNode* node);
         const char*         GetAttributeNameForRelation(const char* relationType);
 		static bool         AddOrUpdateRelationTarget(const char* relationType,
