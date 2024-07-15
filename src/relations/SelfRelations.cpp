@@ -27,36 +27,39 @@ status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* r
     const char* source = sourceParam.String();
     status_t result;
 
-    // get MIME type of source ref
-    BNode sourceNode(source);
-    if ((result = sourceNode.InitCheck()) != B_OK) {
-        ERROR("could not initialize source node %s !", source);
-        return result;
-    }
-    BNodeInfo sourceInfo(&sourceNode);
-    if ((result = sourceInfo.InitCheck()) != B_OK) {
-        ERROR("could not initialize source node info for %s !", source);
-        return result;
-    }
-    char sourceType[B_MIME_TYPE_LENGTH];
-    if ((result = sourceInfo.GetType(sourceType)) != B_OK) {
-        ERROR("could not get MIME type for source node %s !", source);
-        return result;
-    }
+    const char* sourceType = GetMimeTypeForPath(source);
 
     // query for all compatible extractors and return their generated collected output type
     LOG("query for extractors to handle file type %s\n", sourceType);
-    BMessage* typesToPlugins = new BMessage(SENSEI_MESSAGE_TYPE);
+    BMessage typeToPlugins;
 
-    if ((result = SearchPluginsForType(sourceType, typesToPlugins)) != B_OK) {
+    if ((result = GetPluginsForType(sourceType, &typeToPlugins)) != B_OK) {
         return result;
     }
-    DEBUG("got %u output types for source type %s:\n", typesToPlugins->CountNames(B_STRING_TYPE), sourceType);
-    typesToPlugins->PrintToStream();
+    DEBUG("got types/plugins config for source type %s:\n", sourceType);
+    typeToPlugins.PrintToStream();
+/*
+    // add relations as flat list for easier consumption
+    int32 plugins = typeToPlugins.CountNames(B_REF_TYPE);
+    for (int index = 0; index < plugins; index++) {
+        char *pluginSig[B_MIME_TYPE_LENGTH];
+        result = typeToPlugins.GetInfo(B_REF_TYPE, index, pluginSig, NULL, NULL);
+        if (result != B_OK || *pluginSig == NULL) {
+            ERROR("failed to parse output types for source type %s: %s\n", sourceType, strerror(result));
+            return result;
+        }
+        DEBUG("adding output types for plugin %s\n", *pluginSig);
+        result = GetPluginOutputConfig(*pluginSig, &typeToPlugins);
+        if (result != B_OK) {
+            ERROR("failed to get output config for source type %s and plugin %s: %s\n", sourceType, *pluginSig, strerror(result));
+            break;
+        }
+    }
+*/
+    reply->what = SENSEI_MESSAGE_RESULT;
+    reply->Append(typeToPlugins);
 
-    reply->AddMessage(SENSEI_SELF_RELATIONS_KEY, typesToPlugins);
-
-    return B_OK;
+    return result;
 }
 
 status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMessage* reply) {
@@ -65,6 +68,10 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
 		return B_BAD_VALUE;
 	}
     const char* source = sourceParam.String();
+    const char* sourceMimeType = GetMimeTypeForPath(source);
+    if (sourceMimeType == NULL) {
+        return B_ERROR;
+    }
 
     BString relationTypeParam;
     // relation type for self relations is one of the possible output types of compatible extractors.
@@ -77,11 +84,12 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
 
     // sender MAY send a list of already gathered plugins for this type to save re-query
     BMessage typeToPlugins;
-    result = message->FindMessage(SENSEI_SELF_PLUGINS_KEY, &typeToPlugins);
+    result = message->FindMessage(SENSEI_SELF_TYPE_MAPPINGS_KEY, &typeToPlugins);
     if (result != B_OK) {
         if (result == B_NAME_NOT_FOUND) {
             LOG("fresh query for suitable plugins for type %s...\n", relationType);
-            result = SearchPluginsForType(relationType, &typeToPlugins);
+
+            result = GetPluginsForType(sourceMimeType, &typeToPlugins);
             if (result != B_OK) {
                 return result;  // already handled, just pass on
             }
@@ -90,11 +98,11 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
             return result;
          }
     }
-    LOG("got type->plugins map:\n");
+    LOG("got plugin config:\n");
     typeToPlugins.PrintToStream();
 
-    // todo: perform some magic finding the right plugin, for now we assume to have a clean 1:1 mapping and 1st wins
-
+    // filter for plugins that generate the requested relationType
+    // todo: check for 1:N mappings, shouldn't happen, we assume 1:1
     BString pluginType;
     result = typeToPlugins.FindString(relationType, &pluginType);
     if (result != B_OK) {
@@ -134,12 +142,14 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
     }
 
     LOG("received reply from plugin %s:\n", pluginSig);
+    reply->what = SENSEI_MESSAGE_RESULT;
+    reply->Append(typeToPlugins);
     reply->PrintToStream();
 
     return B_OK;
 }
 
-status_t RelationsHandler::SearchPluginsForType(const char* mimeType, BMessage* outputTypesPlugins) {
+status_t RelationsHandler::GetPluginsForType(const char* mimeType, BMessage* outputTypesToPlugins) {
 	BString predicate("SEN:TYPE==meta/x-vnd.sen-meta.plugin && SENSEI:TYPE==extractor");
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
@@ -161,7 +171,7 @@ status_t RelationsHandler::SearchPluginsForType(const char* mimeType, BMessage* 
     }
     BEntry entry;
     int32 pluginCount = 0;
-    while ((result = query.GetNextEntry(&entry)) == B_OK) { // todo: we get duplicate results with same path?!
+    while ((result = query.GetNextEntry(&entry)) == B_OK) {
         BPath path;
         entry.GetPath(&path);
         LOG("found plugin with path %s\n", path.Path());
@@ -182,24 +192,26 @@ status_t RelationsHandler::SearchPluginsForType(const char* mimeType, BMessage* 
         }
         LOG("got plugin app signature: %s\n", pluginAppSig);
 
-        // todo: filter for supported input type
+        // filter for supported input type
+        if (pluginInfo.IsSupportedType(mimeType)) {
+            // get supported output types and add to lookup map accordingly
+            // todo: there may be more plugins per type, supporting different aspects and
+            // returning different output type - later we need to detect and handle overlaps!
+            DEBUG("Adding extractor plugin %s for handling type %s\n", pluginAppSig, mimeType);
 
-        // get supported output types of plugin
-        BStringList outputTypes;
-        result = GetSenseiOutputTypes(&entry, &outputTypes);
-        if (result != B_OK) {
-            ERROR("could not resolve short description for plugin %s: %s\n", path.Path(), strerror(result));
-            return result;
+            entry_ref ref;
+            entry.GetRef(&ref);
+            result = GetPluginOutputConfig(pluginAppSig, &ref, outputTypesToPlugins);
+            if (result != B_OK){
+                ERROR("skipping compatible extractor plugin %s due to error.\n", pluginAppSig);
+                // better luck next time?
+                continue;
+            }
+
+            pluginCount++;
+        } else {
+            DEBUG("extractor plugin %s does not support type %s\n", pluginAppSig, mimeType);
         }
-        // may be empty if there is no plugin for the given type
-        for (int i = 0; i < outputTypes.CountStrings() ; i++) {
-            // outputTypes may occur more than once in this list.
-            // this is no problem since we add the values to the
-            // same key in the result message, creating a list
-            // of multiple plugins that can handle that type.
-            outputTypesPlugins->AddString(outputTypes.StringAt(i), pluginAppSig);
-        }
-        pluginCount++;
     } // while
 
     if (result == B_ENTRY_NOT_FOUND) {  // expected, just check if we found someting
@@ -208,6 +220,8 @@ status_t RelationsHandler::SearchPluginsForType(const char* mimeType, BMessage* 
             return B_OK;
         } else {
             DEBUG("found %u suitable plugins.\n", pluginCount);
+            DEBUG("plugin output map is:\n");
+            outputTypesToPlugins->PrintToStream();
         }
     } else {
         // something else went wrong
@@ -220,9 +234,10 @@ status_t RelationsHandler::SearchPluginsForType(const char* mimeType, BMessage* 
     return B_OK;
 }
 
-status_t RelationsHandler::GetSenseiOutputTypes(const BEntry* src, BStringList* outputTypes) {
-    BNode node(src);
+status_t RelationsHandler::GetPluginOutputConfig(const char* pluginSig, entry_ref* pluginRef, BMessage* pluginOutputConfig) {
+    BNode node(pluginRef);
     status_t result;
+
     if ((result = node.InitCheck()) != B_OK) {
         return result;
     }
@@ -230,9 +245,9 @@ status_t RelationsHandler::GetSenseiOutputTypes(const BEntry* src, BStringList* 
     attr_info attrInfo;
     if ((result = node.GetAttrInfo(SENSEI_OUTPUT_MAPPING, &attrInfo)) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
-            ERROR("expected plugin attribute not found: %s\n", SENSEI_OUTPUT_MAPPING);
+            ERROR("expected plugin attribute not found in plugin %s: %s\n", pluginSig, SENSEI_OUTPUT_MAPPING);
         } else {
-            ERROR("error getting attribute info from node %s: %s\n", src->Name(), strerror(result));
+            ERROR("error getting attribute info from plugin %s: %s\n", pluginSig, strerror(result));
         }
         return result;
     }
@@ -246,24 +261,63 @@ status_t RelationsHandler::GetSenseiOutputTypes(const BEntry* src, BStringList* 
             attrInfo.size);
 
     if (result == 0) {
-        ERROR("no output types found in file.\n");
+        ERROR("no output types found in plugin.\n");
         return B_ENTRY_NOT_FOUND;
     } else if (result < 0) {
-        ERROR("failed to read mappings from attribute %s of file: %s\n", SENSEI_OUTPUT_MAPPING, strerror(result));
+        ERROR("failed to read mappings from attribute %s of plugin: %s\n", SENSEI_OUTPUT_MAPPING, strerror(result));
         return result;
     }
 
-    BMessage outputMapping;
-    outputMapping.Unflatten(attrValue);
+    // retrieve type map for client to map types of result
+    BMessage outputMappings;
+    outputMappings.Unflatten(attrValue);
 
-    // todo: iterate through mapping and retrieve all types, for now we just expect one type and take the default type
-
-    BString outputType;
-    result = outputMapping.FindString("_default", &outputType);
+    // store default type separately if available for easier access
+    BString defaultType;
+    result = outputMappings.FindString(SENSEI_SELF_DEFAULT_TYPE, &defaultType);
     if (result == B_OK) {
-        outputTypes->Add(outputType);
-    } else {
-        ERROR("no default mapping found.\n");
+        pluginOutputConfig->AddString(SENSEI_SELF_DEFAULT_TYPE_KEY, defaultType);
+        // also add actual type to result output type mapping so it will be found by the actual type name later
+        pluginOutputConfig->AddString(defaultType, pluginSig);
+        // and remove from type mappings
+        outputMappings.RemoveData(SENSEI_SELF_DEFAULT_TYPE);
+    }
+
+    // add to reply msg
+    pluginOutputConfig->AddMessage(SENSEI_SELF_TYPE_MAPPINGS_KEY, new BMessage(outputMappings));
+
+    // add mapping from plugin sig to output types generated by this plugin (usually relations) for filtering
+    char *typeName[B_MIME_TYPE_LENGTH];
+    int32 itemCount = outputMappings.CountNames(B_STRING_TYPE);
+    for (int32 index = 0; index < itemCount; index++) {
+        result = outputMappings.GetInfo(B_STRING_TYPE, index, typeName, NULL, NULL);
+        if (result != B_OK || *typeName == NULL) {
+            ERROR("failed to parse output types of plugin %s (%u types added): %s\n", pluginSig, index, strerror(result));
+            return result;
+        }
+        DEBUG("adding output type %s with associated plugin %s\n", *typeName, pluginSig);
+        pluginOutputConfig->AddString(*typeName, pluginSig);
     }
     return result;
+}
+
+const char* RelationsHandler::GetMimeTypeForPath(const char* source) {
+    BNode sourceNode(source);
+    status_t result;
+    if ((result = sourceNode.InitCheck()) != B_OK) {
+        ERROR("could not initialize source node %s !", source);
+        return NULL;
+    }
+    BNodeInfo sourceInfo(&sourceNode);
+    if ((result = sourceInfo.InitCheck()) != B_OK) {
+        ERROR("could not initialize source node info for %s !", source);
+        return NULL;
+    }
+    char sourceType[B_MIME_TYPE_LENGTH];
+    if ((result = sourceInfo.GetType(sourceType)) != B_OK) {
+        ERROR("could not get MIME type for source node %s !", source);
+        return NULL;
+    }
+
+    return (new BString(sourceType))->String();
 }

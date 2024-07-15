@@ -29,14 +29,15 @@ public:
 		status_t					RemoveAllRelations     (const BMessage* message, BMessage* reply);
 		const char*		     		GetOrCreateId          (const char *path, bool createIfMissing = false);
 		status_t                    QueryById              (const char* id, BEntry* entry);
+        const char*                 GetMimeTypeForPath     (const char* path);
 
 virtual
         void MessageReceived(BMessage* message);
 		~RelationsHandler();
 
 protected:
-        status_t            SearchPluginsForType(const char* mimeType, BMessage* typesPlugins);
-        status_t            GetSenseiOutputTypes(const BEntry* src, BStringList* outputTypes);
+        status_t            GetPluginsForType(const char* mimeType, BMessage* outputTypesToPlugins);
+        status_t            GetPluginOutputConfig(const char* pluginSig, entry_ref* pluginRef, BMessage* pluginOutputConfig);
 
 private:
 		BMessage*           ReadRelationsOfType(const char* path, const char* relationType, BMessage* reply);
