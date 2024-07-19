@@ -30,6 +30,7 @@ public:
 		const char*		     		GetOrCreateId          (const char *path, bool createIfMissing = false);
 		status_t                    QueryById              (const char* id, BEntry* entry);
         const char*                 GetMimeTypeForPath     (const char* path);
+        status_t                    ResolveSelfRelationsWithPlugin(const char* pluginSig, const char* source, BMessage* reply);
 
 virtual
         void MessageReceived(BMessage* message);

@@ -31,33 +31,16 @@ status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* r
 
     // query for all compatible extractors and return their generated collected output type
     LOG("query for extractors to handle file type %s\n", sourceType);
-    BMessage typeToPlugins;
+    BMessage pluginConfig;
 
-    if ((result = GetPluginsForType(sourceType, &typeToPlugins)) != B_OK) {
+    if ((result = GetPluginsForType(sourceType, &pluginConfig)) != B_OK) {
         return result;
     }
     DEBUG("got types/plugins config for source type %s:\n", sourceType);
-    typeToPlugins.PrintToStream();
-/*
-    // add relations as flat list for easier consumption
-    int32 plugins = typeToPlugins.CountNames(B_REF_TYPE);
-    for (int index = 0; index < plugins; index++) {
-        char *pluginSig[B_MIME_TYPE_LENGTH];
-        result = typeToPlugins.GetInfo(B_REF_TYPE, index, pluginSig, NULL, NULL);
-        if (result != B_OK || *pluginSig == NULL) {
-            ERROR("failed to parse output types for source type %s: %s\n", sourceType, strerror(result));
-            return result;
-        }
-        DEBUG("adding output types for plugin %s\n", *pluginSig);
-        result = GetPluginOutputConfig(*pluginSig, &typeToPlugins);
-        if (result != B_OK) {
-            ERROR("failed to get output config for source type %s and plugin %s: %s\n", sourceType, *pluginSig, strerror(result));
-            break;
-        }
-    }
-*/
+    pluginConfig.PrintToStream();
+
     reply->what = SENSEI_MESSAGE_RESULT;
-    reply->Append(typeToPlugins);
+    reply->AddMessage(SENSEI_SELF_PLUGIN_CONFIG_KEY, new BMessage(pluginConfig));
 
     return result;
 }
@@ -80,26 +63,46 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
 	}
     const char* relationType = relationTypeParam.String();
 
-    status_t result;
+    BString pluginTypeParam;
+    // client may send the desired plugin signature already, saving us the hassle
+	if (GetMessageParameter(message, reply, SENSEI_SELF_PLUGIN_KEY, &pluginTypeParam, true, false)  == B_OK) {
+        const char* pluginSig = pluginTypeParam.String();
+        DEBUG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
+		return ResolveSelfRelationsWithPlugin(pluginSig, source, reply);
+	}
 
-    // sender MAY send a list of already gathered plugins for this type to save re-query
-    BMessage typeToPlugins;
-    result = message->FindMessage(SENSEI_SELF_TYPE_MAPPINGS_KEY, &typeToPlugins);
+    status_t result;
+    bool clientHasConfig = false;
+
+    // sender MAY send an existing plugin config for this type from a previous call to save re-query
+    BMessage pluginConfig;
+    result = message->FindMessage(SENSEI_SELF_PLUGIN_CONFIG_KEY, &pluginConfig);
     if (result != B_OK) {
         if (result == B_NAME_NOT_FOUND) {
-            LOG("fresh query for suitable plugins for type %s...\n", relationType);
+            LOG("fresh query for suitable plugins for relation type %s...\n", relationType);
 
-            result = GetPluginsForType(sourceMimeType, &typeToPlugins);
+            result = GetPluginsForType(sourceMimeType, &pluginConfig);
             if (result != B_OK) {
                 return result;  // already handled, just pass on
             }
+            LOG("got fresh plugin config:\n");
          } else {
             ERROR("couldn't look up plugins from message: %s", strerror(result));
             return result;
          }
+    } else {
+        LOG("got existing plugin config for relation type %s:\n", relationType);
+        clientHasConfig = true;
     }
-    LOG("got plugin config:\n");
-    typeToPlugins.PrintToStream();
+    pluginConfig.PrintToStream();
+
+    // get type->plugin map
+    BMessage typeToPlugins;
+    result = pluginConfig.FindMessage(SENSEI_SELF_TYPES_PLUGINS_KEY, &typeToPlugins);
+    if (result != B_OK) {
+        ERROR("failed to look up type->plugin map for relation type %s: %s\n", relationType, strerror(result));
+        return result;
+    }
 
     // filter for plugins that generate the requested relationType
     // todo: check for 1:N mappings, shouldn't happen, we assume 1:1
@@ -110,10 +113,24 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
         return result;
     }
     const char* pluginSig = pluginType.String();
-    LOG("got plugin MIME-Type / signature: %s\n", pluginSig);
+
+    result = ResolveSelfRelationsWithPlugin(pluginSig, source, reply);
+    if (result != B_OK) {
+        ERROR("failed to resolve relations of type %s with plugin %s: %s\n", relationType, pluginSig, strerror(result));
+        return result;
+    }
+    // send back current plugin config if client did not have it
+    if (!clientHasConfig) {
+        reply->Append(pluginConfig);
+    }
+    return result;
+}
+
+status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig, const char* source, BMessage* reply) {
+    LOG("got plugin app signature: %s\n", pluginSig);
 
     // execute plugin and return result
-    result = be_roster->Launch(pluginSig);
+    status_t result = be_roster->Launch(pluginSig);
     if (result != B_OK) {
         ERROR("failed to launch plugin %s: %s\n", pluginSig, strerror(result));
         return result;
@@ -135,7 +152,8 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
     refsMsg.PrintToStream();
 
     BMessenger pluginMessenger(pluginSig);
-    if ((result = pluginMessenger.SendMessage(&refsMsg, reply)) != B_OK) {
+    result = pluginMessenger.SendMessage(&refsMsg, reply);
+    if (result != B_OK) {
         ERROR("failed to communicate with plugin %s: %s\n", pluginSig, strerror(result));
         reply->PrintToStream();
         return result;
@@ -143,7 +161,6 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
 
     LOG("received reply from plugin %s:\n", pluginSig);
     reply->what = SENSEI_MESSAGE_RESULT;
-    reply->Append(typeToPlugins);
     reply->PrintToStream();
 
     return B_OK;
@@ -272,13 +289,17 @@ status_t RelationsHandler::GetPluginOutputConfig(const char* pluginSig, entry_re
     BMessage outputMappings;
     outputMappings.Unflatten(attrValue);
 
+    // add mapping from plugin's output types to the plugin signature so we can resolve the relation later.
+
     // store default type separately if available for easier access
+    BMessage typesToPlugins;
     BString defaultType;
+
     result = outputMappings.FindString(SENSEI_SELF_DEFAULT_TYPE, &defaultType);
     if (result == B_OK) {
         pluginOutputConfig->AddString(SENSEI_SELF_DEFAULT_TYPE_KEY, defaultType);
         // also add actual type to result output type mapping so it will be found by the actual type name later
-        pluginOutputConfig->AddString(defaultType, pluginSig);
+        typesToPlugins.AddString(defaultType, pluginSig);
         // and remove from type mappings
         outputMappings.RemoveData(SENSEI_SELF_DEFAULT_TYPE);
     }
@@ -286,7 +307,6 @@ status_t RelationsHandler::GetPluginOutputConfig(const char* pluginSig, entry_re
     // add to reply msg
     pluginOutputConfig->AddMessage(SENSEI_SELF_TYPE_MAPPINGS_KEY, new BMessage(outputMappings));
 
-    // add mapping from plugin sig to output types generated by this plugin (usually relations) for filtering
     char *typeName[B_MIME_TYPE_LENGTH];
     int32 itemCount = outputMappings.CountNames(B_STRING_TYPE);
     for (int32 index = 0; index < itemCount; index++) {
@@ -296,8 +316,10 @@ status_t RelationsHandler::GetPluginOutputConfig(const char* pluginSig, entry_re
             return result;
         }
         DEBUG("adding output type %s with associated plugin %s\n", *typeName, pluginSig);
-        pluginOutputConfig->AddString(*typeName, pluginSig);
+        typesToPlugins.AddString(*typeName, pluginSig);
     }
+    pluginOutputConfig->AddMessage(SENSEI_SELF_TYPES_PLUGINS_KEY, new BMessage(typesToPlugins));
+
     return result;
 }
 
