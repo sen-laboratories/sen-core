@@ -161,6 +161,7 @@ status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig,
 
     LOG("received reply from plugin %s:\n", pluginSig);
     reply->what = SENSEI_MESSAGE_RESULT;
+    reply->AddRef("refs", sourceRef);
     reply->PrintToStream();
 
     return B_OK;

@@ -59,6 +59,7 @@
 // Tracker integration
 #define SEN_OPEN_RELATION_VIEW		    'STor'
 #define SEN_OPEN_RELATION_TARGET_VIEW	'STot'
+#define SEN_OPEN_SELF_RELATION          'STos'
 
 // todo: set to 13 for TSID later
 #define SEN_ID_LEN					32
