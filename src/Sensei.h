@@ -14,9 +14,9 @@
 #define SENSEI_MESSAGE_RESULT		    'SErs'
 
 // self relations
-#define SENSEI_SELF_PLUGIN_CONFIG_KEY	"sensei:self:config"
-#define SENSEI_SELF_PLUGIN_KEY			"sensei:self:plugin"
-#define SENSEI_SELF_TYPES_PLUGINS_KEY  	"sensei:self:types_plugins"
-#define SENSEI_SELF_TYPE_MAPPINGS_KEY	"sensei:self:type_mappings"
-#define SENSEI_SELF_DEFAULT_TYPE_KEY 	"sensei:self:default_type"
-#define SENSEI_SELF_DEFAULT_TYPE     	"_default"
+#define SENSEI_PLUGIN_CONFIG_KEY	"sen:sei:config"
+#define SENSEI_PLUGIN_KEY			"sen:sei:plugin"
+#define SENSEI_TYPES_PLUGINS_KEY  	"sen:sei:types_plugins"
+#define SENSEI_TYPE_MAPPINGS_KEY	"sen:sei:type_mappings"
+#define SENSEI_DEFAULT_TYPE_KEY 	"sen:sei:default_type"
+#define SENSEI_DEFAULT_TYPE    		"sen:sei:default"
