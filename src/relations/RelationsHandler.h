@@ -38,7 +38,9 @@ virtual
 
 protected:
         status_t            GetPluginsForType(const char* mimeType, BMessage* outputTypesToPlugins);
-        status_t            GetPluginOutputConfig(const char* pluginSig, entry_ref* pluginRef, BMessage* pluginOutputConfig);
+        status_t            GetPluginConfig(const char* pluginSig, entry_ref* pluginRef,
+                                            const char* mimeType, BMessage* pluginConfig);
+        status_t            AddTypesToPluginsConfig(BMessage *pluginConfig);
 
 private:
 		BMessage*           ReadRelationsOfType(const char* path, const char* relationType, BMessage* reply);

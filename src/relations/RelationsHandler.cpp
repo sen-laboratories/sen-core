@@ -139,9 +139,9 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 		ERROR("failed to read relations of type %s from file %s\n", relation, source);
 		return B_ERROR;
 	} else if (relations->IsEmpty()) {
-        DEBUG("creating new relation %s for file %s\n", relation, source);
+        LOG("creating new relation %s for file %s\n", relation, source);
     }
-    DEBUG("got relations for type %s and file %s:\n", relation, source);
+    LOG("got relations for type %s and file %s:\n", relation, source);
     relations->PrintToStream();
 
     // prepare target
@@ -166,12 +166,12 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     BMessage oldProperties;
     int index = 0;
     while (relations->FindMessage(targetId, index, &oldProperties) == B_OK) {
-        DEBUG("got existing relation properties at index %d:\n", index);
+        LOG("got existing relation properties at index %d:\n", index);
         oldProperties.PrintToStream();
 
         // get existing relation properties for target if available and skip if already there
         if (oldProperties.HasSameData(properties)) {
-            DEBUG("skipping add relation %s for target %s, already there:\n", relation, targetId);
+            LOG("skipping add relation %s for target %s, already there:\n", relation, targetId);
             oldProperties.PrintToStream();
 
             reply->what = SEN_RESULT_RELATIONS;
@@ -182,19 +182,19 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         index++;
     }
     if (index > 0) {
-        DEBUG("adding new properties for existing relation %s\n", relation);
+        LOG("adding new properties for existing relation %s\n", relation);
     } else {
-        DEBUG("adding new target %s for relation %s\n", targetId, relation);
+        LOG("adding new target %s for relation %s\n", targetId, relation);
         relations->AddString(SEN_TO_ATTR, targetId);
     }
     // add new relation properties for target
     relations->AddMessage(targetId, &properties);
-    DEBUG("new relation properties for relation %s and target %s:\n", relation, target);
+    LOG("new relation properties for relation %s and target %s:\n", relation, target);
     properties.PrintToStream();
 
     // write new relation to designated attribute
     const char* attrName = GetAttributeNameForRelation(relation);
-    DEBUG("writing new relation into attribute %s of file %s\n", attrName, source);
+    LOG("writing new relation into attribute %s of file %s\n", attrName, source);
 
     BNode node(source); // has been checked already at least once here
 
@@ -227,7 +227,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         return B_ERROR;
     }
 
-    DEBUG("created relation %s from src %s to target %s with properties:\n", relation, srcId, targetId);
+    LOG("created relation %s from src %s to target %s with properties:\n", relation, srcId, targetId);
     relations->PrintToStream();
 
 	reply->what = SEN_RESULT_RELATIONS;
@@ -254,7 +254,7 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
         // add all properties of all relations found above and add to result per type for lookup
         for (int i = 0; i < relationNames->CountStrings(); i++) {
             BString relation = relationNames->StringAt(i);
-            DEBUG("adding properties of relation %s...\n", relation.String());
+            LOG("adding properties of relation %s...\n", relation.String());
 
             BMessage* relations = ReadRelationsOfType(source, relation.String(), reply);
             if (relations == NULL) {
@@ -313,7 +313,7 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     // read relation config as message from respective relation attribute
     attr_info attrInfo;
     const char* attrName = GetAttributeNameForRelation(relationType);
-    DEBUG("checking for relation %s in atttribute %s\n", relationType, attrName);
+    LOG("checking for relation %s in atttribute %s\n", relationType, attrName);
 
     if (node.GetAttrInfo(attrName, &attrInfo) != B_OK) { // also if attribute not found, e.g. new relation
         return new BMessage();
@@ -327,7 +327,7 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
             attrInfo.size);
 
     if (result == 0) {
-        DEBUG("no relations of type %s found for path %s.\n", relationType, path);
+        LOG("no relations of type %s found for path %s.\n", relationType, path);
         return new BMessage();
     } else if (result < 0) {
         ERROR("failed to read relation %s of file %s.\n", relationType, path);
@@ -343,7 +343,7 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     resultMsg->FindStrings(SEN_TO_ATTR, &ids);
 
     if (ResolveRelationTargets(&ids, &entries) == B_OK) {
-        DEBUG("got %d relation targets for type %s and file %s, resolving entries...\n",
+        LOG("got %d relation targets for type %s and file %s, resolving entries...\n",
             entries.CountItems(), relationType, path);
 
         for (int32 i = 0; i < entries.CountItems(); i++) {
@@ -364,7 +364,7 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
         return NULL;
     }
 
-    DEBUG("read %d relation(s) of type %s:\n", resultMsg->CountNames(B_MESSAGE_TYPE), relationType);
+    LOG("read %d relation(s) of type %s:\n", resultMsg->CountNames(B_MESSAGE_TYPE), relationType);
     return resultMsg;
 }
 
@@ -381,6 +381,8 @@ status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* rep
 		return B_BAD_VALUE;
 	}
     const char* relation = relationType.String();
+
+    // todo: implement!
 
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("status", BString("removed relation ") << relation << " from " << source);
@@ -433,7 +435,7 @@ BStringList* RelationsHandler::ReadRelationNames(const char* path)
 
 status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<BEntry> *result)
 {
-	DEBUG("resolving ids from list with %d targets...\n", ids->CountStrings())
+	LOG("resolving ids from list with %d targets...\n", ids->CountStrings())
 
     for (int i = 0; i < ids->CountStrings(); i++) {
         BEntry entry;
@@ -468,7 +470,7 @@ const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissi
         }
         id = GenerateId(&node);
         if (id != NULL) {
-            DEBUG("generated new ID %s for path %s\n", id.String(), path);
+            LOG("generated new ID %s for path %s\n", id.String(), path);
             if (node.WriteAttrString(SEN_ID_ATTR, &id) != B_OK) {
                 ERROR("failed to create ID for path %s\n", path);
                 return NULL;
@@ -482,7 +484,7 @@ const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissi
         ERROR("failed to read ID from path %s\n", path);
         return NULL;
     }
-    DEBUG("got existing ID %s for path %s\n", id.String(), path);
+    LOG("got existing ID %s for path %s\n", id.String(), path);
 
     return (new BString(id))->String();
 }
@@ -528,7 +530,7 @@ status_t RelationsHandler::QueryById(const char* id, BEntry* entry)
     }
     if (status_t result = query.GetNextEntry(entry) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
-            DEBUG("no matching file found for ID %s\n", id);
+            LOG("no matching file found for ID %s\n", id);
             return B_OK;
         }
         // something other went wrong

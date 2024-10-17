@@ -37,7 +37,7 @@ SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 
 SenServer::~SenServer()
 {
-    DEBUG("Goodbye:)\n");
+    LOG("Goodbye:)\n");
     stop_watching(this);
 }
 
@@ -133,12 +133,12 @@ void SenServer::MessageReceived(BMessage* message)
                         if (relationsHandler->QueryById(id, &existingEntry) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
-                                DEBUG("SEN:ID %s refers to same node %d, nothing to do.",
+                                LOG("SEN:ID %s refers to same node %d, nothing to do.",
                                     id, node.Dup());
                                 break;
                             }
                             // delete all SEN attributes of copy
-                            DEBUG("found SEN:ID %s with exising node %s, removing attributes from copy...\n",
+                            LOG("found SEN:ID %s with exising node %s, removing attributes from copy...\n",
                                 id, path.Path());
 
                             char attrName[B_ATTR_NAME_LENGTH];
@@ -151,19 +151,19 @@ void SenServer::MessageReceived(BMessage* message)
                                     break;
                                 }
                                 if (BString(attrName).StartsWith(SEN_ATTR_PREFIX)) {
-                                    DEBUG("checking SEN attribute %s of node %s\n", attrName, name.String());
+                                    LOG("checking SEN attribute %s of node %s\n", attrName, name.String());
                                     if (node.RemoveAttr(attrName) != B_OK) {
                                         ERROR("failed to remove SEN attribute %s from node %s\n",
                                             attrName, name.String());
                                     } else {
-                                        DEBUG("removed SEN attribute %s from node %s\n", attrName, name.String());
+                                        LOG("removed SEN attribute %s from node %s\n", attrName, name.String());
                                         attrCount++;
                                     }
                                 }
                             }
-                            DEBUG("removed %d attribute(s) from node %s\n", attrCount, path.Path());
+                            LOG("removed %d attribute(s) from node %s\n", attrCount, path.Path());
                         } else {
-                            DEBUG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
+                            LOG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
                                 name.String(), id);
                         }
                         break;
