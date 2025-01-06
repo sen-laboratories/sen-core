@@ -19,13 +19,14 @@
 #include <Volume.h>
 #include <String.h>
 
+#include <Directory.h>
+#include <FindDirectory.h>
+
 SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 {
 	// setup feature-specific handlers for redirecting messages appropriately
     relationsHandler = new RelationsHandler();
-    Looper()->AddHandler(relationsHandler);
     senConfigHandler = new SenConfigHandler();
-    Looper()->AddHandler(senConfigHandler);
 
 	// see also https://www.haiku-os.org/legacy-docs/bebook/BQuery_Overview.html#id611851
     BVolumeRoster volRoster;
@@ -44,7 +45,7 @@ SenServer::~SenServer()
 void SenServer::MessageReceived(BMessage* message)
 {
 	BMessage* reply = new BMessage();
-	status_t result = B_UNSUPPORTED;
+	status_t result;
 
 	switch (message->what) {
 		case SEN_CORE_INFO:
@@ -91,10 +92,55 @@ void SenServer::MessageReceived(BMessage* message)
 
 		 	break;
 		}
+        case SEN_CORE_TEST:
+		{
+            result = B_OK;
+            reply->what = SEN_CORE_TEST;
+
+            LOG("TSID test...");
+            BPath path;
+            if (find_directory(B_SYSTEM_TEMP_DIRECTORY, &path) != B_OK)
+            {
+                ERROR("could not find user settings directory, falling back to /tmp.\n");
+                path.SetTo("/tmp");
+            }
+            path.Append("sen");
+            BDirectory outputDir;
+            result = outputDir.CreateDirectory(path.Path(), NULL);
+            if (result != B_OK && result != B_FILE_EXISTS) {
+                ERROR("failed to set up test directory: %s\n", strerror(result));
+                break;
+            }
+            outputDir.SetTo(path.Path());
+            BFile file;
+            int32 numFiles = message->GetInt32("count", 1000);
+
+            // create some temp files and ensure they are unique
+            for (int32 i = 0; i < numFiles; i++) {
+                const char* tsid = relationsHandler->GenerateId();
+                LOG("TSID: %s\n", tsid);
+                result = file.SetTo(&outputDir, tsid, B_CREATE_FILE);
+                if (result == B_OK) {
+                    result = file.Flush();
+                } else {
+                    if (result == B_FILE_EXISTS) {
+                        ERROR("test FAILED, ID %s not unique!\n", tsid);
+                    } else {
+                        ERROR("aborting test, internal error: %s\n", strerror(result));
+                    }
+                    break;
+                }
+                file.Unset();
+            }
+            reply->AddBool("testPassed", result == B_OK);
+            break;
+        }
         case SEN_QUERY_ID:
         {
+            result = B_OK;
             BString id;
             BEntry entry;
+
             if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
                 if ((result = relationsHandler->QueryById(id.String(), &entry)) == B_OK) {
                     if ((result = entry.InitCheck()) == B_OK) {
@@ -108,7 +154,9 @@ void SenServer::MessageReceived(BMessage* message)
         }
         case B_NODE_MONITOR:
         {
+            result = B_OK;
             int32 opcode;
+
             if (message->FindInt32("opcode", &opcode) == B_OK) {
                 switch (opcode) {
                     case B_ENTRY_CREATED: {
@@ -141,27 +189,12 @@ void SenServer::MessageReceived(BMessage* message)
                             LOG("found SEN:ID %s with exising node %s, removing attributes from copy...\n",
                                 id, path.Path());
 
-                            char attrName[B_ATTR_NAME_LENGTH];
-                            int attrCount = 0;
-
-                            while (status_t result = node.GetNextAttrName(attrName) >= 0) {
-                                if (result < 0) {
-                                    ERROR("failed to get next attribute from file %s: %u, "
-                                            "possible SEN attributes left!\n", name.String(), result);
-                                    break;
-                                }
-                                if (BString(attrName).StartsWith(SEN_ATTR_PREFIX)) {
-                                    LOG("checking SEN attribute %s of node %s\n", attrName, name.String());
-                                    if (node.RemoveAttr(attrName) != B_OK) {
-                                        ERROR("failed to remove SEN attribute %s from node %s\n",
-                                            attrName, name.String());
-                                    } else {
-                                        LOG("removed SEN attribute %s from node %s\n", attrName, name.String());
-                                        attrCount++;
-                                    }
-                                }
+                            int32 attrCount = RemoveSenAttrs(&node);
+                            if (attrCount >= 0) {
+                                LOG("removed %d attribute(s) from file %s\n", attrCount, path.Path());
+                            } else  {
+                                ERROR("failed to remove attributes from node %s\n", path.Path());
                             }
-                            LOG("removed %d attribute(s) from node %s\n", attrCount, path.Path());
                         } else {
                             LOG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
                                 name.String(), id);
@@ -187,16 +220,51 @@ void SenServer::MessageReceived(BMessage* message)
                 return; // done
             }
             ERROR("failed to forward message %u to RelationHandler!\n", message->what);
+            result = B_ERROR;
+
             break;
         }
 		default:
 		{
+            result = B_UNSUPPORTED;
             LOG("SEN Server: unknown message '%u' received." B_UTF8_ELLIPSIS "\n", message->what);
 		}
 	}
 	reply->AddInt32("resultCode", result);
 	reply->AddString("result", strerror(result));
+
 	message->SendReply(reply);
+}
+
+int32 SenServer::RemoveSenAttrs(BNode* node) {
+    char attrName[B_ATTR_NAME_LENGTH];
+    int attrCount = 0;
+    status_t result;
+
+    while ((result = node->GetNextAttrName(attrName)) >= 0) {
+        if (result < 0) {
+            ERROR("failed to get next attribute from file: %u, "
+                  "possible SEN attributes left!\n", result);
+            break;
+        }
+        if (BString(attrName).StartsWith(SEN_ATTR_PREFIX)) {
+            LOG("checking SEN attribute %s...\n", attrName);
+            result = node->RemoveAttr(attrName);
+            if (result != B_OK) {
+                ERROR("failed to remove SEN attribute %s: %s\n",
+                        attrName, strerror(result));
+                break;
+            } else {
+                LOG("removed SEN attribute %s\n", attrName);
+                attrCount++;
+            }
+        }
+    }
+    if (result == B_OK) {
+        return attrCount;
+    } else {
+        return result;
+    }
 }
 
 int main(int argc, char* argv[])

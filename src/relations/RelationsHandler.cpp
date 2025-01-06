@@ -8,6 +8,7 @@
 #include <Node.h>
 #include <Path.h>
 #include <stdio.h>
+#include <string>
 #include <String.h>
 #include <StringList.h>
 #include <VolumeRoster.h>
@@ -19,6 +20,7 @@
 RelationsHandler::RelationsHandler()
     : BHandler("SenRelationsHandler")
 {
+    tsidGenerator = new IceDustGenerator();
 }
 
 RelationsHandler::~RelationsHandler()
@@ -450,6 +452,10 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BObjectList<
 	return B_OK;
 }
 
+const char* RelationsHandler::GenerateId() {
+    return (new std::string(std::to_string(tsidGenerator->generate())) )->c_str();
+}
+
 /**
  * we use the inode as a stable file/dir reference
  * (for now, just like filesystem links, they have to stay on the same device)
@@ -468,7 +474,7 @@ const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissi
         if (!createIfMissing) {
             return NULL;
         }
-        id = GenerateId(&node);
+        id = GenerateId();
         if (id != NULL) {
             LOG("generated new ID %s for path %s\n", id.String(), path);
             if (node.WriteAttrString(SEN_ID_ATTR, &id) != B_OK) {
@@ -487,18 +493,6 @@ const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissi
     LOG("got existing ID %s for path %s\n", id.String(), path);
 
     return (new BString(id))->String();
-}
-
-const char* RelationsHandler::GenerateId(BNode* node) {
-	node_ref nodeInfo;
-	node->GetNodeRef(&nodeInfo);
-
-	char* id = new char[sizeof(ino_t)];
-	if (snprintf(id, sizeof(id), "%ld", nodeInfo.node) >= 0) {
-		return id;
-	} else {
-		return NULL;
-	}
 }
 
 const char* RelationsHandler::GetAttributeNameForRelation(const char* relationType) {

@@ -14,9 +14,9 @@ APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 
 SRCS := src/relations/RelationsHandler.cpp \
     src/relations/SelfRelations.cpp \
+    src/relations/IceDustGenerator.cpp \
 	src/config/SenConfigHandler.cpp \
-	src/server/SenServer.cpp \
-    src/server/IceDustGenerator.cpp
+	src/server/SenServer.cpp
 
 RDEFS = src/resources/sen_server.rdef
 

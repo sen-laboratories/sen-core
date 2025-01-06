@@ -14,6 +14,8 @@
 #include <Query.h>
 #include <StringList.h>
 
+#include "IceDustGenerator.h"
+
 class RelationsHandler : public BHandler {
 
 public:
@@ -27,8 +29,11 @@ public:
 		status_t					RemoveRelation         (const BMessage* message, BMessage* reply);
         // delete all relations of a given type, e.g. when a related file is deleted
 		status_t					RemoveAllRelations     (const BMessage* message, BMessage* reply);
+
+        const char*                 GenerateId();
 		const char*		     		GetOrCreateId          (const char *path, bool createIfMissing = false);
 		status_t                    QueryById              (const char* id, BEntry* entry);
+
         const char*                 GetMimeTypeForPath     (const char* path);
         status_t                    ResolveSelfRelationsWithPlugin(const char* pluginSig, const char* source, BMessage* reply);
 
@@ -57,10 +62,11 @@ private:
         BString*            StripSuperType(BString* type);
         status_t            GetMessageParameter(const BMessage* message, BMessage* reply, const char* param,
                                 BString* buffer, bool mandatory = true, bool stripSuperType = true);
-        const char*         GenerateId(BNode* node);
         const char*         GetAttributeNameForRelation(const char* relationType);
 		static bool         AddOrUpdateRelationTarget(const char* relationType,
                                 BMessage* newRelationTarget, BMessage* existingRelation);
+
+        IceDustGenerator*   tsidGenerator;
 };
 
 #endif // _RELATION_SERVICE_H

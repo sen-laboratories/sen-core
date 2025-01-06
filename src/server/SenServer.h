@@ -22,9 +22,10 @@ virtual		~SenServer();
 virtual	void MessageReceived(BMessage* message);
 
 private:
-            RelationsHandler*  relationsHandler;
-            SenConfigHandler*  senConfigHandler;
-};
+    int32               RemoveSenAttrs(BNode* node);
 
+    RelationsHandler*   relationsHandler;
+    SenConfigHandler*   senConfigHandler;
+};
 
 #endif // _SEMANTIC_SERVER_H
