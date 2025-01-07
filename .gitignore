@@ -33,6 +33,7 @@
 
 # build
 dist/*
+generated/*
 objects.*
 
 # for now

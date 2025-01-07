@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="images/sen-core_logo.jpg" alt="SEN Core Logo" width=320"/>
+</p>
+
 # SEN Core - Semantic ExteNsions
 
 ## SEN Server
 
-Haiku server process acting as the foundation of the semantic layer
+This is the Haiku server process acting as the foundation of the semantic layer.
 
 ## Build
 
@@ -13,36 +17,13 @@ Haiku server process acting as the foundation of the semantic layer
 ## Run
 
 ```
-> dist/sen_server &
+> generated/sen_server &
 ```
 
-## Demo Proto1
+## Usage
 
-set up index and attributes (manually until script/installer and graphical support for adding relations is implemented):
+You can use <a href="https://github.com/sen-laboratories/sen-tracker>SEN Tracker</a> to navigate Related files using the context menu "Open Related...".
 
-```bash
-> ID=$(stat -c "%i" README.md)
-> mkindex -t string "SEN:_id"
-> mkindex -t string "SEN:referencedBy"
-> addattr -t string "SEN:_id" $ID README.md
-> addattr -t string "SEN:referencedBy" $ID Makefile
-```
+Together with the ontologies in <a href="https://github.com/sen-laboratories/sen-oni">ONI (Ontology Native Interface)</a>, you can start to explore the magic of a truly semantic desktop, managing all your real-world and virtual objects, abstract entities and ideas as files.
 
-send message and get relation targets result (with local example IDs):
-
-```bash
-> hey sen_server 'SCrt' with source=Makefile and relation=SEN:referencedBy
-resolving targets for file IDs 3210985,3670583...
-Results of query "SEN:_id == 3210985":
-        /boot/home/Develop/SEN/sen-core/README.md
-Results of query "SEN:_id == 3670583":
-        /boot/home/Develop/SEN/sen-core/src
-Adding to result message:
-        /boot/home/Develop/SEN/sen-core/README.md
-        /boot/home/Develop/SEN/sen-core/src
-Reply BMessage('SCre'):
-   "targets" (B_STRING_TYPE) : "/boot/home/Develop/SEN/sen-core/README.md"
-   "targets" (B_STRING_TYPE) : "/boot/home/Develop/SEN/sen-core/src"
-   "statusMessage" (B_STRING_TYPE) : "found 2 targets for relation SEN:referencedBy from Makefile"
-   "result" (B_INT32_TYPE) : 0 (0x00000000)
-```
+Other use cases and plugins are currently under development.
