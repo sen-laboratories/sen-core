@@ -22,8 +22,8 @@ This is the Haiku server process acting as the foundation of the semantic layer.
 
 ## Usage
 
-You can use <a href="https://github.com/sen-laboratories/sen-tracker>SEN Tracker</a> to navigate Related files using the context menu "Open Related...".
+You can use [SEN Tracker](https://github.com/sen-laboratories/sen-tracker) to navigate Related files using the context menu "Open Related...".
 
-Together with the ontologies in <a href="https://github.com/sen-laboratories/sen-oni">ONI (Ontology Native Interface)</a>, you can start to explore the magic of a truly semantic desktop, managing all your real-world and virtual objects, abstract entities and ideas as files.
+Together with the ontologies in [ONI (Ontology Native Interface)](https://github.com/sen-laboratories/sen-oni), you can start to explore the magic of a truly semantic desktop, managing all your real-world and virtual objects, abstract entities and ideas as files.
 
 Other use cases and plugins are currently under development.
