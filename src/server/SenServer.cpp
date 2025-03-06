@@ -216,12 +216,8 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL:
         {
-            if ((result = PostMessage(message, relationsHandler)) == B_OK) {
-                return; // done
-            }
-            ERROR("failed to forward message %u to RelationHandler!\n", message->what);
-            result = B_ERROR;
-
+            // todo: PostMessage() fails with error "Mismatched values passed to function"
+            relationsHandler->MessageReceived(message);
             break;
         }
 		default:
