@@ -217,7 +217,14 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATIONS_REMOVE_ALL:
         {
             // todo: PostMessage() fails with error "Mismatched values passed to function"
-            relationsHandler->MessageReceived(message);
+            result = PostMessage(message, relationsHandler);
+            if (result != B_OK) {
+            	ERROR("failed to forward message to RelationsHandler: %s\n", strerror(result));
+            	// still continue to populate relations menu
+            	// fallback
+            	relationsHandler->MessageReceived(message);
+            }
+            
             break;
         }
 		default:

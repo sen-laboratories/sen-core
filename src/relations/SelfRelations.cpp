@@ -311,39 +311,7 @@ status_t RelationsHandler::GetPluginConfig(
     pluginConfig->AddMessage(SENSEI_TYPE_MAPPING, new BMessage(typeMappings));
     return result;
 }
-/*
-status_t RelationsHandler::AddTypesToPluginsConfig(BMessage *pluginConfig) {
-    status_t result;
-    BMessage typeMappings;
 
-    result = pluginConfig->FindMessage(SENSEI_TYPE_MAPPING, &typeMappings);
-    if (result != B_OK) {
-        ERROR("missing type mappings for self relation!\n");
-        return result;
-    }
-    BString  pluginSig;
-    result = pluginConfig->FindMessage(SENSEI_TYPE_MAPPING, &typeMappings);
-    if (result != B_OK) {
-        ERROR("missing type mappings for self relation!\n");
-        return result;
-    }
-
-    int32    itemCount = typeMappings.CountNames(B_STRING_TYPE);
-    char    *typeName[B_MIME_TYPE_LENGTH];
-
-    for (int32 index = 0; index < itemCount; index++) {
-        result = typeMappings.GetInfo(B_STRING_TYPE, index, typeName, NULL, NULL);
-        if (result != B_OK || *typeName == NULL) {
-            ERROR("failed to parse output types of plugin %s (%u types added): %s\n", pluginSig, index, strerror(result));
-            return result;
-        }
-        LOG("adding output type %s with associated plugin %s\n", *typeName, pluginSig);
-        typesToPlugins.AddString(*typeName, pluginSig);
-    }
-    pluginConfig->AddMessage(SENSEI_TYPES_PLUGINS_KEY, new BMessage(typesToPlugins));
-    return result;
-}
-*/
 const char* RelationsHandler::GetMimeTypeForPath(const char* source) {
     BNode sourceNode(source);
     status_t result;

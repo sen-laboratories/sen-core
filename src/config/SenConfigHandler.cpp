@@ -46,16 +46,9 @@ void SenConfigHandler::MessageReceived(BMessage* message)
 
     switch(message->what)
     {
-        case SEN_CORE_INSTALL:
-        {
-            LOG("Currently handled by oni.sh bash script, nothing to do here.");
-            break;
-        }
         default:
         {
-            LOG("SenConfigHandler: unknown message received, handing over to parent: %u\n", message->what);
-            BHandler::MessageReceived(message);
-            return;
+            LOG("SenConfigHandler: currently only left a stub\n");
         }
     }
     LOG("SEN ConfigHandler sending reply %d\n", result);
