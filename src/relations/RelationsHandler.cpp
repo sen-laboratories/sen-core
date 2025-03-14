@@ -187,10 +187,10 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         LOG("adding new properties for existing relation %s\n", relation);
     } else {
         LOG("adding new target %s for relation %s\n", targetId, relation);
-        relations->AddString(SEN_TO_ATTR, targetId);
+        relations->AddString(SEN_TO_ATTR, BString(targetId));
     }
     // add new relation properties for target
-    relations->AddMessage(targetId, &properties);
+    relations->AddMessage(BString(targetId).String(), &properties);
     LOG("new relation properties for relation %s and target %s:\n", relation, target);
     properties.PrintToStream();
 
@@ -229,7 +229,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         return B_ERROR;
     }
 
-    LOG("created relation %s from src %s to target %s with properties:\n", relation, srcId, targetId);
+    LOG("created relation %s from src ID %s to target ID %s with properties:\n", relation, srcId, targetId);
     relations->PrintToStream();
 
 	reply->what = SEN_RESULT_RELATIONS;
