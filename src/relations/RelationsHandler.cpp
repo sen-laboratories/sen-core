@@ -4,6 +4,7 @@
  * Distributed under the terms of the MIT License.
  */
 
+#include <cassert>
 #include <fs_attr.h>
 #include <Node.h>
 #include <Path.h>
@@ -88,19 +89,62 @@ void RelationsHandler::MessageReceived(BMessage* message)
 
 status_t RelationsHandler::GetMessageParameter(
     const BMessage* message, BMessage* reply,
-    const char* param, BString* buffer,
+    const char* param, BString* buffer, entry_ref* ref,
     bool mandatory, bool stripSuperType) {
 
-    if (mandatory && (message->FindString(param, buffer) != B_OK)) {
+    // first check parameter existence (source may be String or ref)
+    if (mandatory && !message->HasData(param, B_ANY_TYPE)) {
         ERROR("failed to read required param '%s'.\n", param);
         reply->AddString("cause", (new BString("missing required parameter "))->Append(param).String());
+
 		return B_BAD_VALUE;
 	}
-    // remove Relation supertype for relation params for internal handling
-    if (stripSuperType && BString(param) == SEN_RELATION_TYPE) {
-        buffer = StripSuperType(buffer);
+
+    // then parse parameter
+    BString paramStr(param);
+    status_t status = B_OK;
+
+    // handle source path / ref and always return back entry_ref
+    if (paramStr == SEN_RELATION_SOURCE) {
+        if (message->HasString(SEN_RELATION_SOURCE)) {
+            // get path string
+            BString srcPath;
+            status = message->FindString(SEN_RELATION_SOURCE, &srcPath);
+            if (status != B_OK) {
+                ERROR("could not parse src string: %s\n", strerror(status));
+                return status;
+            }
+
+            // and translate to ref
+            BEntry entry(srcPath.String());
+            if (status == B_OK) status = entry.InitCheck();
+            if (status == B_OK) status = entry.GetRef(ref);
+        } else {
+            if (message->HasRef(SEN_RELATION_SOURCE) && ref != NULL) {
+                status = message->FindRef(SEN_RELATION_SOURCE, ref);
+            } else {
+                ERROR("invalid src param, either String or Ref is needed!\n");
+                return B_BAD_VALUE;
+            }
+        }
+        LOG("got source ref: %s\n", ref->name);
+    } else {
+        status = message->FindString(param, buffer);
+        if (status != B_OK) {
+            BString error;
+            error << "failed to parse parameter " << param << ": " << strerror(status);
+
+            ERROR("%s", error.String());
+            reply->AddString("cause", error.String());
+        }
+
+        if (stripSuperType && BString(param) == SEN_RELATION_TYPE) {
+            // remove Relation supertype for relation params for internal handling
+            buffer = StripSuperType(buffer);
+        }
     }
-    return B_OK;
+
+    return status;
 }
 
 BString* RelationsHandler::StripSuperType(BString* mimeType) {
@@ -112,42 +156,43 @@ BString* RelationsHandler::StripSuperType(BString* mimeType) {
 
 status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 {
-	BString sourceParam;
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
-		return B_BAD_VALUE;
+    status_t status;
+	entry_ref sourceRef;
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
+		return status;
 	}
-    const char* source = sourceParam.String();
 
 	BString relationType;
-	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType)  != B_OK) {
-		return B_BAD_VALUE;
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType))  != B_OK) {
+		return status;
 	}
     const char* relation = relationType.String();
 
-	BString targetParam;
-	if (GetMessageParameter(message, reply, SEN_RELATION_TARGET, &targetParam)  != B_OK) {
-		return B_BAD_VALUE;
+    entry_ref targetRef;
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_TARGET, NULL, &targetRef))  != B_OK) {
+		return status;
 	}
-    const char* target = targetParam.String();
 
-	const char* srcId = GetOrCreateId(source, true);
+	const char* srcId = GetOrCreateId(&sourceRef, true);
 	if (srcId == NULL) {
 		return B_ERROR;
 	}
 
 	// get existing relations of the given type from the source file
-	BMessage* relations = ReadRelationsOfType(source, relation, reply);
-	if (relations == NULL) {
-		ERROR("failed to read relations of type %s from file %s\n", relation, source);
+	BMessage relations;
+    status = ReadRelationsOfType(&sourceRef, relation, &relations);
+	if (status != B_OK) {
+		ERROR("failed to read relations of type %s from file %s\n", relation, sourceRef.name);
 		return B_ERROR;
-	} else if (relations->IsEmpty()) {
-        LOG("creating new relation %s for file %s\n", relation, source);
+	} else if (relations.IsEmpty()) {
+        LOG("creating new relation %s for file %s\n", relation, sourceRef.name);
+    } else {
+        LOG("got relations for type %s and file %s:\n", relation, sourceRef.name);
+        relations.PrintToStream();
     }
-    LOG("got relations for type %s and file %s:\n", relation, source);
-    relations->PrintToStream();
 
     // prepare target
-	const char* targetId = GetOrCreateId(target, true);
+	const char* targetId = GetOrCreateId(&targetRef, true);
 	if (targetId == NULL) {
 		return B_ERROR;
 	}
@@ -167,7 +212,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     // Since there is no method BMessage::FindMessages() to collect them all, we need to iterate.
     BMessage oldProperties;
     int index = 0;
-    while (relations->FindMessage(targetId, index, &oldProperties) == B_OK) {
+    while (relations.FindMessage(targetId, index, &oldProperties) == B_OK) {
         LOG("got existing relation properties at index %d:\n", index);
         oldProperties.PrintToStream();
 
@@ -187,68 +232,73 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
         LOG("adding new properties for existing relation %s\n", relation);
     } else {
         LOG("adding new target %s for relation %s\n", targetId, relation);
-        relations->AddString(SEN_TO_ATTR, BString(targetId));
+        relations.AddString(SEN_TO_ATTR, BString(targetId));
     }
     // add new relation properties for target
-    relations->AddMessage(BString(targetId).String(), &properties);
-    LOG("new relation properties for relation %s and target %s:\n", relation, target);
+    relations.AddMessage(BString(targetId).String(), &properties);
+
+    LOG("new relation properties for relation %s and target %s:\n", relation, targetRef.name);
     properties.PrintToStream();
 
     // write new relation to designated attribute
     const char* attrName = GetAttributeNameForRelation(relation);
-    LOG("writing new relation into attribute %s of file %s\n", attrName, source);
+    LOG("writing new relation into attribute %s of file %s\n", attrName, sourceRef.name);
 
-    BNode node(source); // has been checked already at least once here
+    BNode node(&sourceRef); // has been checked already at least once here
 
-    ssize_t msgSize = relations->FlattenedSize();
+    ssize_t msgSize = relations.FlattenedSize();
     char msgBuffer[msgSize];
-    status_t flatten_status = relations->Flatten(msgBuffer, msgSize);
+    status_t flatten_status = relations.Flatten(msgBuffer, msgSize);
 
     if (flatten_status != B_OK) {
-        ERROR("failed to store relation properties for relation %s in file %s\n", relation, source);
+        ERROR("failed to store relation properties for relation %s in file %s\n", relation, sourceRef.name);
             reply->what = SEN_RESULT_RELATIONS;
             reply->AddString("status", BString("failed to create relation '") << relation << "' from "
-            << source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]: \n"
+            << sourceRef.name << " [" << srcId << "] -> " <<  targetRef.name << " [" << targetId << "]: \n"
             << flatten_status);
+
         return B_ERROR;
     }
 
-    ssize_t writeSizeStatus = node.WriteAttr(
+    ssize_t result = node.WriteAttr(
             attrName,
             B_MESSAGE_TYPE,
             0,
             msgBuffer,
             msgSize);
 
-    if (writeSizeStatus <= 0) {
-        ERROR("failed to store relation %s for file %s\n", relation, source);
-        	reply->what = SEN_RESULT_RELATIONS;
-            reply->AddString("status", BString("failed to create relation '") << relation << "' from "
-            << source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]: \n"
-            << writeSizeStatus);
+    if (result <= 0) {
+        ERROR("failed to store relation %s for file %s: %s\n", relation, sourceRef.name, strerror(result));
+
+        reply->what = SEN_RESULT_RELATIONS;
+        reply->AddString("status", BString("failed to create relation '") << relation << "' from "
+            << sourceRef.name << " [" << srcId << "] -> " <<  targetRef.name << " [" << targetId << "]: \n"
+            << strerror(result));
+
         return B_ERROR;
     }
 
     LOG("created relation %s from src ID %s to target ID %s with properties:\n", relation, srcId, targetId);
-    relations->PrintToStream();
+    relations.PrintToStream();
 
 	reply->what = SEN_RESULT_RELATIONS;
 	reply->AddString("status", BString("created relation '") << relation << "' from "
-		<< source << " [" << srcId << "] -> " <<  target << " [" << targetId << "]");
+		<< sourceRef.name << " [" << srcId << "] -> " <<  targetRef.name << " [" << targetId << "]");
 
 	return B_OK;
 }
 
 status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
-	BString sourceParam;
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
-		return B_BAD_VALUE;
+	entry_ref sourceRef;
+    status_t  status;
+
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
+		return status;
 	}
-    const char* source = sourceParam.String();
     bool withProperties = message->GetBool("properties");
 
-    BStringList* relationNames = ReadRelationNames(source);
+    BStringList* relationNames = ReadRelationNames(&sourceRef);
     if (relationNames == NULL) {
         return B_ERROR;
     }
@@ -258,68 +308,80 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
             BString relation = relationNames->StringAt(i);
             LOG("adding properties of relation %s...\n", relation.String());
 
-            BMessage* relations = ReadRelationsOfType(source, relation.String(), reply);
-            if (relations == NULL) {
-                return B_ERROR;
+            BMessage relations;
+            status = ReadRelationsOfType(&sourceRef, relation.String(), &relations);
+            if (status != B_OK) {
+                return status;
             }
-            reply->AddMessage(relation.String(), relations);
+            reply->AddMessage(relation.String(), new BMessage(relations));
         }
     }
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings(SEN_RELATIONS, *relationNames);
-    reply->AddString(SEN_ID_ATTR, GetOrCreateId(source));
+    reply->AddString(SEN_ID_ATTR, GetOrCreateId(&sourceRef));
     reply->AddString("status", BString("got ")
-        << relationNames->CountStrings() << " relation(s) from " << source);
+        << relationNames->CountStrings() << " relation(s) from " << sourceRef.name);
 
 	return B_OK;
 }
 
 status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage* reply)
 {
-	BString sourceParam;
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
-		return B_BAD_VALUE;
+	entry_ref sourceRef;
+    status_t  status;
+
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
+		return status;
 	}
-    const char* source = sourceParam.String();
 
 	BString relationType;
 	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType)  != B_OK) {
 		return B_BAD_VALUE;
 	}
-    const char* relation = relationType.String();
 
-    BMessage* relations = ReadRelationsOfType(source, relation, reply);
-    if (relations == NULL) {
-        reply->AddString("cause", "failed to retrieve relations of given type.");
+    BMessage relations;
+    status = ReadRelationsOfType(&sourceRef, relationType.String(), &relations);
+    if (status != B_OK) {
+        reply->AddString("error", "failed to retrieve relations of given type.");
+        reply->AddString("cause", strerror(status));
         return B_ERROR;
     }
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddMessage(SEN_RELATIONS, relations);
-    reply->AddString("status", BString("retrieved ") << relations->CountNames(B_STRING_TYPE)
-        << " relations from " << source);
+    reply->AddMessage(SEN_RELATIONS, new BMessage(relations));
+    reply->AddString("status", BString("retrieved ") << relations.CountNames(B_STRING_TYPE)
+                 << " relations from " << sourceRef.name);
 
     reply->PrintToStream();
+
 	return B_OK;
 }
 
 // private methods
 
-BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* relationType, BMessage* reply)
+status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const char* relationType, BMessage* relations)
 {
-    BNode node(path);
-	if (node.InitCheck() != B_OK) {
-		ERROR("failed to initialize node for path %s\n", path);
-		return NULL;
+    BNode node(sourceRef);
+    status_t status;
+
+	if ((status = node.InitCheck()) != B_OK) {
+		ERROR("failed to initialize node for ref %s: %s\n", sourceRef->name, strerror(status));
+		return status;
 	}
     // read relation config as message from respective relation attribute
     attr_info attrInfo;
     const char* attrName = GetAttributeNameForRelation(relationType);
     LOG("checking for relation %s in atttribute %s\n", relationType, attrName);
 
-    if (node.GetAttrInfo(attrName, &attrInfo) != B_OK) { // also if attribute not found, e.g. new relation
-        return new BMessage();
+    if ((status = node.GetAttrInfo(attrName, &attrInfo)) != B_OK) {
+        // if attribute not found, e.g. new relation, this is OK, else it's a real ERROR
+        if (status != B_ENTRY_NOT_FOUND) {
+            ERROR("failed to get attribute info for ref %s: %s\n", sourceRef->name, strerror(status));
+            return status;
+        }
+        return B_OK;
     }
+    // read relation property message
     char* relation_attr_value = new char[attrInfo.size + 1];
     ssize_t result = node.ReadAttr(
             attrName,
@@ -328,12 +390,12 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
             relation_attr_value,
             attrInfo.size);
 
-    if (result == 0) {
-        LOG("no relations of type %s found for path %s.\n", relationType, path);
-        return new BMessage();
-    } else if (result < 0) {
-        ERROR("failed to read relation %s of file %s.\n", relationType, path);
-        return NULL;
+    if (result == 0) {          // result is bytes read
+        LOG("no relations of type %s found for path %s.\n", relationType, sourceRef->name);
+        return B_OK;
+    } else if (result < 0) {    // result is an error code
+        ERROR("failed to read relation %s of file %s: %s\n", relationType, sourceRef->name, strerror(result));
+        return result;
     }
 
     BMessage *resultMsg = new BMessage();
@@ -344,30 +406,30 @@ BMessage* RelationsHandler::ReadRelationsOfType(const char* path, const char* re
     BObjectList<BEntry> entries;
     resultMsg->FindStrings(SEN_TO_ATTR, &ids);
 
-    if (ResolveRelationTargets(&ids, &entries) == B_OK) {
+    if ((status = ResolveRelationTargets(&ids, &entries)) == B_OK) {
         LOG("got %d relation targets for type %s and file %s, resolving entries...\n",
-            entries.CountItems(), relationType, path);
+            entries.CountItems(), relationType, sourceRef->name);
 
         for (int32 i = 0; i < entries.CountItems(); i++) {
             entry_ref ref;
             BEntry entry = *entries.ItemAt(i);
-            if (entry.InitCheck() == B_OK) {
-                if (entry.GetRef(&ref) == B_OK) {
-                    reply->AddRef("refs", &ref);
+            if ((status = entry.InitCheck()) == B_OK) {
+                if ((status = entry.GetRef(&ref)) == B_OK) {
+                    relations->AddRef("refs", &ref);
                 } else {
-                    ERROR("failed to resolve ref for target %s of relation %s and file %s.\n",
-                        ids.StringAt(i).String(), relationType, path);
-                    return NULL;
+                    ERROR("failed to resolve ref for target %s of relation %s and file %s: %s.\n",
+                        ids.StringAt(i).String(), relationType, sourceRef->name, strerror(status));
+                    return status;
                 }
             }
         }
     } else {
-        ERROR("failed to read relation targets for relation %s of file %s.\n", relationType, path);
-        return NULL;
+        ERROR("failed to read relation targets for relation %s of file %s.\n", relationType, sourceRef->name);
+        return status;
     }
 
     LOG("read %d relation(s) of type %s:\n", resultMsg->CountNames(B_MESSAGE_TYPE), relationType);
-    return resultMsg;
+    return status;
 }
 
 status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* reply)
@@ -410,13 +472,13 @@ status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage*
  * private methods
  */
 
-BStringList* RelationsHandler::ReadRelationNames(const char* path)
+BStringList* RelationsHandler::ReadRelationNames(const entry_ref* ref)
 {
 	BStringList* result = new BStringList();
 
-	BNode node(path);
+	BNode node(ref);
 	if (node.InitCheck() != B_OK) {
-        ERROR("failed to read from %s\n", path);
+        ERROR("failed to read from %s\n", ref->name);
 		return result;
     }
 
@@ -460,37 +522,39 @@ const char* RelationsHandler::GenerateId() {
  * we use the inode as a stable file/dir reference
  * (for now, just like filesystem links, they have to stay on the same device)
  */
-const char* RelationsHandler::GetOrCreateId(const char *path, bool createIfMissing)
+const char* RelationsHandler::GetOrCreateId(const entry_ref *ref, bool createIfMissing)
 {
-	BNode node(path);
-	if (node.InitCheck() != B_OK) {
-		ERROR("failed to initialize node for path %s\n", path);
+    status_t result;
+	BNode node(ref);
+
+	if ((result = node.InitCheck()) != B_OK) {
+		ERROR("failed to initialize node for path %s: %s\n", ref->name, strerror(result));
 		return NULL;
 	}
 
     BString id;
-    status_t result = node.ReadAttrString(SEN_ID_ATTR, &id);
+    result = node.ReadAttrString(SEN_ID_ATTR, &id);
     if (result == B_ENTRY_NOT_FOUND) {
         if (!createIfMissing) {
             return NULL;
         }
         id = GenerateId();
         if (id != NULL) {
-            LOG("generated new ID %s for path %s\n", id.String(), path);
+            LOG("generated new ID %s for path %s\n", id.String(), ref->name);
             if (node.WriteAttrString(SEN_ID_ATTR, &id) != B_OK) {
-                ERROR("failed to create ID for path %s\n", path);
+                ERROR("failed to create ID for path %s\n", ref->name);
                 return NULL;
             }
             return id.String();
         } else {
-            ERROR("failed to create ID for path %s\n", path);
+            ERROR("failed to create ID for path %s\n", ref->name);
             return NULL;
         }
     } else if (result != B_OK && result < 0) {
-        ERROR("failed to read ID from path %s\n", path);
+        ERROR("failed to read ID from path %s\n", ref->name);
         return NULL;
     }
-    LOG("got existing ID %s for path %s\n", id.String(), path);
+    LOG("got existing ID %s for path %s\n", id.String(), ref->name);
 
     return (new BString(id))->String();
 }

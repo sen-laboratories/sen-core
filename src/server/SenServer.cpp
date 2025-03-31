@@ -171,14 +171,14 @@ void SenServer::MessageReceived(BMessage* message)
                         BNode node(&ref);
                         BPath path(&ref);
 
-                        const char *id = relationsHandler->GetOrCreateId(path.Path());
+                        const char *id = relationsHandler->GetOrCreateId(&ref);
                         if (id == NULL) {
                             break;
                         }
 
                         BEntry existingEntry;
 
-                        if (relationsHandler->QueryById(id, &existingEntry) == B_OK) {
+                        if ((result = relationsHandler->QueryById(id, &existingEntry)) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
                                 LOG("SEN:ID %s refers to same node %d, nothing to do.",
@@ -193,7 +193,7 @@ void SenServer::MessageReceived(BMessage* message)
                             if (attrCount >= 0) {
                                 LOG("removed %d attribute(s) from file %s\n", attrCount, path.Path());
                             } else  {
-                                ERROR("failed to remove attributes from node %s\n", path.Path());
+                                ERROR("failed to remove attributes from node %s: %s\n", path.Path(), strerror(result));
                             }
                         } else {
                             LOG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
@@ -217,14 +217,7 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATIONS_REMOVE_ALL:
         {
             // todo: PostMessage() fails with error "Mismatched values passed to function"
-            result = PostMessage(message, relationsHandler);
-            if (result != B_OK) {
-            	ERROR("failed to forward message to RelationsHandler: %s\n", strerror(result));
-            	// still continue to populate relations menu
-            	// fallback
-            	relationsHandler->MessageReceived(message);
-            }
-            
+            relationsHandler->MessageReceived(message);
             break;
         }
 		default:

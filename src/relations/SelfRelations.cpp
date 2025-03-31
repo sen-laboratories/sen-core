@@ -20,21 +20,22 @@
 #include "../Sensei.h"
 
 status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
-	BString sourceParam;
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
-		return B_BAD_VALUE;
-	}
-    const char* source = sourceParam.String();
-    status_t result;
+	entry_ref sourceRef;
+	status_t  status;
 
-    const char* sourceType = GetMimeTypeForPath(source);
+    if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, nullptr, &sourceRef))  != B_OK) {
+        ERROR("failed to parse source: %s\n", strerror(status));
+		return status;
+	}
+
+    const char* sourceType = GetMimeTypeForRef(&sourceRef);
 
     // query for all compatible extractors and return their generated collected output type
     LOG("query for extractors to handle file type %s\n", sourceType);
     BMessage pluginConfig;
 
-    if ((result = GetPluginsForType(sourceType, &pluginConfig)) != B_OK) {
-        return result;
+    if ((status = GetPluginsForType(sourceType, &pluginConfig)) != B_OK) {
+        return status;
     }
     LOG("got types/plugins config for source type %s:\n", sourceType);
     pluginConfig.PrintToStream();
@@ -42,33 +43,35 @@ status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* r
     reply->what = SENSEI_MESSAGE_RESULT;
     reply->AddMessage(SENSEI_PLUGIN_CONFIG_KEY, new BMessage(pluginConfig));
 
-    return result;
+    return status;
 }
 
 status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMessage* reply) {
-	BString sourceParam;
-	if (GetMessageParameter(message, reply, SEN_RELATION_SOURCE, &sourceParam)  != B_OK) {
-		return B_BAD_VALUE;
+    entry_ref sourceRef;
+	status_t  status;
+
+    if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
+		return status;
 	}
-    const char* source = sourceParam.String();
-    const char* sourceMimeType = GetMimeTypeForPath(source);
+
+    const char* sourceMimeType = GetMimeTypeForRef(&sourceRef);
     if (sourceMimeType == NULL) {
         return B_ERROR;
     }
 
     BString relationTypeParam;
     // relation type for self relations is one of the possible output types of compatible extractors.
-	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationTypeParam, true, false)  != B_OK) {
+	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationTypeParam, NULL, true, false)  != B_OK) {
 		return B_BAD_VALUE;
 	}
     const char* relationType = relationTypeParam.String();
 
     BString pluginTypeParam;
     // client may send the desired plugin signature already, saving us the hassle
-	if (GetMessageParameter(message, reply, SENSEI_PLUGIN_KEY, &pluginTypeParam, true, false)  == B_OK) {
+	if (GetMessageParameter(message, reply, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true, false)  == B_OK) {
         const char* pluginSig = pluginTypeParam.String();
         LOG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
-		return ResolveSelfRelationsWithPlugin(pluginSig, source, reply);
+		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, reply);
 	}
 
     status_t result;
@@ -114,7 +117,7 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
     }
     const char* pluginSig = pluginType.String();
 
-    result = ResolveSelfRelationsWithPlugin(pluginSig, source, reply);
+    result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, reply);
     if (result != B_OK) {
         ERROR("failed to resolve relations of type %s with plugin %s: %s\n", relationType, pluginSig, strerror(result));
         return result;
@@ -126,7 +129,7 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
     return result;
 }
 
-status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig, const char* source, BMessage* reply) {
+status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef, BMessage* reply) {
     LOG("got plugin app signature: %s\n", pluginSig);
 
     // execute plugin and return result
@@ -137,12 +140,11 @@ status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig,
     }
 
     // build refs received for plugin as input param
-    BEntry sourceEntry(source);
-    entry_ref* sourceRef = new entry_ref;
+    BEntry sourceEntry(sourceRef);
     result = sourceEntry.InitCheck();
-    if (result == B_OK) result = sourceEntry.GetRef(sourceRef);
+
     if (result != B_OK) {
-        ERROR("failed to get ref for path %s: %s\n", source, strerror(result));
+        ERROR("failed to get ref for path %s: %s\n", sourceRef->name, strerror(result));
         return result;
     }
     BMessage refsMsg(B_REFS_RECEIVED);
@@ -167,6 +169,7 @@ status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig,
     return B_OK;
 }
 
+// todo: extend to handle flavours/features like search or identify
 status_t RelationsHandler::GetPluginsForType(const char* mimeType, BMessage* pluginConfig) {
 	BString predicate("SEN:TYPE==meta/x-vnd.sen-meta.plugin && SENSEI:TYPE==extractor");
 	BVolumeRoster volRoster;
@@ -312,21 +315,21 @@ status_t RelationsHandler::GetPluginConfig(
     return result;
 }
 
-const char* RelationsHandler::GetMimeTypeForPath(const char* source) {
-    BNode sourceNode(source);
+const char* RelationsHandler::GetMimeTypeForRef(const entry_ref *ref) {
+    BNode sourceNode(ref);
     status_t result;
     if ((result = sourceNode.InitCheck()) != B_OK) {
-        ERROR("could not initialize source node %s !", source);
+        ERROR("could not initialize source node %s: %s\n", ref->name, strerror(result));
         return NULL;
     }
     BNodeInfo sourceInfo(&sourceNode);
     if ((result = sourceInfo.InitCheck()) != B_OK) {
-        ERROR("could not initialize source node info for %s !", source);
+        ERROR("could not initialize source node info for %s: %s\n", ref->name, strerror(result));
         return NULL;
     }
     char sourceType[B_MIME_TYPE_LENGTH];
     if ((result = sourceInfo.GetType(sourceType)) != B_OK) {
-        ERROR("could not get MIME type for source node %s !", source);
+        ERROR("could not get MIME type for source node %s: %s\n", ref->name, strerror(result));
         return NULL;
     }
 

@@ -2,12 +2,12 @@ NAME = sen_server
 ARCH = $(shell getarch)
 
 V_MAJOR = 0
-V_MIDDLE = 3
-V_MINOR = 0
+V_MIDDLE = 4
+V_MINOR = 2
 V_VARIETY = B_APPV_DEVELOPMENT
 V_BUILD = 0
 
-TARGET_DIR := ./generated
+TARGET_DIR := ./bin
 PACKAGE = $(TARGET_DIR)/$(NAME)_$(VERSION)-$(ARCH).hpkg
 TYPE = APP
 APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
@@ -15,8 +15,8 @@ APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 SRCS := src/relations/RelationsHandler.cpp \
     	src/relations/SelfRelations.cpp \
     	src/relations/IceDustGenerator.cpp \
-	src/config/SenConfigHandler.cpp \
-	src/server/SenServer.cpp
+		src/config/SenConfigHandler.cpp \
+		src/server/SenServer.cpp
 
 RDEFS = src/resources/sen_server.rdef
 
