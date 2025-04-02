@@ -30,7 +30,7 @@ public:
 		status_t					RemoveAllRelations     (const BMessage* message, BMessage* reply);
 
         const char*                 GenerateId();
-		const char*		     		GetOrCreateId          (const entry_ref* ref, bool createIfMissing = false);
+		status_t    	     		GetOrCreateId          (const entry_ref* ref, char* id, bool createIfMissing = false);
 		status_t                    QueryById              (const char* id, BEntry* entry);
 
         const char*                 GetMimeTypeForRef      (const entry_ref* ref);
@@ -51,6 +51,7 @@ private:
 		status_t            ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations);
 		BStringList*        ReadRelationNames(const entry_ref* ref);
 		status_t            ResolveRelationTargets(BStringList* ids, BObjectList<BEntry> *result);
+
 		// write/delete
 		status_t			WriteRelation(const entry_ref *ref, const char *relationType,
                                 const BMessage* relationConfig);
@@ -63,9 +64,11 @@ private:
         status_t            GetMessageParameter(const BMessage* message, BMessage* reply, const char* param,
                                 BString* buffer = NULL, entry_ref* ref = NULL,
                                 bool mandatory = true, bool stripSuperType = true);
+        status_t            GetPathOrRef(const BMessage* message, BMessage* reply, const char* param, entry_ref* ref);
         const char*         GetAttributeNameForRelation(const char* relationType);
-		static bool         AddOrUpdateRelationTarget(const char* relationType,
-                                BMessage* newRelationTarget, BMessage* existingRelation);
+		//static bool         AddOrUpdateRelationTarget(const char* relationType,
+        //                        BMessage* newRelationTarget, BMessage* existingRelation);
 
+        status_t            GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig);
         IceDustGenerator*   tsidGenerator;
 };

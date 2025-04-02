@@ -171,8 +171,9 @@ void SenServer::MessageReceived(BMessage* message)
                         BNode node(&ref);
                         BPath path(&ref);
 
-                        const char *id = relationsHandler->GetOrCreateId(&ref);
-                        if (id == NULL) {
+                        char id[SEN_ID_LEN];
+                        result = relationsHandler->GetOrCreateId(&ref, id);
+                        if (result != B_OK) {
                             break;
                         }
 
