@@ -136,21 +136,35 @@ void RelationsHandler::MessageReceived(BMessage* message)
 status_t RelationsHandler::GetMessageParameter(
     const BMessage* message, BMessage* reply,
     const char* param, BString* buffer, entry_ref* ref,
-    bool mandatory, bool stripSuperType) {
+    bool mandatory, bool stripSuperType)
+{
+    status_t status;
 
-    // first check parameter existence (source may be String or ref)
-    if (mandatory && !message->HasData(param, B_ANY_TYPE)) {
-        BString error;
-        error << "missing required parameter " << param;
-        ERROR("%s\n", error.String());
-        reply->AddString("error", error);
+    // first check the value for mandatory parameters exist
+    const void *data;
+    ssize_t     size;
+    type_code   type;
 
-		return B_BAD_VALUE;
+    status = message->FindData(param, B_ANY_TYPE, &data, &size);
+
+    if (mandatory && (status != B_OK || size <= 1)) { // also check for empty String values below
+        // check for empty string
+        status = message->GetInfo(param, &type);
+        if (status != B_OK) {
+            ERROR("failed to parse argument %s: %s\n", param, strerror(status));
+            return status;
+        }
+        if (status != B_OK || type == B_STRING_TYPE) {  // empty string has 1 NULL byte
+            BString error;
+            error << "missing required parameter " << param;
+            ERROR("%s\n", error.String());
+            reply->AddString("error", error);
+            return B_BAD_VALUE;
+        }
 	}
 
     // then parse parameter
     BString paramStr(param);
-    status_t status = B_OK;
 
     // handle source path / ref and always return back entry_ref
     if (paramStr == SEN_RELATION_SOURCE || paramStr == SEN_RELATION_TARGET) {
@@ -182,6 +196,9 @@ status_t RelationsHandler::GetMessageParameter(
 status_t RelationsHandler::GetPathOrRef(const BMessage* message, BMessage *reply, const char* param, entry_ref* ref)
 {
     status_t status;
+    BString refParam(param);
+    refParam.Append("Ref");     // by convention, ref params have a "Ref" suffix in SEN
+
     if (message->HasString(param)) {
         // get path string
         BString pathStr;
@@ -197,15 +214,18 @@ status_t RelationsHandler::GetPathOrRef(const BMessage* message, BMessage *reply
         if (status == B_OK) status = entry.GetRef(ref);
         if (status == B_OK) {
             // add ref to reply for possible later use internally
-            reply->AddRef(param, new entry_ref(ref->device, ref->directory, ref->name));
+            reply->AddRef(refParam.String(), new entry_ref(ref->device, ref->directory, ref->name));
         }
     } else {
-        if (message->HasRef(param) && ref != NULL) {
-            status = message->FindRef(param, ref);
+        if (message->HasRef(refParam.String()) && ref != NULL) {
+            status = message->FindRef(refParam.String(), ref);
         } else {
             ERROR("invalid arguments for param '%s': either String or Ref is needed!\n", param);
             return B_BAD_VALUE;
         }
+        // add path for use in external non-native clients
+        BPath path(ref);
+        status = reply->AddString(param, path.Path());
     }
 
     LOG("got ref for param %s: %s\n", param, ref->name);
@@ -409,8 +429,8 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 	}
 
 	BString relationType;
-	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType)  != B_OK) {
-		return B_BAD_VALUE;
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationType))  != B_OK) {
+		return status;
 	}
 
     BMessage relations;
@@ -418,12 +438,12 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
     if (status != B_OK) {
         reply->AddString("error", "failed to retrieve relations of given type.");
         reply->AddString("cause", strerror(status));
-        return B_ERROR;
+        return status;
     }
 
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddMessage(SEN_RELATIONS, new BMessage(relations));
-    reply->AddString("status", BString("retrieved ") << relations.CountNames(B_STRING_TYPE)
+    reply->AddString("status", BString("retrieved ") << relations.CountNames(B_REF_TYPE)
                  << " relations from " << sourceRef.name);
 
     reply->PrintToStream();
