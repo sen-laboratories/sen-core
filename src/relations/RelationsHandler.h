@@ -31,7 +31,7 @@ public:
 
         const char*                 GenerateId();
 		status_t    	     		GetOrCreateId          (const entry_ref* ref, char* id, bool createIfMissing = false);
-		status_t                    QueryById              (const char* id, BEntry* entry);
+		status_t                    QueryById              (const char* id, entry_ref* ref);
 
         const char*                 GetMimeTypeForRef      (const entry_ref* ref);
         status_t                    ResolveSelfRelationsWithPlugin(const char* pluginSig,
@@ -50,8 +50,8 @@ protected:
 private:
 		status_t            ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations);
 		BStringList*        ReadRelationNames(const entry_ref* ref);
-		status_t            ResolveRelationTargets(BStringList* ids, BObjectList<BEntry> *result);
-
+		status_t            ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
+        status_t            ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
 		// write/delete
 		status_t			WriteRelation(const entry_ref *ref, const char *relationType,
                                 const BMessage* relationConfig);

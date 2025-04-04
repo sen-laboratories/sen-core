@@ -139,15 +139,11 @@ void SenServer::MessageReceived(BMessage* message)
         {
             result = B_OK;
             BString id;
-            BEntry entry;
+            entry_ref ref;
 
             if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
-                if ((result = relationsHandler->QueryById(id.String(), &entry)) == B_OK) {
-                    if ((result = entry.InitCheck()) == B_OK) {
-                        entry_ref* ref = new entry_ref;
-                        entry.GetRef(ref);
-                        reply->AddRef("ref", ref);
-                    }
+                if ((result = relationsHandler->QueryById(id.String(), &ref)) == B_OK) {
+                    reply->AddRef("ref", new entry_ref(ref.device, ref.directory, ref.name));
                 }
             }
             break;
@@ -177,7 +173,7 @@ void SenServer::MessageReceived(BMessage* message)
                             break;
                         }
 
-                        BEntry existingEntry;
+                        entry_ref existingEntry;
 
                         if ((result = relationsHandler->QueryById(id, &existingEntry)) == B_OK) {
                             BNode existingNode(&existingEntry);
