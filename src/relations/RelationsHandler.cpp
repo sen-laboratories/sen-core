@@ -535,7 +535,7 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
         relations->AddInt32("count", targetIds.CountStrings());
 
         // add target IDs for quick lookup
-        relations->AddStrings("tagetIds", targetIds);
+        relations->AddStrings(SEN_TO_ATTR, targetIds);
 
         // add refs associated with targetIds
         relations->AddMessage("id_to_ref", new BMessage(idsToRefs));
