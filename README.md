@@ -17,7 +17,7 @@ This is the Haiku server process acting as the foundation of the semantic layer.
 ## Run
 
 ```
-> generated/sen_server &
+> bin/sen_server &
 ```
 
 ## Usage

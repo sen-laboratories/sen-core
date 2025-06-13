@@ -88,6 +88,7 @@ void RelationsHandler::MessageReceived(BMessage* message)
                     reverseRelation.AddRef(SEN_RELATION_TARGET_REF, &srcRef);
 
                     // get reverse properties from config (may be empty)
+                    // todo: factor out into dynamic relation rule and let inference handle it!
                     BMessage reverseConf;
                     status = relationConf.FindMessage(SEN_RELATION_CONFIG_REVERSE, &reverseConf);
                     if (status == B_OK && !reverseConf.IsEmpty()) {
@@ -128,7 +129,7 @@ void RelationsHandler::MessageReceived(BMessage* message)
             reply->AddString("error", "cannot handle this message.");
         }
     }
-    LOG("RelationsHandler sending reply %s\n", strerror(result));
+    LOG("RelationsHandler sending reply %s with message:\n", strerror(result));
 
     reply->AddString("result", strerror(result));
     reply->PrintToStream();

@@ -213,9 +213,8 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL:
         {
-            // todo: PostMessage() fails with error "Mismatched values passed to function"
             relationsHandler->MessageReceived(message);
-            break;
+            return; // done
         }
 		default:
 		{
