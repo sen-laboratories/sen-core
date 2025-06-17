@@ -7,6 +7,7 @@
 #include <cassert>
 #include <fs_attr.h>
 #include <Node.h>
+#include <NodeInfo.h>
 #include <Path.h>
 #include <stdio.h>
 #include <string>
@@ -57,6 +58,16 @@ void RelationsHandler::MessageReceived(BMessage* message)
 			result = GetSelfRelations(message, reply);
 			break;
 		}
+        case SEN_RELATIONS_GET_COMPATIBLE:
+        {
+			result = GetCompatibleRelations(message, reply);
+            break;
+        }
+        case SEN_RELATIONS_GET_COMPATIBLE_TYPES:
+        {
+            result = GetCompatibleTargetTypes(message, reply);
+            break;
+        }
 		case SEN_RELATION_ADD:
 		{
 			result = AddRelation(message, reply);
@@ -204,6 +215,8 @@ status_t RelationsHandler::GetPathOrRef(const BMessage* message, BMessage *reply
         if (status != B_OK) {
             ERROR("could not parse path string from param '%s': %s\n", param, strerror(status));
             return status;
+        } else {
+            LOG("got path for ref: %s\n", pathStr.String());
         }
 
         // and translate to ref
@@ -212,7 +225,7 @@ status_t RelationsHandler::GetPathOrRef(const BMessage* message, BMessage *reply
         if (status == B_OK) status = entry.GetRef(ref);
         if (status == B_OK) {
             // add ref to reply for possible later use internally
-            reply->AddRef(refParam.String(), new entry_ref(ref->device, ref->directory, ref->name));
+            status = reply->AddRef(refParam.String(), new entry_ref(ref->device, ref->directory, ref->name));
         }
     } else {
         if (message->HasRef(refParam.String()) && ref != NULL) {
@@ -226,7 +239,12 @@ status_t RelationsHandler::GetPathOrRef(const BMessage* message, BMessage *reply
         status = reply->AddString(param, path.Path());
     }
 
-    LOG("got ref for param %s: %s\n", param, ref->name);
+    if (status == B_OK) {
+        LOG("got ref for param %s: %s\n", param, ref->name);
+    } else {
+        ERROR("could not find ref for param %s: %s\n", param, strerror(status));
+    }
+    LOG("status is: %s\n", strerror(status));
 
     return status;
 }
@@ -399,7 +417,7 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
 	entry_ref sourceRef;
     status_t  status;
 
-	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
+	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef)) != B_OK) {
 		return status;
 	}
     bool withProperties = message->GetBool("properties");
@@ -425,13 +443,79 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings(SEN_RELATIONS, *relationNames);
 
-    char senId[SEN_ID_LEN];
-    status = GetOrCreateId(&sourceRef, senId);
-    if (status == B_OK) {
-        reply->AddString(SEN_ID_ATTR, senId);
-        reply->AddString("status", BString("got ")
-            << relationNames->CountStrings() << " relation(s) from " << sourceRef.name);
+    // ensure source has a SEN:ID if it has relations
+    // todo: is this needed? would be quite an inconsistency...
+    if (status == B_OK && relationNames->CountStrings() > 0) {
+        char senId[SEN_ID_LEN];
+        status = GetOrCreateId(&sourceRef, senId);
+        reply->AddString(SEN_ID_ATTR, (new BString(senId))->String());
     }
+
+    reply->AddString("status", BString("got ")
+        << relationNames->CountStrings() << " relation(s) from " << sourceRef.name);
+
+	return status;
+}
+
+status_t RelationsHandler::GetCompatibleRelations(const BMessage* message, BMessage* reply)
+{
+    entry_ref sourceRef;
+    status_t  status;
+
+    if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef)) != B_OK) {
+		return status;
+	}
+
+    BNodeInfo nodeInfo(new BNode(&sourceRef));
+    status = nodeInfo.InitCheck();
+    if (status != B_OK) {
+        ERROR("could not resolve entryRef '%s': %s\n", sourceRef.name, strerror(status));
+        return status;
+    }
+
+    char mimeType[B_ATTR_NAME_LENGTH];
+    nodeInfo.GetType(mimeType);
+    LOG("searching for relations compatible to type %s...\n", mimeType);
+
+    BMessage relationTypes;
+    BMimeType::GetInstalledTypes(SEN_RELATION_SUPERTYPE, &relationTypes);
+    LOG("found relations:\n");
+    relationTypes.PrintToStream();
+
+    BStringList types;
+    relationTypes.FindStrings("types", &types);
+
+    // todo: filter out relations that exclude this type
+    reply->what = SEN_RESULT_RELATIONS;
+    reply->AddStrings(SEN_RELATIONS, types);
+    reply->AddString("status", BString("got ")
+                    << types.CountStrings() << " relation(s) from " << sourceRef.name);
+
+	return status;
+}
+
+status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMessage* reply)
+{
+    BString  sourceType;
+    status_t status;
+
+    if ((status = GetMessageParameter(message, reply, SEN_RELATION_TYPE, &sourceType)) != B_OK) {
+		return status;
+	}
+
+    LOG("searching for types compatible to relation %s...\n", sourceType.String());
+
+    BMessage targetTypes;
+    BMimeType::GetInstalledTypes(SEN_ENTITY_SUPERTYPE, &targetTypes);
+    BStringList types;
+    targetTypes.FindStrings("types", &types);
+
+    // todo: filter out targets excluded by relation type
+
+    reply->what = SEN_RESULT_RELATIONS;
+    reply->AddStrings(SEN_MSG_TYPES, types);
+    reply->AddString("status", BString("got ")
+                    << types.CountStrings() << " compatible target(s) for " << sourceType.String());
 
 	return status;
 }
@@ -441,6 +525,7 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 	entry_ref sourceRef;
     status_t  status;
 
+    // todo: move to refs for input and ouput
 	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
 		return status;
 	}
@@ -458,6 +543,7 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
         return status;
     }
 
+    // todo: provide a simple refs variant without the id_to_ref map
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddMessage(SEN_RELATIONS, new BMessage(relations));
     reply->AddString("status", BString("retrieved ") << relations.GetInt32("count", 0)
@@ -525,12 +611,12 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
         return status;
     }
 
-    // add target re
-    BMessage    idsToRefs;
+    // add target refs
+    BMessage    idToRefMap;
 
-    if ((status = ResolveRelationTargets(&targetIds, &idsToRefs)) == B_OK) {
+    if ((status = ResolveRelationTargets(&targetIds, &idToRefMap)) == B_OK) {
         LOG("got %d unique relation targets for type %s and file %s, resolving entries...\n",
-            idsToRefs.CountNames(B_REF_TYPE), relationType, sourceRef->name);
+            idToRefMap.CountNames(B_REF_TYPE), relationType, sourceRef->name);
 
         // add relation count for quick check
         relations->AddInt32("count", targetIds.CountStrings());
@@ -539,7 +625,7 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
         relations->AddStrings(SEN_TO_ATTR, targetIds);
 
         // add refs associated with targetIds
-        relations->AddMessage("id_to_ref", new BMessage(idsToRefs));
+        relations->AddMessage("id_to_ref", new BMessage(idToRefMap));
 
         // add properties associated with a given targetId (nested messages for each relation to that target)
         relations->AddMessage("properties", new BMessage(relationProperties));
@@ -661,8 +747,7 @@ const char* RelationsHandler::GenerateId() {
 }
 
 /**
- * we use the inode as a stable file/dir reference
- * (for now, just like filesystem links, they have to stay on the same device)
+ * retrieve existing SEN:ID from entry, or generate a new one if not existing.
  */
 status_t RelationsHandler::GetOrCreateId(const entry_ref *ref, char* id, bool createIfMissing)
 {

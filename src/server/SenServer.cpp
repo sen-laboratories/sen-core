@@ -209,6 +209,8 @@ void SenServer::MessageReceived(BMessage* message)
         case SEN_RELATIONS_GET_ALL:
         case SEN_RELATIONS_GET_SELF:
         case SEN_RELATIONS_GET_ALL_SELF:
+        case SEN_RELATIONS_GET_COMPATIBLE:
+        case SEN_RELATIONS_GET_COMPATIBLE_TYPES:
 		case SEN_RELATION_ADD:
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL:
