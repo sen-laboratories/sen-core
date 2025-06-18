@@ -507,6 +507,8 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
 
     BMessage targetTypes;
     BMimeType::GetInstalledTypes(SEN_ENTITY_SUPERTYPE, &targetTypes);
+    // TODO: filter internal meta types like Ontology or Plugin
+    BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
     BStringList types;
     targetTypes.FindStrings("types", &types);
 
