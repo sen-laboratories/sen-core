@@ -75,7 +75,10 @@ void RelationsHandler::MessageReceived(BMessage* message)
             if (result == B_OK) {
                 // check if relation is bidirectional and add reverse relation
                 BMessage relationConf;
-                status_t status = GetRelationMimeConfig(reply->GetString(SEN_RELATION_TYPE), &relationConf);
+                BString  relationType;
+                status_t status = reply->FindString(SEN_RELATION_TYPE, &relationType);
+                if (status == B_OK)
+                         status = GetRelationMimeConfig(relationType.String(), &relationConf);
 
                 // relations are bidirectional by default (makes sense in 90% of cases)
                 if (status == B_OK && relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) {
@@ -86,20 +89,19 @@ void RelationsHandler::MessageReceived(BMessage* message)
                     BMessage reverseRelation(*message);
 
                     entry_ref srcRef, targetRef;
-                    reply->FindRef(SEN_RELATION_SOURCE_REF, &srcRef);
-                    reply->FindRef(SEN_RELATION_TARGET_REF, &targetRef);
+                    message->FindRef(SEN_RELATION_SOURCE_REF, &srcRef);
+                    message->FindRef(SEN_RELATION_TARGET_REF, &targetRef);
 
                     // remove any existing source/target and add swapped refs for reverse relation
                     reverseRelation.RemoveData(SEN_RELATION_SOURCE);
                     reverseRelation.RemoveData(SEN_RELATION_TARGET);
                     reverseRelation.RemoveData(SEN_RELATION_SOURCE_REF);
                     reverseRelation.RemoveData(SEN_RELATION_TARGET_REF);
-
+                    // swap source and target
                     reverseRelation.AddRef(SEN_RELATION_SOURCE_REF, &targetRef);
                     reverseRelation.AddRef(SEN_RELATION_TARGET_REF, &srcRef);
 
-                    // get reverse properties from config (may be empty)
-                    // todo: factor out into dynamic relation rule and let inference handle it!
+                    // get optional reverse properties from config
                     BMessage reverseConf;
                     status = relationConf.FindMessage(SEN_RELATION_CONFIG_REVERSE, &reverseConf);
                     if (status == B_OK && !reverseConf.IsEmpty()) {
@@ -119,6 +121,11 @@ void RelationsHandler::MessageReceived(BMessage* message)
                     if (status == B_OK) {
                         reply->AddMessage("reply_reverse", &replyReverse);
                     }
+                    reply->AddString("result_reverse", strerror(status));
+                } else {
+                    LOG("failed to get relation config for type %s: %s\n",
+                        relationType.String(), strerror(status));
+
                     reply->AddString("result_reverse", strerror(status));
                 }
             }
@@ -605,7 +612,7 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
 
     if (result == B_OK) {
         const char* ids = targetIds.Join(",").String();
-        LOG("got ids: %s", ids);
+        LOG("got ids: %s\n", ids);
     } else {
         ERROR("failed to resolve relation target IDs for relation %s of file %s: %s\n",
             relationType, sourceRef->name, strerror(result));
