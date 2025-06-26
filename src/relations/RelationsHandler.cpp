@@ -557,22 +557,27 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
     }
 
     BMessage relations;
-    if (relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) {
-        status = ReadRelationsOfType(&sourceRef, relationType.String(), &relations);
-    } else {
-        status = ResolveInverseRelations(&sourceRef, &relations, relationType.String());
-    }
+    status = ReadRelationsOfType(&sourceRef, relationType.String(), &relations);
+    int32 numberOfRelations = relations.GetInt32("count", 0);
 
+    if (status == B_OK) {
+        if ( (numberOfRelations == 0) && (! relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) ) {
+            // if we get no result, we may be at the other end of a unary relation, then we need to fetch in reverse
+            status = ResolveInverseRelations(&sourceRef, &relations, relationType.String());
+        }
+    }
     if (status != B_OK) {
-        reply->AddString("error", "failed to retrieve relations of given type.");
+        BString error("failed to retrieve relations of type ");
+                error << relationType;
+        reply->AddString("error", error.String());
         reply->AddString("cause", strerror(status));
+
         return status;
     }
 
-    // todo: provide a simple refs variant without the id_to_ref map
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddMessage(SEN_RELATIONS, new BMessage(relations));
-    reply->AddString("status", BString("retrieved ") << relations.GetInt32("count", 0)
+    reply->AddString("status", BString("retrieved ") << numberOfRelations
                  << " relations from " << sourceRef.name);
 
     reply->PrintToStream();

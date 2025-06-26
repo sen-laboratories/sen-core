@@ -169,7 +169,7 @@ status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig,
 
 // todo: extend to handle flavours/features like search or identify
 status_t RelationsHandler::GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* pluginConfig) {
-    BString predicate("SEN:TYPE==" SENSEI_PLUGIN_TYPE " && " SENSEI_PLUGIN_FEATURE_ATTR);
+    BString predicate("SEN:TYPE==" SENSEI_PLUGIN_TYPE " && " SENSEI_PLUGIN_FEATURE_ATTR ":");
             predicate << feature << "==1";
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
