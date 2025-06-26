@@ -4,7 +4,7 @@
  * Distributed under the terms of the MIT License.
  */
 #include "SenConfigHandler.h"
-#include "../Sen.h"
+#include "Sen.h"
 
 #include <Directory.h>
 #include <FindDirectory.h>

@@ -16,8 +16,8 @@
 #include <Volume.h>
 
 #include "RelationsHandler.h"
-#include "../Sen.h"
-#include "../Sensei.h"
+#include "Sen.h"
+#include "Sensei.h"
 
 status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
 	entry_ref sourceRef;
@@ -34,7 +34,7 @@ status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* r
     LOG("query for extractors to handle file type %s\n", sourceType);
     BMessage pluginConfig;
 
-    if ((status = GetPluginsForType(sourceType, &pluginConfig)) != B_OK) {
+    if ((status = GetPluginsForTypeAndFeature(sourceType, SENSEI_FEATURE_EXTRACT, &pluginConfig)) != B_OK) {
         return status;
     }
     LOG("got types/plugins config for source type %s:\n", sourceType);
@@ -84,7 +84,7 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
         if (result == B_NAME_NOT_FOUND) {
             LOG("fresh query for suitable plugins for relation type %s...\n", relationType);
 
-            result = GetPluginsForType(sourceMimeType, &pluginConfig);
+            result = GetPluginsForTypeAndFeature(sourceMimeType, SENSEI_FEATURE_EXTRACT, &pluginConfig);
             if (result != B_OK) {
                 return result;  // already handled, just pass on
             }
@@ -168,8 +168,9 @@ status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig,
 }
 
 // todo: extend to handle flavours/features like search or identify
-status_t RelationsHandler::GetPluginsForType(const char* mimeType, BMessage* pluginConfig) {
-	BString predicate("SEN:TYPE==meta/x-vnd.sen-meta.plugin && SENSEI:TYPE==extractor");
+status_t RelationsHandler::GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* pluginConfig) {
+    BString predicate("SEN:TYPE==" SENSEI_PLUGIN_TYPE " && " SENSEI_PLUGIN_FEATURE_ATTR);
+            predicate << feature << "==1";
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
@@ -181,7 +182,7 @@ status_t RelationsHandler::GetPluginsForType(const char* mimeType, BMessage* plu
     status_t result;
 	if ((result = query.Fetch()) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
-            LOG("no matching extractor found for type %s\n", mimeType);
+            LOG("no matching extractor found for type %s, query was: %s\n", mimeType, predicate.String());
             return B_OK;
         }
         // something else went wrong

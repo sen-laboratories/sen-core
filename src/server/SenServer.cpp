@@ -5,7 +5,7 @@
  */
 
 #include "SenServer.h"
-#include "../Sen.h"
+#include "Sen.h"
 #include "../relations/RelationsHandler.h"
 
 #include <AppFileInfo.h>

@@ -23,6 +23,24 @@ RDEFS = src/resources/sen_server.rdef
 LIBS = be $(STDCPPLIBS)
 #	Specify the level of optimization that you want. Specify either NONE (O0),
 #	SOME (O1), FULL (O2), or leave blank (for the default optimization level).
+
+#	Specify additional paths to directories following the standard libXXX.so
+#	or libXXX.a naming scheme. You can specify full paths or paths relative
+#	to the Makefile. The paths included are not parsed recursively, so
+#	include all of the paths where libraries must be found. Directories where
+#	source files were specified are	automatically included.
+LIBPATHS =
+
+#	Additional paths to look for system headers. These use the form
+#	"#include <header>". Directories that contain the files in SRCS are
+#	NOT auto-included here.
+SYSTEM_INCLUDE_PATHS =
+
+#	Additional paths paths to look for local headers. These use the form
+#	#include "header". Directories that contain the files in SRCS are
+#	automatically included.
+LOCAL_INCLUDE_PATHS = $(HOME)/config/non-packaged/include/sen
+
 OPTIMIZE =
 
 # 	Specify the codes for languages you are going to support in this

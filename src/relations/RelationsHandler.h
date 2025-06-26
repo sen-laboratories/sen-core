@@ -14,6 +14,7 @@
 #include <StringList.h>
 
 #include "IceDustGenerator.h"
+#include "Sensei.h"
 
 class RelationsHandler : public BHandler {
 
@@ -46,7 +47,7 @@ virtual
 		~RelationsHandler();
 
 protected:
-        status_t            GetPluginsForType(const char* mimeType, BMessage* outputTypesToPlugins);
+        status_t            GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* outputTypesToPlugins);
         status_t            GetPluginConfig(const char* pluginSig, entry_ref* pluginRef,
                                             const char* mimeType, BMessage* pluginConfig);
         status_t            AddTypesToPluginsConfig(BMessage *pluginConfig);

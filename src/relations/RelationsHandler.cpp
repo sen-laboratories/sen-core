@@ -17,7 +17,7 @@
 #include <Volume.h>
 
 #include "RelationsHandler.h"
-#include "../Sen.h"
+#include "Sen.h"
 
 RelationsHandler::RelationsHandler()
     : BHandler("SenRelationsHandler")
