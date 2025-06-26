@@ -33,9 +33,11 @@ public:
 
         const char*                 GenerateId();
 		status_t    	     		GetOrCreateId           (const entry_ref* ref, char* id, bool createIfMissing = false);
-		status_t                    QueryById               (const char* id, entry_ref* ref);
+		status_t                    QueryForUniqueSenId     (const char* sourceId, entry_ref* ref);
+		status_t                    QueryForTargetsById     (const char* sourceId, BMessage* idToRef);
 
         const char*                 GetMimeTypeForRef       (const entry_ref* ref);
+        status_t                    ResolveInverseRelations (const entry_ref* sourceRef, BMessage* reply, const char* relationType = NULL);
         status_t                    ResolveSelfRelationsWithPlugin(const char* pluginSig,
                                         const entry_ref* sourceRef, BMessage* reply);
 
@@ -70,7 +72,8 @@ private:
         const char*         GetAttributeNameForRelation(const char* relationType);
 		//static bool         AddOrUpdateRelationTarget(const char* relationType,
         //                        BMessage* newRelationTarget, BMessage* existingRelation);
-
+        status_t            AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
         status_t            GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig);
+
         IceDustGenerator*   tsidGenerator;
 };

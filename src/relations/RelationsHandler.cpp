@@ -76,14 +76,24 @@ void RelationsHandler::MessageReceived(BMessage* message)
                 // check if relation is bidirectional and add reverse relation
                 BMessage relationConf;
                 BString  relationType;
+
                 status_t status = reply->FindString(SEN_RELATION_TYPE, &relationType);
-                if (status == B_OK)
-                         status = GetRelationMimeConfig(relationType.String(), &relationConf);
+                if (status == B_OK) {
+                     status = GetRelationMimeConfig(relationType.String(), &relationConf);
+                }
+                if (status != B_OK) {
+                    LOG("failed to get relation config for type %s: %s\n",
+                        relationType.String(), strerror(status));
+                    result = status;
+                    break;  // bail out
+                }
+
+                LOG("got relation config:\n");
+                relationConf.PrintToStream();
 
                 // relations are bidirectional by default (makes sense in 90% of cases)
-                if (status == B_OK && relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) {
-                    LOG("got relation config:\n");
-                    relationConf.PrintToStream();
+                if (relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) {
+                    LOG("relation is bidirectional.\n");
 
                     // clone source message and and build reverse relation config
                     BMessage reverseRelation(*message);
@@ -120,13 +130,13 @@ void RelationsHandler::MessageReceived(BMessage* message)
 
                     if (status == B_OK) {
                         reply->AddMessage("reply_reverse", &replyReverse);
+                    } else {
+                        LOG("failed to add reverse relation for type %s: %s\n",
+                            relationType.String(), strerror(status));
                     }
                     reply->AddString("result_reverse", strerror(status));
                 } else {
-                    LOG("failed to get relation config for type %s: %s\n",
-                        relationType.String(), strerror(status));
-
-                    reply->AddString("result_reverse", strerror(status));
+                    LOG("added UNIDIRECTIONAL relation, skipping reverse relation.\n");
                 }
             }
 			break;
@@ -375,28 +385,19 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     }
 
     // only now that all is clean, write relation to disk
-    // get old targetIds and add new one (they are stored in SEN:TO for quick search,
-    // and then again as targetId keys for associated relation properties).
-    BString targetIds;
-    status = node.ReadAttrString(SEN_TO_ATTR, &targetIds);
-    if (targetIds.FindFirst(targetId) < 0) {
-        if (! targetIds.IsEmpty())
-            targetIds.Append(",");
-        targetIds.Append(targetId);
-    }
-
-    status = node.WriteAttrString(SEN_TO_ATTR, &targetIds);
+    status = AddRelationTargetIdAttr(node, targetId, relationType);
     if (status != B_OK) {
         ERROR("failed to store targetId %s in file attrs of %s: %s\n", targetId, sourceRef.name, strerror(status));
         return status;
     }
 
+    // write complete relation config into target attribute
     ssize_t result = node.WriteAttr(
-            attrName,
-            B_MESSAGE_TYPE,
-            0,
-            msgBuffer,
-            msgSize);
+        attrName,
+        B_MESSAGE_TYPE,
+        0,
+        msgBuffer,
+        msgSize);
 
     if (result <= 0) {
         ERROR("failed to store relation %s for file %s: %s\n", relation, sourceRef.name, strerror(result));
@@ -427,6 +428,7 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
 	if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef)) != B_OK) {
 		return status;
 	}
+
     bool withProperties = message->GetBool("properties");
 
     BStringList* relationNames = ReadRelationNames(&sourceRef);
@@ -447,6 +449,7 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
             reply->AddMessage(relation.String(), new BMessage(relations));
         }
     }
+
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings(SEN_RELATIONS, *relationNames);
 
@@ -523,8 +526,8 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
 
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings(SEN_MSG_TYPES, types);
-    reply->AddString("status", BString("got ")
-                    << types.CountStrings() << " compatible target(s) for " << sourceType.String());
+    reply->AddString("status", BString("got ") << types.CountStrings()
+                 << " compatible target(s) for " << sourceType.String());
 
 	return status;
 }
@@ -544,8 +547,22 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 		return status;
 	}
 
+    // check config if relation is bidirectional
+    BMessage relationConf;
+    status = GetRelationMimeConfig(relationType.String(), &relationConf);
+    if (status != B_OK) {
+        LOG("failed to get relation config for type %s: %s\n",
+            relationType.String(), strerror(status));
+        return status;
+    }
+
     BMessage relations;
-    status = ReadRelationsOfType(&sourceRef, relationType.String(), &relations);
+    if (relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) {
+        status = ReadRelationsOfType(&sourceRef, relationType.String(), &relations);
+    } else {
+        status = ResolveInverseRelations(&sourceRef, &relations, relationType.String());
+    }
+
     if (status != B_OK) {
         reply->AddString("error", "failed to retrieve relations of given type.");
         reply->AddString("cause", strerror(status));
@@ -563,7 +580,9 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 	return B_OK;
 }
 
+//
 // private methods
+//
 
 status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const char* relationType, BMessage* relations)
 {
@@ -621,8 +640,7 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
     }
 
     // add target refs
-    BMessage    idToRefMap;
-
+    BMessage idToRefMap;
     if ((status = ResolveRelationTargets(&targetIds, &idToRefMap)) == B_OK) {
         LOG("got %d unique relation targets for type %s and file %s, resolving entries...\n",
             idToRefMap.CountNames(B_REF_TYPE), relationType, sourceRef->name);
@@ -708,6 +726,10 @@ BStringList* RelationsHandler::ReadRelationNames(const entry_ref* ref)
 		}
 	}
 
+    // always include classification relation
+    if (! result->HasString(SEN_LABEL_RELATION_TYPE))
+          result->Add(BString(SEN_LABEL_RELATION_TYPE));
+
 	return result;
 }
 
@@ -736,16 +758,65 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BMessage *id
 	LOG("resolving ids from list with %d targets...\n", ids->CountStrings())
 
     entry_ref ref;
+    status_t status;
     for (int i = 0; i < ids->CountStrings(); i++) {
-		if (QueryById(ids->StringAt(i).String(), &ref) == B_OK) {
-            idsToRefs->AddRef(ids->StringAt(i),
-                              new entry_ref(ref.device, ref.directory, ref.name));
+        BString senId = ids->StringAt(i);
+		if ((status = QueryForUniqueSenId(senId.String(), &ref)) == B_OK) {
+            idsToRefs->AddRef(senId, new entry_ref(ref.device, ref.directory, ref.name));
         } else {
-            return B_ERROR;
+            if (status == B_ENTRY_NOT_FOUND) {
+                LOG("ignoring stale target reference with ID %s.\n", senId.String());
+                continue;
+            } else {
+                return B_ERROR;
+            }
         }
 	}
 
 	return B_OK;
+}
+
+status_t RelationsHandler::ResolveInverseRelations(const entry_ref* sourceRef, BMessage* reply, const char* relationType)
+{
+    char sourceId[SEN_ID_LEN];
+    // query for any file with a SEN:TO that contains the sourceId
+    BMessage idToRef;
+
+    status_t status = GetOrCreateId(sourceRef, sourceId, true);
+    if (status == B_OK)
+        status = QueryForTargetsById(sourceId, &idToRef);
+
+    if (status != B_OK) {
+        ERROR("failed to get inverse relation targets for sourceId %s: %s\n", sourceId, strerror(status));
+    }
+    LOG("got inverse id->target map:\n");
+    idToRef.PrintToStream();
+
+    // todo: implement filtering for relationType if there are multiple inverse relations to the source
+
+    reply->what = SEN_RESULT_RELATIONS;
+    reply->AddMessage("id_to_ref", &idToRef);
+    reply->AddString("status", BString("got ") << idToRef.CountNames(B_REF_TYPE)
+                  << " inverse target(s) for " << sourceId);
+
+    return status;
+}
+
+/** adds new targetId to existing IDs stored in SEN:TO / SEN:META for quick search,
+    and then again as targetId keys for associated relation properties).
+ */
+status_t RelationsHandler::AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType)
+{
+    BString targetIds;
+    status_t status = node.ReadAttrString(SEN_TO_ATTR, &targetIds);
+    if (targetIds.FindFirst(targetId) < 0) {
+        if (! targetIds.IsEmpty())
+            targetIds.Append(",");
+        targetIds.Append(targetId);
+    }
+
+    return node.WriteAttrString(SEN_TO_ATTR, &targetIds);
+
 }
 
 //
@@ -807,45 +878,94 @@ const char* RelationsHandler::GetAttributeNameForRelation(const char* relationTy
     return relationAttributeName.String();
 }
 
-status_t RelationsHandler::QueryById(const char* id, entry_ref* refFound)
+status_t RelationsHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound)
 {
-    status_t result;
-	LOG("query for id %s\n", id);
-
-	BString predicate(BString(SEN_ID_ATTR) << "==" << id);
+   	BString predicate(BString(SEN_ID_ATTR) << "==" << sourceId);
 	// TODO: all relation queries currently assume we never leave the boot volume
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
 
-	BQuery query;
+    BQuery query;
+	query.SetVolume(&bootVolume);
+	query.SetPredicate(predicate.String());
+
+    status_t result;
+	if ((result = query.Fetch()) != B_OK) {
+        ERROR("could not execute query for %s == %s: %s\n", SEN_ID_ATTR, sourceId, strerror(result));
+        return result;
+    }
+
+    if ((result = query.GetNextRef(refFound)) != B_OK) {
+        if (result == B_ENTRY_NOT_FOUND) {
+            LOG("no matching file found for ID %s\n", sourceId);
+        } else {
+            // something other went wrong
+            ERROR("error resolving id %s: %s\n", sourceId, strerror(result));
+        }
+        return result;
+    }
+
+    entry_ref ref;
+    if (query.GetNextRef(&ref) == B_OK) {
+        // this should never happen as the SEN:ID MUST be unique!
+        ERROR("Critical error SEN:ID %s is NOT unique!\n", sourceId);
+        return B_DUPLICATE_REPLY;
+    }
+    LOG("found entry %s\n", refFound->name);
+    query.Clear();
+
+    return B_OK;
+}
+
+// used to resolve inverse relations where we need to go from target->source
+// todo: offer a live query (passing around a dest messenger) when querying large number of targets,
+//       e.g. for reverse relations with Classification entities!
+status_t RelationsHandler::QueryForTargetsById(const char* sourceId, BMessage* idToRef)
+{
+    status_t result;
+	LOG("query for inverse relation targets with sourceId %s\n", sourceId);
+
+    // query for files with a SEN:TO attr containing our sourceId
+	BString predicate(BString(SEN_TO_ATTR) << "== '*" << sourceId << "*'");
+	// TODO: all relation queries currently assume we never leave the boot volume
+	BVolumeRoster volRoster;
+	BVolume bootVolume;
+	volRoster.GetBootVolume(&bootVolume);
+
+    BQuery query;
 	query.SetVolume(&bootVolume);
 	query.SetPredicate(predicate.String());
 
 	if ((result = query.Fetch()) != B_OK) {
-        ERROR("could not execute query for SEN:ID %s: %s\n", id, strerror(result));
+        ERROR("could not execute query for %s == %s: %s\n", SEN_TO_ATTR, sourceId, strerror(result));
         return result;
     }
-    if ((result = query.GetNextRef(refFound)) != B_OK) {
-        if (result == B_ENTRY_NOT_FOUND) {
-            LOG("no matching file found for ID %s\n", id);
-            return B_OK;
+
+    entry_ref refFound;
+    while (result == B_OK) {
+        result = query.GetNextRef(&refFound);
+        if (result == B_OK) {
+            char senId[SEN_ID_LEN];
+            result = GetOrCreateId(&refFound, senId);
+            if (result == B_OK) {
+                idToRef->AddRef(senId, new entry_ref(refFound));
+            } else {
+                // unexpected error, abort
+                ERROR("error resolving SEN:ID for entry %s, aborting: %s\n",
+                    refFound.name, strerror(result));
+                return result;
+            }
         }
+    }
+    // done, check result
+    if (result == B_ENTRY_NOT_FOUND) {  // expected
+        return B_OK;
+    } else {
         // something other went wrong
-        ERROR("error resolving id %s: %s\n", id, strerror(result));
+        ERROR("error resolving id %s: %s\n", sourceId, strerror(result));
         return result;
     }
-    else {
-        entry_ref ref;
-        if (query.GetNextRef(&ref) == B_OK) {
-            // this should never happen as the SEN:ID MUST be unique!
-            ERROR("Critical error SEN:ID %s is NOT unique!\n", id);
-            return B_DUPLICATE_REPLY;
-        }
-        LOG("found entry %s\n", refFound->name);
-        query.Clear();
-    }
-    return B_OK;
 }
 
 status_t RelationsHandler::GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig)

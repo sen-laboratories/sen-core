@@ -142,7 +142,7 @@ void SenServer::MessageReceived(BMessage* message)
             entry_ref ref;
 
             if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
-                if ((result = relationsHandler->QueryById(id.String(), &ref)) == B_OK) {
+                if ((result = relationsHandler->QueryForUniqueSenId(id.String(), &ref)) == B_OK) {
                     reply->AddRef("ref", new entry_ref(ref.device, ref.directory, ref.name));
                 }
             }
@@ -175,7 +175,7 @@ void SenServer::MessageReceived(BMessage* message)
 
                         entry_ref existingEntry;
 
-                        if ((result = relationsHandler->QueryById(id, &existingEntry)) == B_OK) {
+                        if ((result = relationsHandler->QueryForUniqueSenId(id, &existingEntry)) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
                                 LOG("SEN:ID %s refers to same node %d, nothing to do.",
