@@ -5,7 +5,7 @@
 <h1 align="center">SEN Core - Semantic Extensions Native</h1>
 
 <p align="center">
-  This repository is the main module of SEN and implements the SEN server, a lightweight server process
+  This repository contains the main module of SEN and implements the SEN server, a lightweight server process
   for Haiku, acting as the foundation of the semantic layer and integrating with the file system.
 </p>
 
