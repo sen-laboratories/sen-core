@@ -60,6 +60,16 @@ void RelationsHandler::MessageReceived(BMessage* message)
 		}
         case SEN_RELATIONS_GET_COMPATIBLE:
         {
+            // special case for associations, here we go straight to target types
+            BString relationType;
+            status_t status = message->FindString(SEN_RELATION_TYPE, &relationType);
+            if (status == B_OK) {
+                 if (relationType == SEN_LABEL_RELATION_TYPE) {
+                    LOG("resolving association targets...\n");
+                    result = GetCompatibleTargetTypes(message, reply);
+                    break;
+                 }
+            }
 			result = GetCompatibleRelations(message, reply);
             break;
         }
@@ -329,6 +339,7 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
 	properties.RemoveData(SEN_RELATION_TARGET_REF);
 	properties.RemoveData(SEN_RELATION_TYPE);
     properties.RemoveData(SEN_RELATION_NAME);
+    properties.RemoveData(SEN_ID_TO_REF_MAP);
 
     // we allow multipe relations of the same type to the same target
     // (e.g. a note for the same text referencing different locations in the referenced text).
@@ -485,10 +496,11 @@ status_t RelationsHandler::GetCompatibleRelations(const BMessage* message, BMess
 
     char mimeType[B_ATTR_NAME_LENGTH];
     nodeInfo.GetType(mimeType);
-    LOG("searching for relations compatible to type %s...\n", mimeType);
+    LOG("searching for relations compatible with %s...\n", mimeType);
 
     BMessage relationTypes;
     BMimeType::GetInstalledTypes(SEN_RELATION_SUPERTYPE, &relationTypes);
+
     LOG("found relations:\n");
     relationTypes.PrintToStream();
 
@@ -509,16 +521,23 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
     BString  sourceType;
     status_t status;
 
-    if ((status = GetMessageParameter(message, reply, SEN_RELATION_TYPE, &sourceType)) != B_OK) {
+    // TODO: check relation config for type restrictions
+    if ((status = GetMessageParameter(message, reply, SEN_RELATION_TYPE, &sourceType, NULL, true, false)) != B_OK) {
+        ERROR("required parameter %s is missing, aborting.\n", SEN_RELATION_TYPE);
 		return status;
 	}
 
-    LOG("searching for types compatible to relation %s...\n", sourceType.String());
+    LOG("searching for types compatible with relation %s...\n", sourceType.String());
 
     BMessage targetTypes;
-    BMimeType::GetInstalledTypes(SEN_ENTITY_SUPERTYPE, &targetTypes);
-    // TODO: filter internal meta types like Ontology or Plugin
-    BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
+    // associations are meta relations and handled slightly differently, here we always take the meta/ types only
+    if ((sourceType == SEN_LABEL_RELATION_TYPE) || (sourceType.StartsWith(SEN_META_SUPERTYPE "/")) ) {
+        LOG("resolving meta types for association...\n");
+        BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
+    } else {
+        LOG("resolving entity types for relation...\n");
+        BMimeType::GetInstalledTypes(SEN_ENTITY_SUPERTYPE, &targetTypes);
+    }
     BStringList types;
     targetTypes.FindStrings("types", &types);
 
