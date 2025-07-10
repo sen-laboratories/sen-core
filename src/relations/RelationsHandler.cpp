@@ -442,14 +442,16 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
 
     bool withProperties = message->GetBool("properties");
 
-    BStringList* relationNames = ReadRelationNames(&sourceRef);
-    if (relationNames == NULL) {
-        return B_ERROR;
+    BStringList relationNames;
+    status = ReadRelationNames(&sourceRef, &relationNames);
+    if (relationNames.IsEmpty()) {
+        return status;
     }
+
     if (withProperties) {
         // add all properties of all relations found above and add to result per type for lookup
-        for (int i = 0; i < relationNames->CountStrings(); i++) {
-            BString relation = relationNames->StringAt(i);
+        for (int i = 0; i < relationNames.CountStrings(); i++) {
+            BString relation = relationNames.StringAt(i);
             LOG("adding properties of relation %s...\n", relation.String());
 
             BMessage relations;
@@ -462,18 +464,18 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
     }
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddStrings(SEN_RELATIONS, *relationNames);
+    reply->AddStrings(SEN_RELATIONS, relationNames);
 
     // ensure source has a SEN:ID if it has relations
     // todo: is this needed? would be quite an inconsistency...
-    if (status == B_OK && relationNames->CountStrings() > 0) {
+    if (status == B_OK && relationNames.CountStrings() > 0) {
         char senId[SEN_ID_LEN];
         status = GetOrCreateId(&sourceRef, senId);
         reply->AddString(SEN_ID_ATTR, (new BString(senId))->String());
     }
 
     reply->AddString("status", BString("got ")
-        << relationNames->CountStrings() << " relation(s) from " << sourceRef.name);
+        << relationNames.CountStrings() << " relation(s) from " << sourceRef.name);
 
 	return status;
 }
@@ -528,15 +530,20 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
 	}
 
     LOG("searching for types compatible with relation %s...\n", sourceType.String());
-
     BMessage targetTypes;
+
     // associations are meta relations and handled slightly differently, here we always take the meta/ types only
     if ((sourceType == SEN_LABEL_RELATION_TYPE) || (sourceType.StartsWith(SEN_META_SUPERTYPE "/")) ) {
         LOG("resolving meta types for association...\n");
-        BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
+
+        status = BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
+
+        if (status != B_OK) {
+            ERROR("error getting installed types from MIME db, falling back to any type: %s\n",
+                strerror(status));
+        }
     } else {
-        LOG("resolving entity types for relation...\n");
-        BMimeType::GetInstalledTypes(SEN_ENTITY_SUPERTYPE, &targetTypes);
+        LOG("using available template types allowed by relation.\n");
     }
     BStringList types;
     targetTypes.FindStrings("types", &types);
@@ -544,7 +551,7 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
     // todo: filter out targets excluded by relation type
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddStrings(SEN_MSG_TYPES, types);
+    reply->AddStrings(SEN_RELATION_COMPATIBLE_TYPES, types);
     reply->AddString("status", BString("got ") << types.CountStrings()
                  << " compatible target(s) for " << sourceType.String());
 
@@ -676,7 +683,7 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
         relations->AddStrings(SEN_TO_ATTR, targetIds);
 
         // add refs associated with targetIds
-        relations->AddMessage("id_to_ref", new BMessage(idToRefMap));
+        relations->AddMessage(SEN_ID_TO_REF_MAP, new BMessage(idToRefMap));
 
         // add properties associated with a given targetId (nested messages for each relation to that target)
         relations->AddMessage("properties", new BMessage(relationProperties));
@@ -728,31 +735,27 @@ status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage*
  * private methods
  */
 
-BStringList* RelationsHandler::ReadRelationNames(const entry_ref* ref)
+status_t RelationsHandler::ReadRelationNames(const entry_ref* ref, BStringList* relations)
 {
-	BStringList* result = new BStringList();
-
 	BNode node(ref);
-	if (node.InitCheck() != B_OK) {
+    status_t result;
+
+	if ((result = node.InitCheck()) != B_OK) {
         ERROR("failed to read from %s\n", ref->name);
 		return result;
     }
 
-	char *attrName = new char[B_ATTR_NAME_LENGTH];
-    int relation_prefix_len = BString(SEN_RELATION_ATTR_PREFIX).Length();
+	char attrName[B_ATTR_NAME_LENGTH];
+    BString relationAttr;
 
 	while (node.GetNextAttrName(attrName) == B_OK) {
-		BString relationAttr(attrName);
+		relationAttr = attrName;
 		if (relationAttr.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
             // relation name is supertype + attribute name without SEN prefixes
-			result->Add(BString(SEN_RELATION_SUPERTYPE "/")
-                        .Append(relationAttr.Remove(0, relation_prefix_len).String()));
+			relations->Add(BString(SEN_RELATION_SUPERTYPE "/")
+                           .Append(relationAttr.Remove(0, SEN_RELATION_ATTR_PREFIX_LEN).String()));
 		}
 	}
-
-    // always include classification relation
-    if (! result->HasString(SEN_LABEL_RELATION_TYPE))
-          result->Add(BString(SEN_LABEL_RELATION_TYPE));
 
 	return result;
 }
@@ -819,7 +822,7 @@ status_t RelationsHandler::ResolveInverseRelations(const entry_ref* sourceRef, B
     // todo: implement filtering for relationType if there are multiple inverse relations to the source
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddMessage("id_to_ref", &idToRef);
+    reply->AddMessage(SEN_ID_TO_REF_MAP, &idToRef);
     reply->AddString("status", BString("got ") << idToRef.CountNames(B_REF_TYPE)
                   << " inverse target(s) for " << sourceId);
 
@@ -857,6 +860,9 @@ status_t RelationsHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cr
 {
     status_t result;
 	BNode node(ref);
+
+    // make sure to always initialize target ID so it is empty in case of error
+    *id = '\0';
 
 	if ((result = node.InitCheck()) != B_OK) {
 		ERROR("failed to initialize node for path %s: %s\n", ref->name, strerror(result));

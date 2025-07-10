@@ -54,7 +54,7 @@ protected:
 
 private:
 		status_t            ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations);
-		BStringList*        ReadRelationNames(const entry_ref* ref);
+		status_t            ReadRelationNames(const entry_ref* ref, BStringList* relations);
 		status_t            ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
         status_t            ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
 		// write/delete
