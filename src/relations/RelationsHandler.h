@@ -40,7 +40,7 @@ public:
         const char*                 GetMimeTypeForRef       (const entry_ref* ref);
         status_t                    ResolveInverseRelations (const entry_ref* sourceRef, BMessage* reply, const char* relationType = NULL);
         status_t                    ResolveSelfRelationsWithPlugin(const char* pluginSig,
-                                        const entry_ref* sourceRef, BMessage* reply);
+                                                                   const entry_ref* sourceRef, BMessage* reply);
 
 virtual
         void MessageReceived(BMessage* message);
@@ -58,21 +58,16 @@ private:
 		status_t            ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
         status_t            ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
 		// write/delete
-		status_t			WriteRelation(const entry_ref *ref, const char *relationType,
-                                const BMessage* relationConfig);
-		status_t            RemoveRelationForTypeAndTarget(const entry_ref *ref,
-                                const char *relationType, const char *targetId);
+		status_t			WriteRelation(const entry_ref *ref, const char *relationType, const BMessage* relationConfig);
+		status_t            RemoveRelationForTypeAndTarget(const entry_ref *ref, const char *relationType, const char *targetId);
 		status_t            RemoveAllRelations(const entry_ref *ref);
 
 		// helper methods
         BString*            StripSuperType(BString* type);
-        status_t            GetMessageParameter(const BMessage* message, BMessage* reply, const char* param,
+        status_t            GetMessageParameter(const BMessage* message, const char* param,
                                 BString* buffer = NULL, entry_ref* ref = NULL,
                                 bool mandatory = true, bool stripSuperType = true);
-        status_t            GetPathOrRef(const BMessage* message, BMessage* reply, const char* param, entry_ref* ref);
         const char*         GetAttributeNameForRelation(const char* relationType);
-		//static bool         AddOrUpdateRelationTarget(const char* relationType,
-        //                        BMessage* newRelationTarget, BMessage* existingRelation);
         status_t            AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
         status_t            GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig);
 

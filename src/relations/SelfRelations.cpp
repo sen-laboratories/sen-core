@@ -23,8 +23,7 @@ status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* r
 	entry_ref sourceRef;
 	status_t  status;
 
-    if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, nullptr, &sourceRef))  != B_OK) {
-        ERROR("failed to parse source: %s\n", strerror(status));
+    if ((status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, nullptr, &sourceRef))  != B_OK) {
 		return status;
 	}
 
@@ -50,7 +49,7 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
     entry_ref sourceRef;
 	status_t  status;
 
-    if ((status = GetMessageParameter(message, reply, SEN_RELATION_SOURCE, NULL, &sourceRef))  != B_OK) {
+    if ((status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, nullptr, &sourceRef))  != B_OK) {
 		return status;
 	}
 
@@ -61,14 +60,14 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
 
     BString relationTypeParam;
     // relation type for self relations is one of the possible output types of compatible extractors.
-	if (GetMessageParameter(message, reply, SEN_RELATION_TYPE, &relationTypeParam, NULL, true, false)  != B_OK) {
+	if (GetMessageParameter(message, SEN_RELATION_TYPE, &relationTypeParam, NULL, true, false)  != B_OK) {
 		return B_BAD_VALUE;
 	}
     const char* relationType = relationTypeParam.String();
 
     BString pluginTypeParam;
     // client may send the desired plugin signature already, saving us the hassle
-	if (GetMessageParameter(message, reply, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true, false)  == B_OK) {
+	if (GetMessageParameter(message, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true, false)  == B_OK) {
         const char* pluginSig = pluginTypeParam.String();
         LOG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
 		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, reply);
@@ -97,10 +96,12 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
         LOG("got existing plugin config for relation type %s:\n", relationType);
         clientHasConfig = true;
     }
+
     pluginConfig.PrintToStream();
 
     // get type->plugin map
     BMessage typeToPlugins;
+
     result = pluginConfig.FindMessage(SENSEI_TYPES_PLUGINS_KEY, &typeToPlugins);
     if (result != B_OK) {
         ERROR("failed to look up type->plugin map for relation type %s: %s\n", relationType, strerror(result));
@@ -115,6 +116,7 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
         ERROR("failed to look up plugin signature for relation type %s: %s\n", relationType, strerror(result));
         return result;
     }
+
     const char* pluginSig = pluginType.String();
 
     result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, reply);
@@ -122,14 +124,20 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
         ERROR("failed to resolve relations of type %s with plugin %s: %s\n", relationType, pluginSig, strerror(result));
         return result;
     }
+
     // send back current plugin config if client did not have it
     if (!clientHasConfig) {
         reply->Append(pluginConfig);
     }
+
     return result;
 }
 
-status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef, BMessage* reply) {
+status_t RelationsHandler::ResolveSelfRelationsWithPlugin(
+const char* pluginSig,
+const entry_ref* sourceRef,
+BMessage* reply)
+{
     LOG("got plugin app signature: %s\n", pluginSig);
 
     // execute plugin and return result
@@ -167,9 +175,12 @@ status_t RelationsHandler::ResolveSelfRelationsWithPlugin(const char* pluginSig,
     return B_OK;
 }
 
-// todo: extend to handle flavours/features like search or identify
-status_t RelationsHandler::GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* pluginConfig) {
-    BString predicate("SEN:TYPE==" SENSEI_PLUGIN_TYPE " && " SENSEI_PLUGIN_FEATURE_ATTR ":");
+status_t RelationsHandler::GetPluginsForTypeAndFeature(
+    const char* mimeType,
+    const char* feature,
+    BMessage* pluginConfig)
+{
+    BString predicate(SEN_TYPE "==" SENSEI_PLUGIN_TYPE " && " SENSEI_PLUGIN_FEATURE_ATTR ":");
             predicate << feature << "==1";
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
