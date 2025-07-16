@@ -88,13 +88,12 @@ void RelationsHandler::MessageReceived(BMessage* message)
                 BMessage relationConf;
                 BString  relationType;
 
-                status_t status = reply->FindString(SEN_RELATION_TYPE, &relationType);
+                status_t status = message->FindString(SEN_RELATION_TYPE, &relationType);
                 if (status == B_OK) {
                      status = GetRelationMimeConfig(relationType.String(), &relationConf);
                 }
                 if (status != B_OK) {
-                    LOG("failed to get relation config for type %s: %s\n",
-                        relationType.String(), strerror(status));
+                    LOG("failed to get relation config for type %s: %s\n", relationType.String(), strerror(status));
                     result = status;
                     break;  // bail out
                 }
@@ -440,7 +439,7 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
     // todo: filter out targets excluded by relation type
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddString("filter", "compatible");
+    reply->AddString(SEN_MSG_FILTER, "compatible");
     reply->AddStrings(SEN_RELATION_COMPATIBLE_TYPES, types);
     reply->AddString("status", BString("got ") << types.CountStrings()
                  << " compatible target(s) for " << sourceType.String());

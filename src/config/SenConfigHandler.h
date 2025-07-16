@@ -31,18 +31,29 @@ private:
      * @param name  the custom name of the context
      * @param ref   an optional `entry_ref` to hold the resulting context dir ref
      *
-     * @return B_OK or the status code of the last error.
+     * @return `B_OK` or the status code of the last error.
      */
     status_t    CreateContext(const char* name, entry_ref* ref = NULL);
 
     /**
-     * shortcut for internal use to quickly resolve the corresponding directory for the given context.
+     * shortcut to quickly resolve the corresponding directory for the given context.
      *
-     * @param name  the custom name of the context
-     * @param ref   an empty `entry_ref` to hold the resulting context dir ref
+     * @param context  the custom name of the context
+     * @param ref      an empty `entry_ref` to hold the resulting context dir ref
+     * @return `B_OK` or the status code of the last error.
+     */
+    status_t    GetContextDir(const char* context, entry_ref* ref);
+
+    /**
+     * shortcut to quickly resolve the corresponding base directory for the given classification type in a context.
+     *
+     * @param context  the custom context name
+     * @param type     the custom type name (MIME type)
+     * @param ref      an empty `entry_ref` to hold the resulting context dir ref
+     * @param create   create directory if it does not exist?
      * @return B_OK or the status code of the last error.
      */
-    status_t    GetContextDir(const char* name, entry_ref* ref);
+    status_t    GetClassificationDir(const char* context, const char* type, entry_ref* ref, bool create = false);
 
     /**
      * finds the corresponding context directory for a given context name and returns the

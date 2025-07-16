@@ -131,8 +131,8 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* me
         if (status == B_OK) {
             // set SEN Context FileType
             BDirectory contextDir(path.Path());
-            // we need a NodeInfo here, not an AppFileInfo, since we want to set the type of the context dir
             BNodeInfo contextDirInfo(&contextDir);
+
             status = contextDirInfo.SetType(SEN_CONTEXT_TYPE);
         }
         if (status != B_OK) {
@@ -181,15 +181,16 @@ status_t SenConfigHandler::SaveSettings(const BMessage* message)
 void SenConfigHandler::MessageReceived(BMessage* message)
 {
     BMessage* reply = new BMessage();
-	  status_t status = B_OK;
+	status_t status = B_OK;
 
     LOG("in SEN ConfigHandler::MessageReceived\n");
     message->PrintToStream();
 
     // for now, we always need these same parameters for context
-    const char* context = message->GetString(SEN_CONFIG_CLASS_CONTEXT, "");
-    const char* name = message->GetString(SEN_CONFIG_CLASS_NAME, "");
-    const char* type = message->GetString(SEN_CONFIG_CLASS_TYPE, "");
+    // if optional context is empty, use global default context
+    const char* context = message->GetString(SEN_MSG_CONTEXT, SEN_CONFIG_CONTEXT_GLOBAL);
+    const char* name = message->GetString(SEN_MSG_NAME, "");
+    const char* type = message->GetString(SEN_MSG_TYPE, "");
 
     switch(message->what)
     {
@@ -234,21 +235,22 @@ status_t SenConfigHandler::FindContextByName(const char* name, BMessage *reply)
 status_t SenConfigHandler::AddClassification(const char* context, const char* name, const char* type, BMessage* reply)
 {
     // get context path
-    entry_ref contextRef;
-    status_t status = GetContextDir(context, &contextRef);
+    entry_ref classDirRef;
+    status_t status = GetClassificationDir(context, type, &classDirRef, true);
 
-    BPath classPath(&contextRef);
-    classPath.Append(name);
+    BPath classPath(&classDirRef);
+    status = classPath.Append(name);
 
     BFile classFile(classPath.Path(), B_CREATE_FILE);
-    status = classFile.InitCheck();
+    if (status == B_OK)
+        status = classFile.InitCheck();
 
     // must not exist already
     if (status != B_OK) {
-        ERROR("could not create classification entity '%s' of type '%s' in context '%s': %s",
+        ERROR("could not create classification entity '%s' of type '%s' in context '%s': %s\n",
               name, type, context, strerror(status));
     } else {
-        BAppFileInfo classInfo(&classFile);
+        BNodeInfo classInfo(&classFile);
         status = classInfo.SetType(type);
 
         if (status == B_OK) {
@@ -256,8 +258,13 @@ status_t SenConfigHandler::AddClassification(const char* context, const char* na
             BEntry classEntry(classPath.Path());
 
             status = classEntry.GetRef(&classFileRef);
-            if (status == B_OK)
+            if (status == B_OK) {
                 status = reply->AddRef("refs", &classFileRef);
+            }
+        }
+        if (status != B_OK) {
+            ERROR("could not set type of new classification '%s' of type '%s' in context '%s': %s\n",
+                name, type, context, strerror(status));
         }
     }
     return status;
@@ -296,23 +303,76 @@ status_t SenConfigHandler::GetClassification(const char* context, const char* na
 status_t SenConfigHandler::GetContextDir(const char* context, entry_ref* ref)
 {
     entry_ref contextRef;
-    status_t status = fSettingsMsg->FindRef(SEN_CONFIG_CLASS_BASE_PATH_REF, &contextRef);
+    status_t status = fSettingsMsg->FindRef(SEN_CONFIG_CONTEXT_BASE_PATH_REF, &contextRef);
 
     BPath contextPath(&contextRef);
-    if (status == B_OK) {
-        // if optional name is empty, use global default context
-        if (BString(context).IsEmpty())
-            context = SEN_CONFIG_CONTEXT_GLOBAL;
-
+    if (status == B_OK && contextPath.InitCheck() == B_OK) {
         status = contextPath.Append(context);
     }
     status = contextPath.InitCheck();
     if (status == B_OK) {
         LOG("found context dir %s for context %s.\n", contextPath.Path(), context);
+        status = BEntry(contextPath.Path()).GetRef(ref);
     } else {
         ERROR("failed to get dir for context %s: %s\n", context, strerror(status));
     }
     return status;
+}
+
+status_t SenConfigHandler::GetClassificationDir(const char* context, const char* type, entry_ref* ref, bool create)
+{
+    entry_ref contextRef;
+
+    status_t status = GetContextDir(context, &contextRef);
+    if (status == B_OK) {
+        BPath classPathBase(&contextRef);
+        if (status == B_OK && classPathBase.InitCheck() == B_OK) {
+            classPathBase.Append(SEN_CONFIG_CLASS_PATH_NAME);
+
+            // use MIME type for grouping classifications by type and context
+            BMimeType mimeClass(type);
+            status = mimeClass.InitCheck();
+
+            if (status == B_OK) {
+                // for valid MIME types, check we only get a meta type for classification and then use just the subtype
+                BString typeName(type);
+                if (! typeName.StartsWith(SEN_META_SUPERTYPE)) {
+                    ERROR("unsupported type for classification: %s\n", type);
+                    return B_BAD_VALUE;
+                }
+                BPath classPath(classPathBase);
+                status = classPath.InitCheck();
+
+                if (status == B_OK) {
+                    // API does not have BMimeType.Subtype() sadly
+                    typeName.RemoveFirst(SEN_META_SUPERTYPE "/");
+                    classPath.Append(typeName.String());
+
+                    status = classPath.InitCheck();
+                    if (status == B_OK) {
+                        LOG("found classifications dir %s for context %s and type %s.\n",
+                            classPath.Path(), context, type);
+
+                        BEntry classEntry(classPath.Path());
+                        if (create && ! classEntry.Exists()) {
+                            LOG("creating new classification directory %s.\n", classPath.Path());
+
+                            BDirectory classDir(classPathBase.Path());
+                            status = classDir.CreateDirectory(classPath.Leaf(), NULL);
+                            if (status == B_OK) {
+                                status = classEntry.GetRef(ref);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (status != B_OK) {
+        ERROR("failed to get dir for classification with context %s and type %s: %s\n", context, type, strerror(status));
+    }
+    return status;
+
 }
 
 status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
