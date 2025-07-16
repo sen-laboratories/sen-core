@@ -8,23 +8,40 @@
 #include "Sen.h"
 #include "../relations/RelationsHandler.h"
 
+#include <stdio.h>
+
 #include <AppFileInfo.h>
+#include <Directory.h>
 #include <Entry.h>
+#include <FindDirectory.h>
 #include <MimeType.h>
 #include <NodeMonitor.h>
 #include <Path.h>
 #include <Resources.h>
 #include <Roster.h>
+#include <String.h>
 #include <VolumeRoster.h>
 #include <Volume.h>
-#include <String.h>
 
-#include <Directory.h>
-#include <FindDirectory.h>
+
+int main(int argc, char* argv[])
+{
+	SenServer* app = new(std::nothrow) SenServer();
+    status_t status = app->InitCheck();
+	if (status != B_OK) {
+        fprintf(stderr, "failed to start SEN Server: %s\n", strerror(status));
+		return status;
+    }
+
+	app->Run();
+
+	delete app;
+	return 0;
+}
 
 SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 {
-	// setup feature-specific handlers for redirecting messages appropriately
+	// setup feature-specific handlers for initializing SEN modules and later redirecting messages appropriately
     relationsHandler = new RelationsHandler();
     senConfigHandler = new SenConfigHandler();
 
@@ -32,6 +49,7 @@ SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
     BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
+
     // watch for move (rename) and copy operations to ensure our SEN ID stays unique.
     watch_volume(bootVolume.Device(), B_WATCH_NAME, this);
 }
@@ -40,6 +58,18 @@ SenServer::~SenServer()
 {
     LOG("Goodbye:)\n");
     stop_watching(this);
+}
+
+void SenServer::ReadyToRun()
+{
+    status_t status = senConfigHandler->Init();
+    if (status != B_OK) {
+        // critical, abort
+        LOG("critical error, aborting.\n");
+        Quit();
+    }
+
+    BApplication::ReadyToRun();
 }
 
 void SenServer::MessageReceived(BMessage* message)
@@ -203,8 +233,19 @@ void SenServer::MessageReceived(BMessage* message)
             }
             break;
         }
-
-        // Relations - fallthrough: handle all in separate handler
+        // Config - redirect to SenConfigHandler, except for trivial case
+        case SEN_CONFIG_GET:
+        {
+            senConfigHandler->GetConfig(reply);
+            break;
+        }
+        case SEN_CONFIG_CLASS_ADD:
+        case SEN_CONFIG_CLASS_GET: // fallthrough
+        {
+            senConfigHandler->MessageReceived(message);
+            return; // done
+        }
+        // Relations - redirect to separate RelationsHndler
         case SEN_RELATIONS_GET:
         case SEN_RELATIONS_GET_ALL:
         case SEN_RELATIONS_GET_SELF:
@@ -213,7 +254,7 @@ void SenServer::MessageReceived(BMessage* message)
         case SEN_RELATIONS_GET_COMPATIBLE_TYPES:
 		case SEN_RELATION_ADD:
 		case SEN_RELATION_REMOVE:
-		case SEN_RELATIONS_REMOVE_ALL:
+		case SEN_RELATIONS_REMOVE_ALL: // fallthrough
         {
             relationsHandler->MessageReceived(message);
             return; // done
@@ -259,15 +300,4 @@ int32 SenServer::RemoveSenAttrs(BNode* node) {
     } else {
         return result;
     }
-}
-
-int main(int argc, char* argv[])
-{
-	SenServer* app = new(std::nothrow) SenServer();
-	if (app->InitCheck() != B_OK)
-		return 1;
-
-	app->Run();
-	delete app;
-	return 0;
 }

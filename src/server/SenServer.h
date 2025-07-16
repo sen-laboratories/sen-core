@@ -19,6 +19,7 @@ class SenServer : public BApplication {
 public:		SenServer();
 virtual		~SenServer();
 
+virtual	void ReadyToRun();
 virtual	void MessageReceived(BMessage* message);
 
 private:
