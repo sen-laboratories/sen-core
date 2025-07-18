@@ -336,7 +336,7 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
             if (status == B_OK) {
                 // for valid MIME types, check we only get a meta type for classification and then use just the subtype
                 BString typeName(type);
-                if (! typeName.StartsWith(SEN_META_SUPERTYPE)) {
+                if (! typeName.StartsWith(SEN_META_SUPERTYPE "/")) {
                     ERROR("unsupported type for classification: %s\n", type);
                     return B_BAD_VALUE;
                 }
@@ -350,18 +350,20 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
 
                     status = classPath.InitCheck();
                     if (status == B_OK) {
-                        LOG("found classifications dir %s for context %s and type %s.\n",
+                        LOG("found classifications dir '%s' for context '%s' and type '%s'.\n",
                             classPath.Path(), context, type);
 
                         BEntry classEntry(classPath.Path());
+
                         if (create && ! classEntry.Exists()) {
-                            LOG("creating new classification directory %s.\n", classPath.Path());
+                            LOG("creating new classification directory '%s'.\n", classPath.Path());
 
                             BDirectory classDir(classPathBase.Path());
                             status = classDir.CreateDirectory(classPath.Leaf(), NULL);
-                            if (status == B_OK) {
-                                status = classEntry.GetRef(ref);
-                            }
+                        }
+
+                        if (status == B_OK) {
+                            status = classEntry.GetRef(ref);
                         }
                     }
                 }
@@ -369,7 +371,8 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
         }
     }
     if (status != B_OK) {
-        ERROR("failed to get dir for classification with context %s and type %s: %s\n", context, type, strerror(status));
+        ERROR("failed to get dir for classification with context '%s' and type '%s': %s\n",
+                context, type, strerror(status));
     }
     return status;
 
@@ -390,7 +393,7 @@ status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
         return status;
     }
 
-    BAppFileInfo contextInfo(&classFile);
+    BNodeInfo contextInfo(&classFile);
     status = contextInfo.SetType(SEN_CONTEXT_TYPE);
     // optionally return the ref to the newly created context
     if (status == B_OK && ref != NULL) {

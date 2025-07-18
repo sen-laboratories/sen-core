@@ -58,12 +58,15 @@ private:
 		status_t            ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
         status_t            ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
 		// write/delete
-		status_t			WriteRelation(const entry_ref *ref, const char *relationType, const BMessage* relationConfig);
+		status_t			WriteRelation(const entry_ref *srcRef, const char* targetId,
+                                          const char *relationType, const BMessage* properties,
+                                          bool linkToTargets = true);
 		status_t            RemoveRelationForTypeAndTarget(const entry_ref *ref, const char *relationType, const char *targetId);
 		status_t            RemoveAllRelations(const entry_ref *ref);
 
 		// helper methods
         BString*            StripSuperType(BString* type);
+        status_t            GetTypeForRef(entry_ref* ref, BString* mimeType);
         status_t            GetMessageParameter(const BMessage* message, const char* param,
                                 BString* buffer = NULL, entry_ref* ref = NULL,
                                 bool mandatory = true, bool stripSuperType = true);
