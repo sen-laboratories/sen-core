@@ -9,7 +9,7 @@
 #define _SEN_SERVER_H
 
 #include "../config/SenConfigHandler.h"
-#include "../relations/RelationsHandler.h"
+#include "../relations/RelationHandler.h"
 
 #include <Application.h>
 #include <File.h>
@@ -25,7 +25,7 @@ virtual	void MessageReceived(BMessage* message);
 private:
     int32               RemoveSenAttrs(BNode* node);
 
-    RelationsHandler*   relationsHandler;
+    RelationHandler*    relationHandler;
     SenConfigHandler*   senConfigHandler;
 };
 

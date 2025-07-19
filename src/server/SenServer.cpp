@@ -6,7 +6,7 @@
 
 #include "SenServer.h"
 #include "Sen.h"
-#include "../relations/RelationsHandler.h"
+#include "../relations/RelationHandler.h"
 
 #include <stdio.h>
 
@@ -42,7 +42,7 @@ int main(int argc, char* argv[])
 SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 {
 	// setup feature-specific handlers for initializing SEN modules and later redirecting messages appropriately
-    relationsHandler = new RelationsHandler();
+    relationHandler  = new RelationHandler();
     senConfigHandler = new SenConfigHandler();
 
 	// see also https://www.haiku-os.org/legacy-docs/bebook/BQuery_Overview.html#id611851
@@ -147,7 +147,7 @@ void SenServer::MessageReceived(BMessage* message)
 
             // create some temp files and ensure they are unique
             for (int32 i = 0; i < numFiles; i++) {
-                const char* tsid = relationsHandler->GenerateId();
+                const char* tsid = relationHandler->GenerateId();
                 LOG("TSID: %s\n", tsid);
                 result = file.SetTo(&outputDir, tsid, B_CREATE_FILE);
                 if (result == B_OK) {
@@ -172,7 +172,7 @@ void SenServer::MessageReceived(BMessage* message)
             entry_ref ref;
 
             if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
-                if ((result = relationsHandler->QueryForUniqueSenId(id.String(), &ref)) == B_OK) {
+                if ((result = relationHandler->QueryForUniqueSenId(id.String(), &ref)) == B_OK) {
                     reply->AddRef("ref", new entry_ref(ref.device, ref.directory, ref.name));
                 }
             }
@@ -198,14 +198,14 @@ void SenServer::MessageReceived(BMessage* message)
                         BPath path(&ref);
 
                         char id[SEN_ID_LEN];
-                        result = relationsHandler->GetOrCreateId(&ref, id);
+                        result = relationHandler->GetOrCreateId(&ref, id);
                         if (result != B_OK) {
                             break;
                         }
 
                         entry_ref existingEntry;
 
-                        if ((result = relationsHandler->QueryForUniqueSenId(id, &existingEntry)) == B_OK) {
+                        if ((result = relationHandler->QueryForUniqueSenId(id, &existingEntry)) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
                                 LOG("SEN:ID %s refers to same node %d, nothing to do.",
@@ -240,7 +240,8 @@ void SenServer::MessageReceived(BMessage* message)
             break;
         }
         case SEN_CONFIG_CLASS_ADD:
-        case SEN_CONFIG_CLASS_GET: // fallthrough
+        case SEN_CONFIG_CLASS_GET: 
+        case SEN_CONFIG_CLASS_FIND:	// fallthrough
         {
             senConfigHandler->MessageReceived(message);
             return; // done
@@ -256,7 +257,7 @@ void SenServer::MessageReceived(BMessage* message)
 		case SEN_RELATION_REMOVE:
 		case SEN_RELATIONS_REMOVE_ALL: // fallthrough
         {
-            relationsHandler->MessageReceived(message);
+            relationHandler->MessageReceived(message);
             return; // done
         }
 		default:

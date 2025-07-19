@@ -75,7 +75,7 @@ private:
     /**
      * adds a classification entity under a given context with custom name and MIME type.
      *
-     * @param context   optional, pass empty string for default context
+     * @param context   custom context name
      * @param name      a custom name.
      * @param type      the MIME type of the META entity to use for the context
      * @param reply     an empty message to hold the result, which is the entry_ref
@@ -90,12 +90,22 @@ private:
      * There can only be one classification entity for a given context, type and name.
      * Use a different context if you encounter this intentional limit.
      *
-     * @param context   optional, pass empty string for default context
+     * @param context   custom context name
      * @param name      the entity name of the classification.
      * @param type      the MIME type of the META entity of the context
      * @param reply     an empty BMessage to hold the result
      */
     status_t    GetClassification(const char* context, const char* name, const char* type, BMessage* reply);
+
+    /**
+     * find classifications for a given context with optional matching name and/or MIME type.
+     *
+     * @param context   custom context name
+     * @param name      filter for a given classification name, leave empty for any
+     * @param type      filter for a given classification type, leave empty for any
+     * @param reply     an empty BMessage to hold the result
+     */
+    status_t    FindClassification(const char* context, const BString* name, const BString* type, BMessage *reply);
 
     BDirectory* fSettingsDir;
     BMessage*   fSettingsMsg;

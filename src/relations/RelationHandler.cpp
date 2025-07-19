@@ -16,25 +16,25 @@
 #include <VolumeRoster.h>
 #include <Volume.h>
 
-#include "RelationsHandler.h"
+#include "RelationHandler.h"
 #include "Sen.h"
 
-RelationsHandler::RelationsHandler()
-    : BHandler("SenRelationsHandler")
+RelationHandler::RelationHandler()
+    : BHandler("SenRelationHandler")
 {
     tsidGenerator = new IceDustGenerator();
 }
 
-RelationsHandler::~RelationsHandler()
+RelationHandler::~RelationHandler()
 {
 }
 
-void RelationsHandler::MessageReceived(BMessage* message)
+void RelationHandler::MessageReceived(BMessage* message)
 {
     BMessage* reply = new BMessage();
     status_t result = B_UNSUPPORTED;
 
-    LOG("RelationsHandler got message:\n");
+    LOG("RelationHandler got message:\n");
     message->PrintToStream();
 
     switch(message->what)
@@ -65,10 +65,10 @@ void RelationsHandler::MessageReceived(BMessage* message)
             BString relationType;
             status_t status = message->FindString(SEN_RELATION_TYPE, &relationType);
 
-            if (status == B_OK) {
-                if (relationType == SEN_LABEL_RELATION_TYPE) {
+            if (status == B_OK || status == B_NAME_NOT_FOUND) {     // e.g. for templates, search compatible relations
+                if (relationType == SEN_LABEL_RELATION_TYPE) {      //      in that case, relationType is empty
                     LOG("resolving association targets...\n");
-                    result = GetCompatibleTargetTypes(message, reply);
+                    result = GetCompatibleTargetTypes(relationType, reply);
                 } else {
                     LOG("resolving compatible relations...\n");
                     result = GetCompatibleRelations(message, reply);
@@ -83,7 +83,10 @@ void RelationsHandler::MessageReceived(BMessage* message)
         }
         case SEN_RELATIONS_GET_COMPATIBLE_TYPES:
         {
-            result = GetCompatibleTargetTypes(message, reply);
+            BString relationType;
+            result = message->FindString(SEN_RELATION_TYPE, &relationType);
+            if (result == B_OK)
+                result = GetCompatibleTargetTypes(relationType, reply);
             break;
         }
         case SEN_RELATION_ADD:
@@ -103,15 +106,15 @@ void RelationsHandler::MessageReceived(BMessage* message)
         }
         default:
         {
-            LOG("RelationsHandler: unkown message received: %u\n", message->what);
+            LOG("RelationHandler: unkown message received: %u\n", message->what);
             reply->AddString("error", "cannot handle this message.");
         }
     }
 
     if (result == B_OK) {
-        LOG("RelationsHandler sending successful reply '%s' with message:\n", strerror(result));
+        LOG("RelationHandler sending successful reply '%s' with message:\n", strerror(result));
     } else {
-        ERROR("RelationsHandler encountered an error while processing the request: %s\n", strerror(result));
+        ERROR("RelationHandler encountered an error while processing the request: %s\n", strerror(result));
     }
 
     reply->AddInt32 ("status", result);
@@ -121,7 +124,7 @@ void RelationsHandler::MessageReceived(BMessage* message)
     message->SendReply(reply);
 }
 
-status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
+status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
 {
     status_t  status;
     entry_ref srcRef;
@@ -190,32 +193,25 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     }
 
     // prepare new relation properties with properties from message received
-    BMessage properties(*message);
+    BMessage newProperties;
+    // we take what we get but don't check as properties are optional
+    message->FindMessage(SEN_RELATION_PROPERTIES, &newProperties);
 
-    // remove internal SEN properties
-    properties.RemoveData(SEN_RELATION_SOURCE_REF);
-    properties.RemoveData(SEN_RELATION_TARGET_REF);
-    properties.RemoveData(SEN_RELATION_TYPE);
-    properties.RemoveData(SEN_RELATION_NAME);
-    properties.RemoveData(SEN_ID_TO_REF_MAP);
-
-    // will hold all outgoing relations (for bidirectional / meta-non-meta relations) and their properties, or
-    // just an empty placeholder in case of unidirectional / Association relations (META)
-    BMessage relations;
+    // check for existing properties with same key/values
+    BMessage existingRelations;
 
     if (linkToTarget) {
-        LOG("adding relation with link to target...\n");
+        LOG("adding relation %s with link to target...\n", relationType);
 
         // get existing relations of the given type from the source file
-        status = ReadRelationsOfType(&srcRef, relationType, &relations);
+        status = ReadRelationsOfType(&srcRef, relationType, &existingRelations);
         if (status != B_OK) {
             ERROR("failed to read relations of type %s from file %s\n", relationType, srcRef.name);
             return B_ERROR;
-        } else if (relations.IsEmpty()) {
+        } else if (existingRelations.IsEmpty()) {
             LOG("creating new relation %s for file %s\n", relationType, srcRef.name);
         } else {
-            LOG("got relations for type %s and file %s:\n", relationType, srcRef.name);
-            relations.PrintToStream();
+            LOG("adding new properties to existing relation %s and file %s:\n", relationType, srcRef.name);
         }
 
         // prepare target
@@ -225,24 +221,21 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
             return status;
         }
 
-        // we allow multipe relations of the same type to the same target
+        // Note: we allow multipe relations of the same type to the same target
         // (e.g. a note for the same text referencing different locations in the referenced text).
         // Hence, we have a Message with targetId as *key* pointing to 1-N messages with relation properties
         // for that target.
+
         // We need to check if a src->target relation with the same properties already exists and only
         // add a new mapping when no existing targetId->property message has been found.
-        BMessage oldProperties;
+        BMessage existingProperties;
         int index = 0;
 
-        while (relations.FindMessage(targetId, index, &oldProperties) == B_OK) {
-            LOG("got existing relation properties at index %d:\n", index);
-            oldProperties.PrintToStream();
-
-            // get existing relation properties for target if available and skip if already there
-            if (oldProperties.HasSameData(properties)) {
-                LOG("skipping add relation %s for target %s, already there with same properties:\n",
-                        relationType, targetId);
-                oldProperties.PrintToStream();
+        while ((status = existingRelations.FindMessage(targetId, index, &existingProperties)) == B_OK) {
+            // bail out if new properties for particular relation and target are the same as existing ones
+            if (existingProperties.HasSameData(newProperties)) {
+                LOG("skipping add relation %s for target %s with same properties:\n", relationType, targetId);
+                existingProperties.PrintToStream();
 
                 reply->what = SEN_RESULT_RELATIONS;
                 reply->AddString("status", BString("relation with same properties already exists"));
@@ -251,18 +244,30 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
             }
             index++;
         }
-        if (index > 0) {
-            LOG("adding new properties for existing relation %s at index %d\n", relationType, index);
-        } else {
-            LOG("adding new target %s for relation %s\n", targetId, relationType);
+
+        if (status != B_OK) {
+            if (status != B_NAME_NOT_FOUND) {
+                ERROR("error reading properties of existing relation %s from file %s: %s",
+                    relationType, srcRef.name, strerror(status));
+                return status;
+            } else {
+                index = -1; // no existing properties for target found, OK
+            }
         }
-        // add new relation properties for target
-        relations.AddMessage(targetId, &properties);
 
-        LOG("new relation properties for relation %s to target %s [%s]:\n", relationType, targetRef.name, targetId);
-        relations.PrintToStream();
+        if (index >= 0) {
+            LOG("adding new properties to existing relation %s and target %s at index %d\n",
+                relationType, targetId, index);
+        } else {
+            LOG("creating new properties for target %s [%s] for relation %s\n", targetRef.name, targetId, relationType);
+        }
 
-        status = WriteRelation(&srcRef, targetId, relationType, &relations, linkToTarget);
+        // add new relation properties for target to any existing relations
+        existingRelations.AddMessage(targetId, &newProperties);
+        existingRelations.PrintToStream();
+
+        status = WriteRelation(&srcRef, targetId, relationType, &existingRelations);
+
         if (status == B_OK) {
             LOG("created relation %s from source %s to target %s [%s] with properties:\n",
                     relationType, srcRef.name, targetRef.name, targetId);
@@ -276,7 +281,9 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     } else { // if linkToTargets
         LOG("adding shallow relation with source-only config...\n");
 
-        status = WriteRelation(&srcRef, NULL, relationType, &relations, linkToTarget);
+        // add empty relations message for consistency
+        status = WriteRelation(&srcRef, NULL, relationType, &existingRelations);
+
         if (status == B_OK) {
             LOG("created relation %s from source %s to target ID %s with properties:\n",
                     relationType, srcRef.name, targetRef.name);
@@ -292,15 +299,9 @@ status_t RelationsHandler::AddRelation(const BMessage* message, BMessage* reply)
     return status;
 }
 
-status_t RelationsHandler::WriteRelation(const entry_ref *srcRef,  const char* targetId,
-                                         const char *relationType, const BMessage* properties, bool linkToTarget)
+status_t RelationHandler::WriteRelation(const entry_ref *srcRef,  const char* targetId,
+                                        const char *relationType, const BMessage* properties)
 {
-    // sanity check arguments
-    if (linkToTarget && targetId == NULL) {
-        ERROR("WriteRelation expects a targetId for linking to target.\n");
-        return B_BAD_VALUE;
-    }
-
     char srcId[SEN_ID_LEN];
     status_t status = GetOrCreateId(srcRef, srcId, true);
     if (status != B_OK) {
@@ -308,7 +309,8 @@ status_t RelationsHandler::WriteRelation(const entry_ref *srcRef,  const char* t
     }
 
     // write new relation to designated attribute
-    const char* attrName = GetAttributeNameForRelation(relationType);
+    char attrName[B_ATTR_NAME_LENGTH];
+    GetAttributeNameForRelation(relationType, attrName);
     LOG("writing new relation %s into attribute %s of file %s\n", relationType, attrName, srcRef->name);
 
     BNode node(srcRef); // has been checked already at least once here
@@ -323,16 +325,18 @@ status_t RelationsHandler::WriteRelation(const entry_ref *srcRef,  const char* t
     }
 
     // only now that all is clean, write relation to disk
-    if (linkToTarget) {
-        LOG("adding relation target attr...\n");
+    if (targetId) {
+        LOG("adding relation target attr with targetId %s...\n", targetId);
         status = AddRelationTargetIdAttr(node, targetId, relationType);
+
         if (status != B_OK) {
             ERROR("failed to store targetId %s in file attrs of %s: %s\n", targetId, srcRef->name, strerror(status));
             return status;
         }
     }
 
-    // write complete relation config into target attribute under the SEN-ified relation type name
+    // write complete relation config into target attribute with the canonical relation type name
+    // Note: we also write relation config when not linking to a target, currently unused and empty.
     ssize_t result = node.WriteAttr(
         attrName,
         B_MESSAGE_TYPE,
@@ -348,7 +352,7 @@ status_t RelationsHandler::WriteRelation(const entry_ref *srcRef,  const char* t
     return B_OK;
 }
 
-status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* reply)
+status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
     status_t  status;
@@ -397,7 +401,7 @@ status_t RelationsHandler::GetAllRelations(const BMessage* message, BMessage* re
     return status;
 }
 
-status_t RelationsHandler::GetCompatibleRelations(const BMessage* message, BMessage* reply)
+status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
     status_t  status;
@@ -413,12 +417,16 @@ status_t RelationsHandler::GetCompatibleRelations(const BMessage* message, BMess
         return status;
     }
 
-    char mimeType[B_ATTR_NAME_LENGTH];
+    char mimeType[B_MIME_TYPE_LENGTH];
     nodeInfo.GetType(mimeType);
     LOG("searching for relations compatible with %s...\n", mimeType);
 
     BMessage relationTypes;
-    BMimeType::GetInstalledTypes(SEN_RELATION_SUPERTYPE, &relationTypes);
+    status = BMimeType::GetInstalledTypes(SEN_RELATION_SUPERTYPE, &relationTypes);
+    if (status != B_OK) {
+        ERROR("could not get installed MIME types: %s\n", strerror(status));
+        return status;
+    }
 
     LOG("found relations:\n");
     relationTypes.PrintToStream();
@@ -435,23 +443,15 @@ status_t RelationsHandler::GetCompatibleRelations(const BMessage* message, BMess
     return status;
 }
 
-status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMessage* reply)
+status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, BMessage* reply)
 {
-    BString  sourceType;
+    LOG("searching for types compatible with relation %s...\n", relationType.String());
+    BMessage targetTypes;
     status_t status;
 
-    // TODO: check relation config for type restrictions
-    if ((status = GetMessageParameter(message, SEN_RELATION_TYPE, &sourceType, NULL, true, false)) != B_OK) {
-        ERROR("required parameter %s is missing, aborting.\n", SEN_RELATION_TYPE);
-        return status;
-    }
-
-    LOG("searching for types compatible with relation %s...\n", sourceType.String());
-    BMessage targetTypes;
-
     // associations are meta relations and handled slightly differently, here we always take the meta/ types only
-    if ((sourceType == SEN_LABEL_RELATION_TYPE) || (sourceType.StartsWith(SEN_META_SUPERTYPE "/")) ) {
-        LOG("resolving meta types for association...\n");
+    if ((relationType == SEN_LABEL_RELATION_TYPE) || (relationType.StartsWith(SEN_META_SUPERTYPE "/")) ) {
+        LOG("resolving compatible association types...\n");
 
         status = BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
 
@@ -461,22 +461,22 @@ status_t RelationsHandler::GetCompatibleTargetTypes(const BMessage* message, BMe
         }
     } else {
         LOG("using available template types allowed by relation.\n");
+        // todo: filter out targets excluded by relation type
     }
+
     BStringList types;
     targetTypes.FindStrings("types", &types);
-
-    // todo: filter out targets excluded by relation type
 
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddString(SEN_MSG_FILTER, "compatible");
     reply->AddStrings(SEN_RELATION_COMPATIBLE_TYPES, types);
     reply->AddString("status", BString("got ") << types.CountStrings()
-                 << " compatible target(s) for " << sourceType.String());
+                 << " compatible target(s) for " << relationType.String());
 
     return status;
 }
 
-status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage* reply)
+status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
     status_t  status;
@@ -533,26 +533,40 @@ status_t RelationsHandler::GetRelationsOfType(const BMessage* message, BMessage*
 // private methods
 //
 
-status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const char* relationType, BMessage* relations)
+status_t RelationHandler::ReadRelationsOfType(
+    const entry_ref* sourceRef,
+    const char* relationType,
+    BMessage* relations,
+    BMessage* idToRefMap,
+    BStringList* targetIds)
 {
     BNode node(sourceRef);
     status_t status;
+
+    // parameter check: idToRefMap needs targetIds to be passed in, too
+    if (idToRefMap == NULL && targetIds == NULL) {
+        ERROR("itToRefMap parameter requires targetIds also to be set.\n");
+        return B_BAD_VALUE;
+    }
 
     if ((status = node.InitCheck()) != B_OK) {
         ERROR("failed to initialize node for ref %s: %s\n", sourceRef->name, strerror(status));
         return status;
     }
+
     // read relation config as message from respective relation attribute
-    attr_info attrInfo;
-    const char* attrName = GetAttributeNameForRelation(relationType);
+    char attrName[B_ATTR_NAME_LENGTH];
+    GetAttributeNameForRelation(relationType, attrName);
     LOG("checking for relation %s in atttribute %s\n", relationType, attrName);
 
+    attr_info attrInfo;
     if ((status = node.GetAttrInfo(attrName, &attrInfo)) != B_OK) {
         // if attribute not found, e.g. new relation, this is OK, else it's a real ERROR
         if (status != B_ENTRY_NOT_FOUND) {
             ERROR("failed to get attribute info for ref %s: %s\n", sourceRef->name, strerror(status));
             return status;
         }
+        LOG("no existing relation of type %s found.\n", relationType);
         return B_OK;
     }
     // read relation property message
@@ -575,48 +589,41 @@ status_t RelationsHandler::ReadRelationsOfType(const entry_ref* sourceRef, const
     BMessage relationProperties;
     relationProperties.Unflatten(relation_attr_value);
 
-    BStringList targetIds;
-    result = ResolveRelationPropertyTargetIds(&relationProperties, &targetIds);
+    if (targetIds != NULL) {
+        result = ResolveRelationPropertyTargetIds(&relationProperties, targetIds);
 
-    if (result == B_OK) {
-        const char* ids = targetIds.Join(",").String();
-        LOG("got ids: %s\n", ids);
-    } else {
-        ERROR("failed to resolve relation target IDs for relation %s of file %s: %s\n",
-            relationType, sourceRef->name, strerror(result));
+        if (result == B_OK) {
+            const char* ids = targetIds->Join(",").String();
+            LOG("got ids: %s\n", ids);
+        } else {
+            ERROR("failed to resolve relation target IDs for relation %s of file %s: %s\n",
+                relationType, sourceRef->name, strerror(result));
 
-        return status;
+            return status;
+        }
     }
 
-    // add target refs
-    BMessage idToRefMap;
-    if ((status = ResolveRelationTargets(&targetIds, &idToRefMap)) == B_OK) {
-        LOG("got %d unique relation targets for type %s and file %s, resolving entries...\n",
-            idToRefMap.CountNames(B_REF_TYPE), relationType, sourceRef->name);
-
-        // add relation count for quick check
-        relations->AddInt32("count", targetIds.CountStrings());
-
-        // add target IDs for quick lookup
-        relations->AddStrings(SEN_TO_ATTR, targetIds);
-
-        // add refs associated with targetIds
-        relations->AddMessage(SEN_ID_TO_REF_MAP, new BMessage(idToRefMap));
-
-        // add properties associated with a given targetId (nested messages for each relation to that target)
-        relations->AddMessage("properties", new BMessage(relationProperties));
-    } else {
-        ERROR("failed to resolve relation target refs for relation %s of file %s.\n", relationType, sourceRef->name);
-        return status;
+    // optionally add target refs
+    if (idToRefMap) {
+        if ((status = ResolveRelationTargets(targetIds, idToRefMap)) == B_OK) {
+            LOG("got %d unique relation targets for type %s and file %s, resolving entries...\n",
+                idToRefMap->CountNames(B_REF_TYPE), relationType, sourceRef->name);
+        } else {
+            ERROR("failed to resolve relation target refs for relation %s of file %s.\n", relationType, sourceRef->name);
+            return status;
+        }
     }
+
+    // add properties associated with a given targetId (nested messages for each relation to the same target)
+    relations->Append(relationProperties);
 
     return status;
 }
 
-status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* reply)
+status_t RelationHandler::RemoveRelation(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
-  status_t  status;
+    status_t  status;
 
     BString sourceParam;
     if ((status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, NULL, &sourceRef))  != B_OK) {
@@ -637,7 +644,7 @@ status_t RelationsHandler::RemoveRelation(const BMessage* message, BMessage* rep
     return B_OK;
 }
 
-status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
+status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
   status_t  status;
@@ -656,10 +663,10 @@ status_t RelationsHandler::RemoveAllRelations(const BMessage* message, BMessage*
  * private methods
  */
 
-status_t RelationsHandler::ReadRelationNames(const entry_ref* ref, BStringList* relations)
+status_t RelationHandler::ReadRelationNames(const entry_ref* ref, BStringList* relations)
 {
     BNode node(ref);
-  status_t result;
+    status_t result;
 
     if ((result = node.InitCheck()) != B_OK) {
         ERROR("failed to read from %s\n", ref->name);
@@ -672,7 +679,7 @@ status_t RelationsHandler::ReadRelationNames(const entry_ref* ref, BStringList* 
     while (node.GetNextAttrName(attrName) == B_OK) {
         relationAttr = attrName;
         if (relationAttr.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
-            // relation name is supertype + attribute name without SEN prefixes
+            // full relation name is supertype + attribute name without SEN prefixes
             relations->Add(BString(SEN_RELATION_SUPERTYPE "/")
                            .Append(relationAttr.Remove(0, SEN_RELATION_ATTR_PREFIX_LEN).String()));
         }
@@ -681,7 +688,7 @@ status_t RelationsHandler::ReadRelationNames(const entry_ref* ref, BStringList* 
     return result;
 }
 
-status_t RelationsHandler::ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids)
+status_t RelationHandler::ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids)
 {
     char*       idKey;
     type_code   typeCode;
@@ -701,7 +708,7 @@ status_t RelationsHandler::ResolveRelationPropertyTargetIds(const BMessage* rela
     return result;
 }
 
-status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs)
+status_t RelationHandler::ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs)
 {
     LOG("resolving ids from list with %d targets...\n", ids->CountStrings())
 
@@ -724,7 +731,7 @@ status_t RelationsHandler::ResolveRelationTargets(BStringList* ids, BMessage *id
     return B_OK;
 }
 
-status_t RelationsHandler::ResolveInverseRelations(const entry_ref* sourceRef, BMessage* reply, const char* relationType)
+status_t RelationHandler::ResolveInverseRelations(const entry_ref* sourceRef, BMessage* reply, const char* relationType)
 {
     char sourceId[SEN_ID_LEN];
     // query for any file with a SEN:TO that contains the sourceId
@@ -750,16 +757,16 @@ status_t RelationsHandler::ResolveInverseRelations(const entry_ref* sourceRef, B
     return status;
 }
 
-/** adds new targetId to existing IDs stored in SEN:TO / SEN:META for quick search,
-    and then again as targetId keys for associated relation properties).
- */
-status_t RelationsHandler::AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType)
+// adds new targetId to existing IDs stored in SEN:TO for quick search and possible back linking.
+status_t RelationHandler::AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType)
 {
     BString targetIds;
     status_t status = node.ReadAttrString(SEN_TO_ATTR, &targetIds);
+
     if (targetIds.FindFirst(targetId) < 0) {
         if (! targetIds.IsEmpty())
             targetIds.Append(",");
+
         targetIds.Append(targetId);
     }
 
@@ -770,7 +777,7 @@ status_t RelationsHandler::AddRelationTargetIdAttr(BNode& node, const char* targ
 //
 // utility functions
 //
-status_t RelationsHandler::GetMessageParameter(
+status_t RelationHandler::GetMessageParameter(
     const BMessage* message,
     const char* param,
     BString* buffer,
@@ -809,9 +816,12 @@ status_t RelationsHandler::GetMessageParameter(
     switch (type) {
         case B_STRING_TYPE: {
             status = message->FindString(param, buffer);
-            if (status == B_OK && stripSuperType/* && BString(param) == SEN_RELATION_TYPE*/) {
-                // remove Relation supertype for relation params for internal handling
-                buffer = StripSuperType(buffer);
+            if (status == B_OK && stripSuperType) {
+                // mainly used for relation params to use only subtype for further processing
+                BString subtype;
+                status = GetSubtype(buffer, &subtype);
+                if (status == B_OK)
+                    buffer->SetTo(subtype);
             }
             break;
         }
@@ -831,24 +841,49 @@ status_t RelationsHandler::GetMessageParameter(
     return status;
 }
 
-BString* RelationsHandler::StripSuperType(BString* mimeType) {
-    if (mimeType->StartsWith(SEN_RELATION_SUPERTYPE "/")) {
-        mimeType->Remove(0, sizeof(SEN_RELATION_SUPERTYPE));
+status_t RelationHandler::GetSubtype(const BString* mimeTypeStr, BString* subType) {
+    BMimeType mimeType(mimeTypeStr->String());
+
+    // MIME type will be invalid if only subtype is given, unless it is *only* a supertype (handled below)
+    status_t status = mimeType.InitCheck();
+    if (status == B_OK) {
+        if (mimeType.IsSupertypeOnly()) {
+            subType->SetTo("");     // only supertype, empty subtype
+            return B_OK;
+        }
+        // else, extract subtype
+        BMimeType superType;
+        status = mimeType.GetSupertype(&superType);
+        if (status == B_OK) {
+            subType->SetTo(mimeType.Type());
+            subType->RemoveFirst(superType.Type());
+            subType->RemoveFirst("/");
+        }
+    } else {
+        // check if we got a valid subtype or something is off
+        BString testTypeStr("test/");
+        testTypeStr.Prepend(mimeTypeStr->String());
+        BMimeType testType(testTypeStr.String());
+        status = testType.InitCheck();
+        if (status == B_OK) {
+            subType->SetTo(*mimeTypeStr);   // take valid subtype
+        }
     }
-    return mimeType;
+    // error from above due to processing or we really just got a subtype, so no change needed
+    return status;
 }
 
 //
 // ID handling
 //
-const char* RelationsHandler::GenerateId() {
+const char* RelationHandler::GenerateId() {
     return (new std::string(std::to_string(tsidGenerator->generate())) )->c_str();
 }
 
 /**
  * retrieve existing SEN:ID from entry, or generate a new one if not existing.
  */
-status_t RelationsHandler::GetOrCreateId(const entry_ref *ref, char* id, bool createIfMissing)
+status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool createIfMissing)
 {
     status_t result;
     BNode node(ref);
@@ -891,7 +926,7 @@ status_t RelationsHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cr
     return B_OK;
 }
 
-status_t RelationsHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound)
+status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound)
 {
     BString predicate(BString(SEN_ID_ATTR) << "==" << sourceId);
     // TODO: all relation queries currently assume we never leave the boot volume
@@ -934,7 +969,7 @@ status_t RelationsHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* 
 // used to resolve inverse relations where we need to go from target->source
 // todo: offer a live query (passing around a dest messenger) when querying large number of targets,
 //       e.g. for reverse relations with Classification entities!
-status_t RelationsHandler::QueryForTargetsById(const char* sourceId, BMessage* idToRef)
+status_t RelationHandler::QueryForTargetsById(const char* sourceId, BMessage* idToRef)
 {
     status_t result;
     LOG("query for inverse relation targets with sourceId %s\n", sourceId);
@@ -984,26 +1019,27 @@ status_t RelationsHandler::QueryForTargetsById(const char* sourceId, BMessage* i
 //
 // Relation helpers
 //
-const char* RelationsHandler::GetAttributeNameForRelation(const char* relationType)
+void RelationHandler::GetAttributeNameForRelation(const char* relationType, char* attrName)
 {
-    BString relationAttributeName(relationType);
+    BString attrNameStr(relationType);
 
     // strip possible relation supertype
-    if (! relationAttributeName.StartsWith(SEN_RELATION_SUPERTYPE)) {
-        relationAttributeName.RemoveFirst(SEN_RELATION_SUPERTYPE "/");
+    if (! attrNameStr.StartsWith(SEN_RELATION_SUPERTYPE "/")) {
+        attrNameStr.RemoveFirst(SEN_RELATION_SUPERTYPE "/");
     }
-    if (! relationAttributeName.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
-        relationAttributeName.Prepend(SEN_RELATION_ATTR_PREFIX);
+    // add SEN:REL prefix if not there already
+    if (! attrNameStr.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
+        attrNameStr.Prepend(SEN_RELATION_ATTR_PREFIX);
     }
 
-    return (new BString(relationAttributeName))->String();
+    return attrNameStr.CopyInto(attrName, 0, attrNameStr.CountBytes(0, attrNameStr.Length()));
 }
 
-status_t RelationsHandler::GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig)
+status_t RelationHandler::GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig)
 {
     BString relation(mimeType);
 
-    if (!relation.StartsWith(SEN_RELATION_SUPERTYPE))
+    if (!relation.StartsWith(SEN_RELATION_SUPERTYPE "/"))
         relation.Prepend(SEN_RELATION_SUPERTYPE "/");
 
     BMimeType relationType(relation);
@@ -1020,7 +1056,7 @@ status_t RelationsHandler::GetRelationMimeConfig(const char* mimeType, BMessage*
     return result;
 }
 
-status_t RelationsHandler::GetTypeForRef(entry_ref* ref, BString* typeName)
+status_t RelationHandler::GetTypeForRef(entry_ref* ref, BString* typeName)
 {
     BNode srcNode(ref);
     status_t status = srcNode.InitCheck();

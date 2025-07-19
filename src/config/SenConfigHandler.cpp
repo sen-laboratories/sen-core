@@ -189,8 +189,8 @@ void SenConfigHandler::MessageReceived(BMessage* message)
     // for now, we always need these same parameters for context
     // if optional context is empty, use global default context
     const char* context = message->GetString(SEN_MSG_CONTEXT, SEN_CONFIG_CONTEXT_GLOBAL);
-    const char* name = message->GetString(SEN_MSG_NAME, "");
-    const char* type = message->GetString(SEN_MSG_TYPE, "");
+    const BString name = message->GetString(SEN_MSG_NAME, "");
+    const BString type = message->GetString(SEN_MSG_TYPE, "");
 
     switch(message->what)
     {
@@ -198,7 +198,10 @@ void SenConfigHandler::MessageReceived(BMessage* message)
             status = AddClassification(context, name, type, reply);
             break;
         case SEN_CONFIG_CLASS_GET:
-            status = GetClassification(context, name, type, reply);
+            status = GetClassification(context, name.String(), type.String(), reply);
+            break;
+        case SEN_CONFIG_CLASS_FIND:
+            status = FindClassification(context, &name, &type, reply);
             break;
         default:
             LOG("SenConfigHandler: unknown config message received.\n");
@@ -272,11 +275,10 @@ status_t SenConfigHandler::AddClassification(const char* context, const char* na
 
 status_t SenConfigHandler::GetClassification(const char* context, const char* name, const char* type, BMessage* reply)
 {
-    // get context path
-    entry_ref contextRef;
-    status_t status = GetContextDir(context, &contextRef);
+    entry_ref classtRef;
+    status_t status = GetClassificationDir(context, type, &classtRef, false);
 
-    BPath classPath(&contextRef);
+    BPath classPath(&classtRef);
     classPath.Append(name);
 
     BFile classFile(classPath.Path(), B_READ_ONLY);
@@ -293,6 +295,79 @@ status_t SenConfigHandler::GetClassification(const char* context, const char* na
         if (status == B_OK)
             status = reply->AddRef("refs", &classFileRef);
     }
+    return status;
+}
+
+status_t SenConfigHandler::FindClassification(
+    const char* context,
+    const BString* name,
+    const BString* type,
+    BMessage *reply)
+{
+    entry_ref classtRef;
+    status_t status = GetClassificationDir(context, type->String(), &classtRef, false);
+
+    LOG("searching for classification with name %s and type %s...\n",
+        name->IsEmpty() ? "*" : name->String(),
+        type->IsEmpty() ? "*" : type->String());
+
+    if (status == B_OK) {
+        BDirectory classDir(&classtRef);
+        BEntry     classEntry;
+        BNode      classNode;
+        BNodeInfo  classNodeInfo;
+        bool       includeRef;
+        entry_ref  classRef;
+        char       classType[B_MIME_TYPE_LENGTH];
+
+        if (classDir.InitCheck() == B_OK) {
+            // iterate directory and filter by optional params name and type
+            while ((status = classDir.GetNextEntry(&classEntry)) == B_OK) {
+                // apply optional filters, be optimistic:)
+                includeRef = true;
+
+                // filter by optional name
+                if (!name->IsEmpty() && *name != classEntry.Name())
+                    includeRef = false;
+
+                // filter by optional type
+                status = classNode.SetTo(&classEntry);
+                if (status == B_OK)
+                    status = classNodeInfo.SetTo(&classNode);
+                if (status == B_OK)
+                    status = classNodeInfo.GetType(classType);
+                if (status != B_OK) {
+                    ERROR("  > skipping entry '%s', error resolving node(info/type): %s.\n",
+                            classEntry.Name(), strerror(status));
+                    continue;
+                }
+
+                if (!type->IsEmpty() && *type != classType)
+                    includeRef = false;
+
+                if (includeRef) {
+                    LOG("found matching classification entity %s, addding to list.\n", classEntry.Name());
+                    status = classEntry.GetRef(&classRef);
+                    if (status == B_OK) {
+                        // add refs and types separately under common names so they can be easier consumed
+                        reply->AddString("types", classType);
+                        reply->AddRef("refs", &classRef);
+                    }
+                }
+            } // while
+            // check for errors besides the obvious B_ENTRY_NOT_FOUND
+            if (status != B_ENTRY_NOT_FOUND) {
+                ERROR("search encountered an error, result may be incomplete.\n");
+            } else {
+                status = B_OK;
+            }
+        }
+    }
+
+    if (status != B_OK) {
+        reply->AddString("detail", strerror(status));
+    }
+
     return status;
 }
 

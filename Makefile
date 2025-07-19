@@ -12,11 +12,11 @@ PACKAGE = $(TARGET_DIR)/$(NAME)_$(VERSION)-$(ARCH).hpkg
 TYPE = APP
 APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 
-SRCS := src/relations/RelationsHandler.cpp \
-    	src/relations/SelfRelations.cpp \
+SRCS := src/relations/RelationHandler.cpp \
+    	src/relations/SelfRelationHandler.cpp \
     	src/relations/IceDustGenerator.cpp \
-		src/config/SenConfigHandler.cpp \
-		src/server/SenServer.cpp
+	src/config/SenConfigHandler.cpp \
+	src/server/SenServer.cpp
 
 RDEFS = src/resources/sen_server.rdef
 

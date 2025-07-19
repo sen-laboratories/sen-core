@@ -15,11 +15,11 @@
 #include <VolumeRoster.h>
 #include <Volume.h>
 
-#include "RelationsHandler.h"
+#include "RelationHandler.h"
 #include "Sen.h"
 #include "Sensei.h"
 
-status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
+status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
 	entry_ref sourceRef;
 	status_t  status;
 
@@ -45,7 +45,7 @@ status_t RelationsHandler::GetSelfRelations(const BMessage* message, BMessage* r
     return status;
 }
 
-status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMessage* reply) {
+status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMessage* reply) {
     entry_ref sourceRef;
 	status_t  status;
 
@@ -133,10 +133,10 @@ status_t RelationsHandler::GetSelfRelationsOfType (const BMessage* message, BMes
     return result;
 }
 
-status_t RelationsHandler::ResolveSelfRelationsWithPlugin(
-const char* pluginSig,
-const entry_ref* sourceRef,
-BMessage* reply)
+status_t RelationHandler::ResolveSelfRelationsWithPlugin(
+    const char* pluginSig,
+    const entry_ref* sourceRef,
+    BMessage* reply)
 {
     LOG("got plugin app signature: %s\n", pluginSig);
 
@@ -175,7 +175,7 @@ BMessage* reply)
     return B_OK;
 }
 
-status_t RelationsHandler::GetPluginsForTypeAndFeature(
+status_t RelationHandler::GetPluginsForTypeAndFeature(
     const char* mimeType,
     const char* feature,
     BMessage* pluginConfig)
@@ -262,7 +262,7 @@ status_t RelationsHandler::GetPluginsForTypeAndFeature(
     return B_OK;
 }
 
-status_t RelationsHandler::GetPluginConfig(
+status_t RelationHandler::GetPluginConfig(
     const char* pluginSig,
     entry_ref* pluginRef,
     const char* pluginMimeType,
@@ -325,7 +325,7 @@ status_t RelationsHandler::GetPluginConfig(
     return result;
 }
 
-const char* RelationsHandler::GetMimeTypeForRef(const entry_ref *ref) {
+const char* RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
     BNode sourceNode(ref);
     status_t result;
     if ((result = sourceNode.InitCheck()) != B_OK) {
