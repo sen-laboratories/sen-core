@@ -70,7 +70,7 @@ private:
         status_t            GetMessageParameter(const BMessage* message, const char* param,
                                 BString* buffer = NULL, entry_ref* ref = NULL,
                                 bool mandatory = true, bool stripSuperType = true);
-        void                GetAttributeNameForRelation(const char* relationType, char* attrName);
+        void                GetAttributeNameForRelation(const char* relationType, BString* attrName);
         status_t            AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
         status_t            GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig);
 

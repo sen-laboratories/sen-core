@@ -309,9 +309,9 @@ status_t RelationHandler::WriteRelation(const entry_ref *srcRef,  const char* ta
     }
 
     // write new relation to designated attribute
-    char attrName[B_ATTR_NAME_LENGTH];
-    GetAttributeNameForRelation(relationType, attrName);
-    LOG("writing new relation %s into attribute %s of file %s\n", relationType, attrName, srcRef->name);
+    BString attrName;
+    GetAttributeNameForRelation(relationType, &attrName);
+    LOG("writing new relation %s into attribute %s of file %s\n", relationType, attrName.String(), srcRef->name);
 
     BNode node(srcRef); // has been checked already at least once here
 
@@ -338,7 +338,7 @@ status_t RelationHandler::WriteRelation(const entry_ref *srcRef,  const char* ta
     // write complete relation config into target attribute with the canonical relation type name
     // Note: we also write relation config when not linking to a target, currently unused and empty.
     ssize_t result = node.WriteAttr(
-        attrName,
+        attrName.String(),
         B_MESSAGE_TYPE,
         0,
         msgBuffer,
@@ -361,7 +361,7 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
         return status;
     }
 
-    bool withProperties = message->GetBool("properties");
+    bool withProperties = message->GetBool(SEN_MSG_PROPERTIES);
 
     BStringList relationNames;
     status = ReadRelationNames(&sourceRef, &relationNames);
@@ -491,6 +491,10 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
         return status;
     }
 
+    // filled in id_to_ref map if it was passed in
+    BMessage idToRefMap;
+    bool returnIdToRefMap = message->GetBool(SEN_ID_TO_REF_MAP, false);
+
     // check config if relation is bidirectional
     BMessage relationConf;
     status = GetRelationMimeConfig(relationType.String(), &relationConf);
@@ -501,8 +505,9 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     }
 
     BMessage relations;
-    status = ReadRelationsOfType(&sourceRef, relationType.String(), &relations);
-    int32 numberOfRelations = relations.GetInt32("count", 0);
+    status = ReadRelationsOfType(&sourceRef, relationType.String(),
+                                 &relations, returnIdToRefMap ? &idToRefMap : NULL, NULL);
+    int32 numberOfRelations = relations.CountNames(B_MESSAGE_TYPE);
 
     if (status == B_OK) {
         if ( (numberOfRelations == 0) && (! relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) ) {
@@ -520,7 +525,14 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     }
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddMessage(SEN_RELATIONS, new BMessage(relations));
+    reply->AddMessage(SEN_RELATIONS, &relations);
+
+    // hand back filled in id_to_ref map if it was passed in
+    if (returnIdToRefMap) {
+        reply->AddMessage(SEN_ID_TO_REF_MAP, &idToRefMap);
+    }
+
+    reply->AddInt32("count", numberOfRelations);
     reply->AddString("status", BString("retrieved ") << numberOfRelations
                  << " relations from " << sourceRef.name);
 
@@ -543,24 +555,18 @@ status_t RelationHandler::ReadRelationsOfType(
     BNode node(sourceRef);
     status_t status;
 
-    // parameter check: idToRefMap needs targetIds to be passed in, too
-    if (idToRefMap == NULL && targetIds == NULL) {
-        ERROR("itToRefMap parameter requires targetIds also to be set.\n");
-        return B_BAD_VALUE;
-    }
-
     if ((status = node.InitCheck()) != B_OK) {
         ERROR("failed to initialize node for ref %s: %s\n", sourceRef->name, strerror(status));
         return status;
     }
 
     // read relation config as message from respective relation attribute
-    char attrName[B_ATTR_NAME_LENGTH];
-    GetAttributeNameForRelation(relationType, attrName);
-    LOG("checking for relation %s in atttribute %s\n", relationType, attrName);
+    BString attrName;
+    GetAttributeNameForRelation(relationType, &attrName);
+    LOG("checking for relation %s in atttribute %s\n", relationType, attrName.String());
 
     attr_info attrInfo;
-    if ((status = node.GetAttrInfo(attrName, &attrInfo)) != B_OK) {
+    if ((status = node.GetAttrInfo(attrName.String(), &attrInfo)) != B_OK) {
         // if attribute not found, e.g. new relation, this is OK, else it's a real ERROR
         if (status != B_ENTRY_NOT_FOUND) {
             ERROR("failed to get attribute info for ref %s: %s\n", sourceRef->name, strerror(status));
@@ -572,7 +578,7 @@ status_t RelationHandler::ReadRelationsOfType(
     // read relation property message
     char* relation_attr_value = new char[attrInfo.size + 1];
     ssize_t result = node.ReadAttr(
-            attrName,
+            attrName.String(),
             B_MESSAGE_TYPE,
             0,
             relation_attr_value,
@@ -589,8 +595,9 @@ status_t RelationHandler::ReadRelationsOfType(
     BMessage relationProperties;
     relationProperties.Unflatten(relation_attr_value);
 
+    // optionally add targetIds list
     if (targetIds != NULL) {
-        result = ResolveRelationPropertyTargetIds(&relationProperties, targetIds);
+        status = ResolveRelationPropertyTargetIds(&relationProperties, targetIds);
 
         if (result == B_OK) {
             const char* ids = targetIds->Join(",").String();
@@ -604,8 +611,19 @@ status_t RelationHandler::ReadRelationsOfType(
     }
 
     // optionally add target refs
-    if (idToRefMap) {
-        if ((status = ResolveRelationTargets(targetIds, idToRefMap)) == B_OK) {
+    if (idToRefMap != NULL) {
+        // targetIds might have not been requested but we need them here now
+        if (targetIds != NULL) {
+            status = ResolveRelationTargets(targetIds, idToRefMap);
+        } else {
+            BStringList tids;
+            status = ResolveRelationPropertyTargetIds(&relationProperties, &tids);
+            if (status == B_OK) {
+                status = ResolveRelationTargets(&tids, idToRefMap);
+            }
+        }
+
+        if (status == B_OK) {
             LOG("got %d unique relation targets for type %s and file %s, resolving entries...\n",
                 idToRefMap->CountNames(B_REF_TYPE), relationType, sourceRef->name);
         } else {
@@ -647,7 +665,7 @@ status_t RelationHandler::RemoveRelation(const BMessage* message, BMessage* repl
 status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
-  status_t  status;
+    status_t  status;
 
     if (status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, NULL, &sourceRef)  != B_OK) {
         return status;
@@ -678,10 +696,14 @@ status_t RelationHandler::ReadRelationNames(const entry_ref* ref, BStringList* r
 
     while (node.GetNextAttrName(attrName) == B_OK) {
         relationAttr = attrName;
+        // is it a SEN relation?
         if (relationAttr.StartsWith(SEN_RELATION_ATTR_PREFIX)) {
-            // full relation name is supertype + attribute name without SEN prefixes
+            // add full SEN relation name (=supertype + attribute name) without the SEN:REL prefix
             relations->Add(BString(SEN_RELATION_SUPERTYPE "/")
-                           .Append(relationAttr.Remove(0, SEN_RELATION_ATTR_PREFIX_LEN).String()));
+                           .Append(
+                                relationAttr.Remove(0, SEN_RELATION_ATTR_PREFIX_LEN)
+                           )
+                           .String());
         }
     }
 
@@ -863,6 +885,7 @@ status_t RelationHandler::GetSubtype(const BString* mimeTypeStr, BString* subTyp
         // check if we got a valid subtype or something is off
         BString testTypeStr("test/");
         testTypeStr.Prepend(mimeTypeStr->String());
+
         BMimeType testType(testTypeStr.String());
         status = testType.InitCheck();
         if (status == B_OK) {
@@ -1019,12 +1042,12 @@ status_t RelationHandler::QueryForTargetsById(const char* sourceId, BMessage* id
 //
 // Relation helpers
 //
-void RelationHandler::GetAttributeNameForRelation(const char* relationType, char* attrName)
+void RelationHandler::GetAttributeNameForRelation(const char* relationType, BString* attrName)
 {
     BString attrNameStr(relationType);
 
     // strip possible relation supertype
-    if (! attrNameStr.StartsWith(SEN_RELATION_SUPERTYPE "/")) {
+    if (attrNameStr.StartsWith(SEN_RELATION_SUPERTYPE "/")) {
         attrNameStr.RemoveFirst(SEN_RELATION_SUPERTYPE "/");
     }
     // add SEN:REL prefix if not there already
@@ -1032,7 +1055,7 @@ void RelationHandler::GetAttributeNameForRelation(const char* relationType, char
         attrNameStr.Prepend(SEN_RELATION_ATTR_PREFIX);
     }
 
-    return attrNameStr.CopyInto(attrName, 0, attrNameStr.CountBytes(0, attrNameStr.Length()));
+    *attrName = attrNameStr;
 }
 
 status_t RelationHandler::GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig)
