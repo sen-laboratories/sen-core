@@ -201,7 +201,7 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
     BMessage existingRelations;
 
     if (linkToTarget) {
-        LOG("adding relation %s with link to target...\n", relationType);
+        LOG("* adding relation %s with link to target...\n", relationType);
 
         // get existing relations of the given type from the source file
         status = ReadRelationsOfType(&srcRef, relationType, &existingRelations);
@@ -211,7 +211,7 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
         } else if (existingRelations.IsEmpty()) {
             LOG("creating new relation %s for file %s\n", relationType, srcRef.name);
         } else {
-            LOG("adding new properties to existing relation %s and file %s:\n", relationType, srcRef.name);
+            LOG("adding new properties to existing relation %s and file %s.\n", relationType, srcRef.name);
         }
 
         // prepare target
@@ -256,10 +256,10 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
         }
 
         if (index >= 0) {
-            LOG("adding new properties to existing relation %s and target %s at index %d\n",
+            LOG("  > adding new properties to existing relation %s and target %s at index %d\n",
                 relationType, targetId, index);
         } else {
-            LOG("creating new properties for target %s [%s] for relation %s\n", targetRef.name, targetId, relationType);
+            LOG("  > creating new properties for target %s [%s] for relation %s\n", targetRef.name, targetId, relationType);
         }
 
         // add new relation properties for target to any existing relations
@@ -269,7 +269,7 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
         status = WriteRelation(&srcRef, targetId, relationType, &existingRelations);
 
         if (status == B_OK) {
-            LOG("created relation %s from source %s to target %s [%s] with properties:\n",
+            LOG("* created relation %s from source %s to target %s [%s].\n",
                     relationType, srcRef.name, targetRef.name, targetId);
 
             reply->AddString("detail", BString("created relation '") << relationType << "' from "
@@ -278,7 +278,46 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
             reply->AddString("detail", BString("failed to create relation '") << relationType << "' from "
                 << srcRef.name << " -> " <<  targetRef.name << " [" << targetId << "]");
         }
-    } else { // if linkToTargets
+
+        // write inverse relation if it doesn't already exist
+        LOG("  > checking for inverse relations of type %s...\n", relationType);
+
+        BMessage inverseRelationsReply;
+        status = ResolveInverseRelations(&targetRef, &inverseRelationsReply, relationType);
+
+        if (status == B_OK) {
+            // bail out if back link already exists
+            BMessage inverseRelations;
+            status = inverseRelationsReply.FindMessage(SEN_RELATIONS, &inverseRelations);
+            if (! inverseRelations.IsEmpty()) {
+                // done
+                LOG("  > backlink already exists, skipping.\n");
+                return status;
+            }
+
+            // now we need the ID of the original source for linking back to it
+            char srcId[SEN_ID_LEN];
+            status = GetOrCreateId(&srcRef, srcId, false);
+
+            if (status == B_OK) {
+                LOG("* linking back inverse relation from target %s [%s] -> source %s [%s].\n",
+                    targetRef.name, targetId, srcRef.name, srcId);
+
+                // get inverse relation properties (e.g. suitable label)
+                BMessage inverseConfig;
+                status = relationConf.FindMessage(SEN_RELATION_CONFIG_INVERSE, &inverseConfig);
+
+                // todo: separate config from properties
+                inverseRelations.AddMessage(srcId, &inverseConfig);
+
+                if (status == B_OK || status == B_NAME_NOT_FOUND) {  // optional
+                    // write inverse relations with swapped src/target
+                    status = WriteRelation(&targetRef, srcId, relationType, &inverseRelations);
+                }
+             }
+
+        }
+    } else { // if linkToTarget
         LOG("adding shallow relation with source-only config...\n");
 
         // add empty relations message for consistency
@@ -311,7 +350,8 @@ status_t RelationHandler::WriteRelation(const entry_ref *srcRef,  const char* ta
     // write new relation to designated attribute
     BString attrName;
     GetAttributeNameForRelation(relationType, &attrName);
-    LOG("writing new relation %s into attribute %s of file %s\n", relationType, attrName.String(), srcRef->name);
+    LOG("writing new relation '%s' from %s [%s] -> %s into attribute '%s'...\n",
+        relationType, srcRef->name, srcId, targetId, attrName.String());
 
     BNode node(srcRef); // has been checked already at least once here
 
@@ -563,7 +603,7 @@ status_t RelationHandler::ReadRelationsOfType(
     // read relation config as message from respective relation attribute
     BString attrName;
     GetAttributeNameForRelation(relationType, &attrName);
-    LOG("checking for relation %s in atttribute %s\n", relationType, attrName.String());
+    LOG("checking file '%s' for relation %s in atttribute %s\n", sourceRef->name, relationType, attrName.String());
 
     attr_info attrInfo;
     if ((status = node.GetAttrInfo(attrName.String(), &attrInfo)) != B_OK) {
@@ -756,25 +796,37 @@ status_t RelationHandler::ResolveRelationTargets(BStringList* ids, BMessage *ids
 status_t RelationHandler::ResolveInverseRelations(const entry_ref* sourceRef, BMessage* reply, const char* relationType)
 {
     char sourceId[SEN_ID_LEN];
-    // query for any file with a SEN:TO that contains the sourceId
     BMessage idToRef;
+    BMessage inverseRelations;
 
     status_t status = GetOrCreateId(sourceRef, sourceId, true);
-    if (status == B_OK)
-        status = QueryForTargetsById(sourceId, &idToRef);
 
     if (status != B_OK) {
         ERROR("failed to get inverse relation targets for sourceId %s: %s\n", sourceId, strerror(status));
+        // not enough info for reply message, bail out
+        return status;
     }
-    LOG("got inverse id->target map:\n");
-    idToRef.PrintToStream();
 
-    // todo: implement filtering for relationType if there are multiple inverse relations to the source
+    // filter for optional relationType to narrow down result to specific relation type
+    if (relationType != NULL) {
+        status = ReadRelationsOfType(sourceRef, relationType, &inverseRelations, &idToRef);
+        if (status == B_OK) {
+            reply->AddMessage(SEN_RELATIONS, &inverseRelations);
+        }
+    } else {
+        // get all inverse relations
+        status = QueryForTargetsById(sourceId, &idToRef);
+    }
 
     reply->what = SEN_RESULT_RELATIONS;
+    // add resolved sourceId to speed up further relation calls
+    reply->AddString(SEN_RELATION_SOURCE_ID, sourceId);
     reply->AddMessage(SEN_ID_TO_REF_MAP, &idToRef);
     reply->AddString("status", BString("got ") << idToRef.CountNames(B_REF_TYPE)
                   << " inverse target(s) for " << sourceId);
+
+    LOG("sending reply for inverse relations for type %s::\n", relationType != NULL ? relationType : "ALL");
+    reply->PrintToStream();
 
     return status;
 }
@@ -991,7 +1043,7 @@ status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* r
 
 // used to resolve inverse relations where we need to go from target->source
 // todo: offer a live query (passing around a dest messenger) when querying large number of targets,
-//       e.g. for reverse relations with Classification entities!
+//       e.g. for inverse relations with Classification entities!
 status_t RelationHandler::QueryForTargetsById(const char* sourceId, BMessage* idToRef)
 {
     status_t result;
