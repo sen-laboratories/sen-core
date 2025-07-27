@@ -32,7 +32,7 @@ RelationHandler::~RelationHandler()
 void RelationHandler::MessageReceived(BMessage* message)
 {
     BMessage* reply = new BMessage();
-    status_t result = B_UNSUPPORTED;
+    status_t result = B_OK;
 
     LOG("RelationHandler got message:\n");
     message->PrintToStream();
@@ -63,20 +63,21 @@ void RelationHandler::MessageReceived(BMessage* message)
         {
             // special case for associations, here we go straight to target types
             BString relationType;
-            status_t status = message->FindString(SEN_RELATION_TYPE, &relationType);
+            result = message->FindString(SEN_RELATION_TYPE, &relationType);
 
-            if (status == B_OK || status == B_NAME_NOT_FOUND) {     // e.g. for templates, search compatible relations
-                if (relationType == SEN_LABEL_RELATION_TYPE) {      //      in that case, relationType is empty
+            if (result == B_OK || result == B_NAME_NOT_FOUND) {     // e.g. for templates, search compatible relations
+                if (relationType == SEN_ASSOC_RELATION_TYPE) {      //      in that case, relationType is empty
                     LOG("resolving association targets...\n");
                     result = GetCompatibleTargetTypes(relationType, reply);
                 } else {
                     LOG("resolving compatible relations...\n");
+                    relationType = "<any>";
                     result = GetCompatibleRelations(message, reply);
                 }
             }
-            if (status != B_OK) {
+            if (result != B_OK) {
                 BString error("failed to resolve compatible relations for type '");
-                        error << relationType << "'";
+                        error << relationType << "': " << strerror(result);
                 reply->AddString("error", error.String());
             }
             break;
@@ -161,7 +162,7 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
     LOG("got relation config:\n");
     relationConf.PrintToStream();
 
-    // special case for relations from normal to meta entities (used for classification): here we don't link back
+    // special case for relations from normal to classification entities (used for classification): here we don't link back
     // as to not overload the SEN:TO targetId attribute. The targets are then resolved via back-Query.
     // exception: relations between meta entities only, e.g. Concept hierarchies: here we allow bidirectional linking.
     bool linkToTarget = true;
@@ -175,15 +176,15 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
             return status;
         }
 
-        if (srcType.StartsWith(SEN_META_SUPERTYPE)) {
-            // allow back linking *between* meta entities to form classification networks (nerd mode)
+        if (srcType.StartsWith(SEN_CLASS_SUPERTYPE)) {
+            // allow back linking *between* classification entities to form classification networks (aka nerd mode)
             BString targetType;
             status = GetTypeForRef(&targetRef, &targetType);
             if (status != B_OK) {
                 return status;
             }
 
-            if (! targetType.StartsWith(SEN_META_SUPERTYPE)) {
+            if (! targetType.StartsWith(SEN_CLASS_SUPERTYPE)) {
                 linkToTarget = false;
                 LOG("source is META entity but target is NOT, storing relation info without linking back to targets.\n");
             }
@@ -490,10 +491,10 @@ status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, 
     status_t status;
 
     // associations are meta relations and handled slightly differently, here we always take the meta/ types only
-    if ((relationType == SEN_LABEL_RELATION_TYPE) || (relationType.StartsWith(SEN_META_SUPERTYPE "/")) ) {
+    if ((relationType == SEN_ASSOC_RELATION_TYPE) || (relationType.StartsWith(SEN_CLASS_SUPERTYPE "/")) ) {
         LOG("resolving compatible association types...\n");
 
-        status = BMimeType::GetInstalledTypes(SEN_META_SUPERTYPE, &targetTypes);
+        status = BMimeType::GetInstalledTypes(SEN_CLASS_SUPERTYPE, &targetTypes);
 
         if (status != B_OK) {
             ERROR("error getting installed types from MIME db, falling back to any type: %s\n",

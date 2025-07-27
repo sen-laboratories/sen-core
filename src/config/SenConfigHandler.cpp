@@ -409,9 +409,9 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
             status = mimeClass.InitCheck();
 
             if (status == B_OK) {
-                // for valid MIME types, check we only get a meta type for classification and then use just the subtype
+                // for valid MIME types, check we only get a classification type and then use just the subtype
                 BString typeName(type);
-                if (! typeName.StartsWith(SEN_META_SUPERTYPE "/")) {
+                if (! typeName.StartsWith(SEN_CLASS_SUPERTYPE "/")) {
                     ERROR("unsupported type for classification: %s\n", type);
                     return B_BAD_VALUE;
                 }
@@ -420,7 +420,7 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
 
                 if (status == B_OK) {
                     // API does not have BMimeType.Subtype() sadly
-                    typeName.RemoveFirst(SEN_META_SUPERTYPE "/");
+                    typeName.RemoveFirst(SEN_CLASS_SUPERTYPE "/");
                     classPath.Append(typeName.String());
 
                     status = classPath.InitCheck();
