@@ -36,15 +36,12 @@ status_t SenConfigHandler::Init()
 
     if (status != B_OK) {
         ERROR("failed to read settings: %s\n", strerror(status));
-    } else {
-        LOG("got settings:\n");
-        fSettingsMsg->PrintToStream();
     }
 
     return status;
 }
 
-status_t SenConfigHandler::LoadSettings(BMessage* message)
+status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
 {
     BPath path;
     status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
@@ -62,22 +59,34 @@ status_t SenConfigHandler::LoadSettings(BMessage* message)
     BEntry settingsFileEntry(fSettingsDir, "sen.settings");
 
     if (! settingsDirEntry.Exists() || ! settingsFileEntry.Exists()) {
-        status = InitDefaultSettings(&path, fSettingsMsg);
+        status = InitDefaultSettings(&path, settingsMessage);
+        if (status == B_OK) {
+            LOG("successfully initialized settings.\n");
+            status = SaveSettings(settingsMessage);
+        } else {
+            ERROR("failed to initialize settings: %s\n", strerror(status));
+            return status;
+        }
     } else {
+        LOG("reading exising settings from %s" B_UTF8_ELLIPSIS "\n", path.Path());
         BFile settingsFile(&settingsFileEntry, B_READ_WRITE);
+
         status = settingsFile.InitCheck();
         if (status == B_OK) {
-            status = fSettingsMsg->Unflatten(&settingsFile);
+            status = settingsMessage->Unflatten(&settingsFile);
         }
         if (status != B_OK) {
-            ERROR("could not unflatten settings message: %s\n", strerror(status));
+            ERROR("could not retrieve settings: %s\n", strerror(status));
+            return status;
         }
     }
+    LOG("successfully retrieved settings:\n");
+    settingsMessage->PrintToStream();
 
     return status;
 }
 
-status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* message)
+status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* settingsMessage)
 {
     status_t status;
 
@@ -85,21 +94,19 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* me
 
     // checking and building sen settings directories incrementally
     BEntry settingsDirEntry(settingsPath->Path());
-    BPath path;     // working path for setting up directories
-    settingsPath->GetParent(&path); // user settings home
-
-    BDirectory settingsDir(path.Path());
-    path.Append("sen");
+    BDirectory settingsDir(&settingsDirEntry);
 
 	if (! settingsDirEntry.Exists())
-		status = settingsDir.CreateDirectory(path.Leaf(), NULL);
+		status = settingsDir.CreateDirectory(settingsPath->Path(), NULL);
 
 	if (status != B_OK) {
-        ERROR("could not access settings path '%s': %s\n", path.Path(), strerror(status));
+        ERROR("could not access settings path '%s': %s\n", settingsPath->Path(), strerror(status));
         return status;
     }
 
-    message->AddString(SEN_CONFIG_PATH, path.Path());
+    BPath path(*settingsPath);    // working path for setting up directories
+
+    settingsMessage->AddString(SEN_CONFIG_PATH, path.Path());
     settingsDir.SetTo(path.Path());
 
     // set up context directories
@@ -114,11 +121,11 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* me
         }
     }
     settingsDir.SetTo(path.Path());
-    message->AddString(SEN_CONFIG_CONTEXT_BASE_PATH, path.Path());
+    settingsMessage->AddString(SEN_CONFIG_CONTEXT_BASE_PATH, path.Path());
 
     entry_ref contextBaseRef;
     settingsDirEntry.GetRef(&contextBaseRef);
-    message->AddRef(SEN_CONFIG_CONTEXT_BASE_PATH_REF, &contextBaseRef);
+    settingsMessage->AddRef(SEN_CONFIG_CONTEXT_BASE_PATH_REF, &contextBaseRef);
 
     // create initial global context as default
     // Note: we do this manually here since CreateContext() rightfully relies on setup to be completed.
@@ -154,17 +161,17 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* me
         }
     }
 
-    message->AddString(SEN_CONFIG_CLASS_BASE_PATH, path.Path());
+    settingsMessage->AddString(SEN_CONFIG_CLASS_BASE_PATH, path.Path());
     entry_ref classBaseRef;
     settingsDirEntry.GetRef(&classBaseRef);
-    message->AddRef(SEN_CONFIG_CLASS_BASE_PATH_REF, &classBaseRef);
+    settingsMessage->AddRef(SEN_CONFIG_CLASS_BASE_PATH_REF, &classBaseRef);
 
     return status;
 }
 
 status_t SenConfigHandler::SaveSettings(const BMessage* message)
 {
-    BFile settingsFile(fSettingsDir, "sen.settings", B_READ_WRITE);
+    BFile settingsFile(fSettingsDir, "sen.settings", B_CREATE_FILE | B_ERASE_FILE | B_READ_WRITE);
 
     status_t status = message->Flatten(&settingsFile);
     if (status == B_OK) {
@@ -401,6 +408,7 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
     status_t status = GetContextDir(context, &contextRef);
     if (status == B_OK) {
         BPath classPathBase(&contextRef);
+
         if (status == B_OK && classPathBase.InitCheck() == B_OK) {
             classPathBase.Append(SEN_CONFIG_CLASS_PATH_NAME);
 
@@ -435,6 +443,27 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
 
                             BDirectory classDir(classPathBase.Path());
                             status = classDir.CreateDirectory(classPath.Leaf(), NULL);
+
+                            if (status == B_OK) {
+                                // write a friendly name for use in UI's like Tracker;
+                                // real name is the full and unique context MIME type.
+                                classDir.SetTo(classPath.Path());
+
+                                char shortName[B_MIME_TYPE_LENGTH];
+                                BString folderName;
+
+                                status = mimeClass.GetShortDescription(shortName);
+                                if (status == B_OK) {
+                                    folderName = shortName;
+                                    folderName.Append("s"); // quick hack, todo: move to MIME Type config
+                                } else {
+                                    ERROR("failed to get short description for type %s, falling back to type name: %s.\n",
+                                          typeName, strerror(status));
+                                    folderName = typeName;
+                                }
+
+                                status = classDir.WriteAttrString(META_FOLDER_NAME, &folderName);
+                            }
                         }
 
                         if (status == B_OK) {
@@ -458,18 +487,19 @@ status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
     entry_ref contextRef;
     status_t status = GetContextDir(name, &contextRef);
 
-    BFile classFile(&contextRef, B_CREATE_FILE);
-    status = classFile.InitCheck();
+    BFile contextFile(&contextRef, B_CREATE_FILE);
+    status = contextFile.InitCheck();
 
     // esp. must not exist already
     if (status != B_OK) {
-        ERROR("could not create context '%s' with type '%s': %s",
+        ERROR("could not create directory for context '%s' with type '%s': %s",
               name, strerror(status));
         return status;
     }
 
-    BNodeInfo contextInfo(&classFile);
+    BNodeInfo contextInfo(&contextFile);
     status = contextInfo.SetType(SEN_CONTEXT_TYPE);
+
     // optionally return the ref to the newly created context
     if (status == B_OK && ref != NULL) {
         *ref = contextRef;
