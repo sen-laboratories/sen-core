@@ -427,13 +427,14 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
 
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings(SEN_RELATIONS, relationNames);
+    reply->AddInt32(SEN_MSG_COUNT, relationNames.CountStrings());
 
     // ensure source has a SEN:ID if it has relations
     // todo: is this needed? would be quite an inconsistency...
     if (status == B_OK && relationNames.CountStrings() > 0) {
         char senId[SEN_ID_LEN];
         status = GetOrCreateId(&sourceRef, senId);
-        reply->AddString(SEN_ID_ATTR, (new BString(senId))->String());
+        reply->AddString(SEN_RELATION_SOURCE_ID, (new BString(senId))->String());
     }
 
     reply->AddString("status", BString("got ")
