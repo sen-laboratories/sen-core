@@ -4,6 +4,8 @@
  * Distributed under the terms of the MIT License.
  */
 
+#include <cassert>
+
 #include <AppFileInfo.h>
 #include <fs_attr.h>
 #include <Node.h>
@@ -33,14 +35,47 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     LOG("query for extractors to handle file type %s\n", sourceType);
     BMessage pluginConfig;
 
-    if ((status = GetPluginsForTypeAndFeature(sourceType, SENSEI_FEATURE_EXTRACT, &pluginConfig)) != B_OK) {
+    status = GetPluginsForTypeAndFeature(sourceType, SENSEI_FEATURE_EXTRACT, &pluginConfig);
+    if (status != B_OK) {
         return status;
     }
+
     LOG("got types/plugins config for source type %s:\n", sourceType);
     pluginConfig.PrintToStream();
 
     reply->what = SENSEI_MESSAGE_RESULT;
     reply->AddMessage(SENSEI_PLUGIN_CONFIG_KEY, new BMessage(pluginConfig));
+
+    // transparently add type mappings as relations for consistent uniform handling from outside (e.g. Tracker)
+    BStringList relationTypes;
+
+    BMessage typeMappings;
+    status = pluginConfig.FindMessage(SENSEI_TYPE_MAPPING, &typeMappings);
+    if (status != B_OK) {
+        ERROR("could not find expected type mappings, aborting.\n");
+        return status;
+    }
+
+    // add all types (values) as relations
+    char *alias;
+    BString relationTypeName;
+
+    for (int t = 0; t < typeMappings.CountNames(B_STRING_TYPE); t++) {
+        status = typeMappings.GetInfo(B_STRING_TYPE, t, &alias, NULL);
+        if (status == B_OK)
+            status = typeMappings.FindString(alias, t, &relationTypeName);
+        if (status != B_OK) {
+            ERROR("failed to get type mapping #%d: %s\n", t, strerror(status));
+            continue;
+        }
+        relationTypes.Add(relationTypeName);
+    }
+
+    BString defaultType = pluginConfig.GetString(SENSEI_DEFAULT_TYPE_KEY, "");
+    if (! defaultType.IsEmpty())
+        relationTypes.Add(defaultType);
+
+    reply->AddStrings(SEN_RELATIONS, relationTypes);
 
     return status;
 }
@@ -310,10 +345,10 @@ status_t RelationHandler::GetPluginConfig(
     typesToPlugins.AddString(pluginMimeType, pluginSig);
     pluginConfig->AddMessage(SENSEI_TYPES_PLUGINS_KEY, new BMessage(typesToPlugins));
 
-    // store default type separately if available for easier access
+    // store default type separately if available for easier access and remove from individual type mappings
     BString defaultType;
-
     result = typeMappings.FindString(SENSEI_DEFAULT_TYPE, &defaultType);
+
     if (result == B_OK) {
         pluginConfig->AddString(SENSEI_DEFAULT_TYPE_KEY, defaultType);
         // and remove from type mappings
@@ -322,6 +357,7 @@ status_t RelationHandler::GetPluginConfig(
 
     // add to reply msg
     pluginConfig->AddMessage(SENSEI_TYPE_MAPPING, new BMessage(typeMappings));
+
     return result;
 }
 
