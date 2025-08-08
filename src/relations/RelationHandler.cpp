@@ -113,7 +113,7 @@ void RelationHandler::MessageReceived(BMessage* message)
     }
 
     if (result == B_OK) {
-        LOG("RelationHandler sending successful reply '%s' with message:\n", strerror(result));
+        LOG("RelationHandler sending successful reply with message:\n");
     } else {
         ERROR("RelationHandler encountered an error while processing the request: %s\n", strerror(result));
     }
