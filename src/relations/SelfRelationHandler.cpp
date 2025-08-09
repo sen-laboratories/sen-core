@@ -190,6 +190,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
         ERROR("failed to get ref for path %s: %s\n", sourceRef->name, strerror(result));
         return result;
     }
+
     BMessage refsMsg(B_REFS_RECEIVED);
     refsMsg.AddRef("refs", sourceRef);
 
@@ -310,40 +311,22 @@ status_t RelationHandler::GetPluginConfig(
         return result;
     }
 
-    attr_info attrInfo;
-    if ((result = node.GetAttrInfo(SENSEI_TYPE_MAPPING, &attrInfo)) != B_OK) {
-        if (result == B_ENTRY_NOT_FOUND) {
-            ERROR("expected plugin attribute not found in plugin %s: %s\n", pluginSig, SENSEI_TYPE_MAPPING);
-        } else {
-            ERROR("error getting attribute info from plugin %s: %s\n", pluginSig, strerror(result));
-        }
-        return result;
-    }
-
-    char* attrValue = new char[attrInfo.size + 1];
-    result = node.ReadAttr(
-            SENSEI_TYPE_MAPPING,
-            B_MESSAGE_TYPE,
-            0,
-            attrValue,
-            attrInfo.size);
-
-    if (result == 0) {
-        ERROR("no output types found in plugin.\n");
-        return B_ENTRY_NOT_FOUND;
-    } else if (result < 0) {
-        ERROR("failed to read mappings from attribute %s of plugin: %s\n", SENSEI_TYPE_MAPPING, strerror(result));
-        return result;
-    }
-
-    // retrieve type map for client to map types of result
+    // retrieve type and attribute mapping config from plugin resources
     BMessage typeMappings;
-    typeMappings.Unflatten(attrValue);
+    BMessage attrMappings;
+
+    result = GetAttrMessage(&node, SENSEI_TYPE_MAPPING, &typeMappings);
+    if (result == B_OK)
+        result = GetAttrMessage(&node, SENSEI_ATTR_MAPPING, &attrMappings);
+
+    if (result != B_OK) {
+        return result;
+    }
 
     // add mapping from plugin's output types to the plugin signature so we can resolve the relation later.
     BMessage typesToPlugins;
     typesToPlugins.AddString(pluginMimeType, pluginSig);
-    pluginConfig->AddMessage(SENSEI_TYPES_PLUGINS_KEY, new BMessage(typesToPlugins));
+    pluginConfig->AddMessage(SENSEI_TYPES_PLUGINS_KEY, &typesToPlugins);
 
     // store default type separately if available for easier access and remove from individual type mappings
     BString defaultType;
@@ -355,10 +338,45 @@ status_t RelationHandler::GetPluginConfig(
         typeMappings.RemoveData(SENSEI_DEFAULT_TYPE);
     }
 
-    // add to reply msg
-    pluginConfig->AddMessage(SENSEI_TYPE_MAPPING, new BMessage(typeMappings));
+    // add mapping configs to plugin config
+    pluginConfig->AddMessage(SENSEI_TYPE_MAPPING, &typeMappings);
+    pluginConfig->AddMessage(SENSEI_ATTR_MAPPING, &attrMappings);
 
     return result;
+}
+
+status_t RelationHandler::GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage)
+{
+    attr_info attrInfo;
+    status_t  result;
+
+    if ((result = node->GetAttrInfo(name, &attrInfo)) != B_OK) {
+        if (result == B_ENTRY_NOT_FOUND) {
+            ERROR("expected plugin config attribute '%s' not found in plugin.\n", name);
+        } else {
+            ERROR("error getting plugin config for '%s' from attribute info for plugin: %s\n",
+                name, strerror(result));
+        }
+        return result;
+    }
+
+    char* attrValue = new char[attrInfo.size + 1];
+    result = node->ReadAttr(
+            name,
+            B_MESSAGE_TYPE,
+            0,
+            attrValue,
+            attrInfo.size);
+
+    if (result == 0) {
+        ERROR("no %s config found for plugin.\n", name);
+        return B_ENTRY_NOT_FOUND;
+    } else if (result < 0) {
+        ERROR("failed to read mappings from attribute %s of plugin: %s\n", name, strerror(result));
+        return result;
+    }
+
+    return attrMessage->Unflatten(attrValue);
 }
 
 const char* RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {

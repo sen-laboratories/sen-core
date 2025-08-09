@@ -58,6 +58,7 @@ protected:
         status_t    GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* outputTypesToPlugins);
         status_t    GetPluginConfig(const char* pluginSig, entry_ref* pluginRef,
                                             const char* mimeType, BMessage* pluginConfig);
+        status_t    GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage);
         status_t    AddTypesToPluginsConfig(BMessage *pluginConfig);
 
 private:

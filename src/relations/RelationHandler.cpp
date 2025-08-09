@@ -162,9 +162,9 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
     LOG("got relation config:\n");
     relationConf.PrintToStream();
 
-    // special case for relations from normal to classification entities (used for classification): here we don't link back
+    // special case for relations to classification entities (used for associations): here we don't link back
     // as to not overload the SEN:TO targetId attribute. The targets are then resolved via back-Query.
-    // exception: relations between meta entities only, e.g. Concept hierarchies: here we allow bidirectional linking.
+    // exception: relations between 2 association entities, e.g. Concept hierarchies: here we allow bidirectional linking.
     bool linkToTarget = true;
 
     // relations are bidirectional by default (makes sense in 95% of cases)
