@@ -338,6 +338,10 @@ status_t RelationHandler::GetPluginConfig(
         typeMappings.RemoveData(SENSEI_DEFAULT_TYPE);
     }
 
+    // add default attribute mappings if not specified otherwise
+    if (!attrMappings.HasString(SENSEI_LABEL))
+        attrMappings.AddString(SENSEI_LABEL, "SEN:REL:Label");
+
     // add mapping configs to plugin config
     pluginConfig->AddMessage(SENSEI_TYPE_MAPPING, &typeMappings);
     pluginConfig->AddMessage(SENSEI_ATTR_MAPPING, &attrMappings);
