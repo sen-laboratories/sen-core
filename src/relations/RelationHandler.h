@@ -58,6 +58,19 @@ protected:
         status_t    GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* outputTypesToPlugins);
         status_t    GetPluginConfig(const char* pluginSig, entry_ref* pluginRef,
                                             const char* mimeType, BMessage* pluginConfig);
+        /**
+         * collect relation configs from input types and store in provides message keyed by type.
+         *
+         * @param  types            relation mime types to query
+         * @param  relationConfigs  result message that will hold all configs found.
+         * @return B_OK or the error of the last failed API call.
+         */
+        status_t    GetRelationConfigs(const BStringList* types, BMessage* relationConfigs);
+        /**
+         * single param version.
+         * @see #GetRelationConfigs
+         */
+        status_t    GetRelationConfig(const char* mimeType, BMessage* relationConfig);
         status_t    GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage);
         status_t    AddTypesToPluginsConfig(BMessage *pluginConfig);
 
@@ -81,7 +94,6 @@ private:
                                         bool mandatory = true, bool stripSuperType = true);
         void        GetAttributeNameForRelation(const char* relationType, BString* attrName);
         status_t    AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
-        status_t    GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig);
 
         IceDustGenerator*   tsidGenerator;
 };

@@ -57,10 +57,10 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     }
 
     // add all types (values) as relations
-    char *alias;
-    BString relationTypeName;
-
     for (int t = 0; t < typeMappings.CountNames(B_STRING_TYPE); t++) {
+        char *alias;
+        BString relationTypeName;
+
         status = typeMappings.GetInfo(B_STRING_TYPE, t, &alias, NULL);
         if (status == B_OK)
             status = typeMappings.FindString(alias, t, &relationTypeName);
@@ -76,6 +76,13 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
         relationTypes.Add(defaultType);
 
     reply->AddStrings(SEN_RELATIONS, relationTypes);
+
+    // get relation configs (always needed for self relations)
+    BMessage relationConfigs;
+    status = GetRelationConfigs(&relationTypes, &relationConfigs);
+    if (status == B_OK) {
+        reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
+    }
 
     return status;
 }
@@ -99,6 +106,20 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 		return B_BAD_VALUE;
 	}
     const char* relationType = relationTypeParam.String();
+
+    // retrieve relation config from MIME DB in the filesystem
+    BMessage relationConfigs;
+    BStringList types;
+    types.Add(relationType);
+
+    status = GetRelationConfigs(&types, &relationConfigs);
+    if (status != B_OK) {
+        LOG("failed to get relation config for type %s: %s\n", relationType, strerror(status));
+        return status;
+    }
+
+    // add to reply
+    reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
 
     BString pluginTypeParam;
     // client may send the desired plugin signature already, saving us the hassle

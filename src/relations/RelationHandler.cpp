@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <fs_attr.h>
+#include <FindDirectory.h>
 #include <Node.h>
 #include <NodeInfo.h>
 #include <Path.h>
@@ -147,7 +148,7 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
 
     // get relation config
     BMessage relationConf;
-    status = GetRelationMimeConfig(relationType, &relationConf);
+    status = GetRelationConfig(relationType, &relationConf);
     if (status != B_OK) {
         LOG("failed to get relation config for type %s: %s\n", relationType, strerror(status));
 
@@ -403,6 +404,7 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
     }
 
     bool withProperties = message->GetBool(SEN_MSG_PROPERTIES);
+    bool withConfigs    = message->GetBool(SEN_MSG_CONFIGS, true);
 
     BStringList relationNames;
     status = ReadRelationNames(&sourceRef, &relationNames);
@@ -425,17 +427,18 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
         }
     }
 
+    if (withConfigs) {
+        // get relation configs and store keyed by type
+        BMessage relationConfigs;
+        status = GetRelationConfigs(&relationNames, &relationConfigs);
+        if (status == B_OK) {
+            reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
+        }
+    }
+
     reply->what = SEN_RESULT_RELATIONS;
     reply->AddStrings(SEN_RELATIONS, relationNames);
     reply->AddInt32(SEN_MSG_COUNT, relationNames.CountStrings());
-
-    // ensure source has a SEN:ID if it has relations
-    // todo: is this needed? would be quite an inconsistency...
-    if (status == B_OK && relationNames.CountStrings() > 0) {
-        char senId[SEN_ID_LEN];
-        status = GetOrCreateId(&sourceRef, senId);
-        reply->AddString(SEN_RELATION_SOURCE_ID, (new BString(senId))->String());
-    }
 
     reply->AddString("status", BString("got ")
         << relationNames.CountStrings() << " relation(s) from " << sourceRef.name);
@@ -475,6 +478,17 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
 
     BStringList types;
     relationTypes.FindStrings("types", &types);
+
+    // optionally get relation configs
+    bool withConfigs = message->GetBool(SEN_MSG_CONFIGS, true);
+
+    if (withConfigs) {
+        BMessage relationConfigs;
+        status = GetRelationConfigs(&types, &relationConfigs);
+        if (status == B_OK) {
+            reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
+        }
+    }
 
     // todo: filter out relations that exclude this type
     reply->what = SEN_RESULT_RELATIONS;
@@ -523,44 +537,46 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     entry_ref sourceRef;
     status_t  status;
 
-    // todo: move to refs for input and ouput
     if ((status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, NULL, &sourceRef))  != B_OK) {
         return status;
     }
 
-    BString relationType;
-    if ((status = GetMessageParameter(message, SEN_RELATION_TYPE, &relationType))  != B_OK) {
+		BString relationTypeStr;
+    if ((status = GetMessageParameter(message, SEN_RELATION_TYPE, &relationTypeStr))  != B_OK) {
         return status;
     }
+    const char *relationType = relationTypeStr.String();
 
     // filled in id_to_ref map if it was passed in
     BMessage idToRefMap;
     bool returnIdToRefMap = message->GetBool(SEN_ID_TO_REF_MAP, false);
 
-    // check config if relation is bidirectional
-    BMessage relationConf;
-    status = GetRelationMimeConfig(relationType.String(), &relationConf);
-    if (status != B_OK) {
-        LOG("failed to get relation config for type %s: %s\n",
-            relationType.String(), strerror(status));
-        return status;
+    // for single relations, config is mandatory as we need it below
+    BMessage relationConfig;
+    BStringList types;
+    types.Add(relationType);
+
+    // currently there will be only 1 type but to be consistent, we use the collection variant
+    // also later, n-ary relations will need more than 1 config.
+    status = GetRelationConfigs(&types, &relationConfig);
+    if (status == B_OK) {
+        reply->AddMessage(SEN_RELATION_CONFIG, &relationConfig);
     }
 
     BMessage relations;
-    status = ReadRelationsOfType(&sourceRef, relationType.String(),
+    status = ReadRelationsOfType(&sourceRef, relationType,
                                  &relations, returnIdToRefMap ? &idToRefMap : NULL, NULL);
     int32 numberOfRelations = relations.CountNames(B_MESSAGE_TYPE);
 
     if (status == B_OK) {
-        if ( (numberOfRelations == 0) && (! relationConf.GetBool(SEN_RELATION_IS_BIDIR, true)) ) {
+        if ( (numberOfRelations == 0) && (! relationConfig.GetBool(SEN_RELATION_IS_BIDIR, true)) ) {
             // if we get no result, we may be at the other end of a unary relation, then we need to fetch in reverse
-            status = ResolveInverseRelations(&sourceRef, &relations, relationType.String());
+            status = ResolveInverseRelations(&sourceRef, &relations, relationType);
         }
     }
     if (status != B_OK) {
         BString error("failed to retrieve relations of type ");
                 error << relationType;
-        reply->AddString("error", error.String());
         reply->AddString("cause", strerror(status));
 
         return status;
@@ -617,7 +633,8 @@ status_t RelationHandler::ReadRelationsOfType(
         LOG("no existing relation of type %s found.\n", relationType);
         return B_OK;
     }
-    // read relation property message
+
+    // read relation properties message
     char* relation_attr_value = new char[attrInfo.size + 1];
     ssize_t result = node.ReadAttr(
             attrName.String(),
@@ -917,6 +934,127 @@ status_t RelationHandler::GetMessageParameter(
     return status;
 }
 
+status_t RelationHandler::GetRelationConfigs(const BStringList* relations, BMessage* relationConfigs) {
+    status_t status = B_OK;
+
+    for (int i = 0; i < relations->CountStrings(); i++) {
+        BString type = relations->StringAt(i);
+        BMessage relationConf;
+
+        status = GetRelationConfig(type.String(), &relationConf);
+
+        LOG("got relation config for type %s:\n", type.String());
+        relationConf.PrintToStream();
+
+        if (status == B_OK) {
+            status = relationConfigs->AddMessage(type.String(), &relationConf);
+        } else {
+            ERROR("failed to get relation config for type %s: %s\n", type.String(), strerror(status));
+            continue;
+        }
+    }
+
+    LOG("collected relation configs in msg:\n");
+    relationConfigs->PrintToStream();
+
+    return status;
+}
+
+status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* relationConfig)
+{
+    BString relation(mimeType);
+
+    if (!relation.StartsWith(SEN_RELATION_SUPERTYPE "/"))
+        relation.Prepend(SEN_RELATION_SUPERTYPE "/");
+
+    BMimeType relationType(relation);
+    BMessage relationInfo;
+
+    status_t result = relationType.InitCheck();
+    if (result == B_OK) {
+        // we need to get this from the MIME DB directly as it is not part of
+        // the MimeType but stored as a custom attribute in the file system.
+        BPath path;
+        result = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
+        if (result != B_OK) {
+            ERROR("could not find user settings directory: %s\n", strerror(result));
+            return result;
+        }
+
+        path.Append("mime_db");
+        path.Append(mimeType);
+
+        BNode mimeNode(path.Path());
+        if (mimeNode.InitCheck() != B_OK) {
+            ERROR( "error accessing MIME type file at '%s': %s\n", path.Path(), strerror(result));
+            return result;
+        }
+
+        // FIXME: we need to take into account the default relation config from the supertype!
+        //        BMessage::Append() will not overwrite existing properties but append them,
+        //        but we need a real merge with overwriting config from super in subtypes!
+        attr_info attrInfo;
+        result = mimeNode.GetAttrInfo(SEN_RELATION_CONFIG_ATTR, &attrInfo);
+
+        if (result != B_OK) {
+            // this attribute is optional for relation subtypes, just add defaults
+            if (result == B_ENTRY_NOT_FOUND) {
+                LOG("no relation config found for type %s, using defaults.\n", mimeType);
+
+                // quick hack to add defaults here, see above
+                relationInfo.AddBool(SEN_RELATION_IS_BIDIR, true);
+                relationInfo.AddBool(SEN_RELATION_IS_DYNAMIC, false);
+                relationInfo.AddBool(SEN_RELATION_IS_SELF, false);
+
+                result = B_OK;  // we fixed it:)
+            } else {
+                ERROR("could not get attrInfo for sen relation config for type %s: %s", mimeType, strerror(result));
+                return result;
+            }
+        } else {
+            // read config msg from fs attr
+            char buffer[attrInfo.size];
+
+            size_t sizeResult = mimeNode.ReadAttr(
+                SEN_RELATION_CONFIG_ATTR, B_MESSAGE_TYPE, 0, buffer, attrInfo.size);
+
+            if (sizeResult < attrInfo.size) {
+                if (sizeResult < 0)
+                    result = sizeResult;
+                else
+                    result = B_ERROR;
+
+                ERROR("error reading SEN:CONFIG attribute from MIME type file '%s': %s\n", path.Path(), strerror(result));
+                return result;
+            }
+
+            // materialize the flattened message
+            result = relationInfo.Unflatten(buffer);
+        }
+    }
+
+    if (result != B_OK) {
+        ERROR("could not get relation config for type %s: %s\n", mimeType, strerror(result));
+    }
+
+    // get base attributes last (not to be overwritten by Unflatten above:)
+    char shortName[B_MIME_TYPE_LENGTH];
+    result = relationType.GetShortDescription(shortName);
+
+    if (result != B_OK) {
+        ERROR("could not get short name for MIME type %s, falling back to type name: %s\n", mimeType, strerror(result));
+        return result;
+    }
+
+    relationInfo.AddString(SEN_RELATION_NAME, shortName);
+    LOG("local relationInfo:\n");
+    relationInfo.PrintToStream();
+
+    relationConfig->Append(relationInfo);
+
+    return result;
+}
+
 status_t RelationHandler::GetSubtype(const BString* mimeTypeStr, BString* subType) {
     BMimeType mimeType(mimeTypeStr->String());
 
@@ -1110,27 +1248,6 @@ void RelationHandler::GetAttributeNameForRelation(const char* relationType, BStr
     }
 
     *attrName = attrNameStr;
-}
-
-status_t RelationHandler::GetRelationMimeConfig(const char* mimeType, BMessage* relationConfig)
-{
-    BString relation(mimeType);
-
-    if (!relation.StartsWith(SEN_RELATION_SUPERTYPE "/"))
-        relation.Prepend(SEN_RELATION_SUPERTYPE "/");
-
-    BMimeType relationType(relation);
-
-    status_t result = relationType.InitCheck();
-    if (result == B_OK) {
-        result = relationType.GetAttrInfo(relationConfig);
-    }
-
-    if (result != B_OK) {
-        ERROR("could not get relation config for type %s: %s\n", mimeType, strerror(result));
-    }
-
-    return result;
 }
 
 status_t RelationHandler::GetTypeForRef(entry_ref* ref, BString* typeName)
