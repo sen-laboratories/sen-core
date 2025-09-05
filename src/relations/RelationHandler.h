@@ -73,6 +73,7 @@ protected:
         status_t    GetRelationConfig(const char* mimeType, BMessage* relationConfig);
         status_t    GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage);
         status_t    AddTypesToPluginsConfig(BMessage *pluginConfig);
+        status_t    AddItemIdToPluginResult(BMessage *pluginReply);
 
 private:
         status_t    ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations,
@@ -80,6 +81,7 @@ private:
         status_t    ReadRelationNames(const entry_ref* ref, BStringList* relations);
         status_t    ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
         status_t    ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
+
         // write/delete
         status_t    WriteRelation(const entry_ref *srcRef, const char* targetId,
                                           const char *relationType, const BMessage* properties);

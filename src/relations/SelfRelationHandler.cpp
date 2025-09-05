@@ -220,16 +220,79 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
 
     BMessenger pluginMessenger(pluginSig);
     result = pluginMessenger.SendMessage(&refsMsg, reply);
+
     if (result != B_OK) {
         ERROR("failed to communicate with plugin %s: %s\n", pluginSig, strerror(result));
         reply->PrintToStream();
         return result;
     }
 
+    // add unique node ID to all nested nodes for easier tracking (e.g. Tracker selected node->relation folder)
+    result = AddItemIdToPluginResult(reply);
+
     reply->what = SENSEI_MESSAGE_RESULT;
     reply->AddRef("refs", sourceRef);
 
     return B_OK;
+}
+
+status_t RelationHandler::AddItemIdToPluginResult(BMessage* pluginReply)
+{
+    int32      count;
+    type_code  type;
+    status_t   status;
+
+    status = pluginReply->GetInfo(SENSEI_ITEM, &type, &count);
+    if (status != B_OK) {
+        if (status == B_NAME_NOT_FOUND) {
+            return B_OK;    // done, no items at this level
+        }
+        // else it's an error
+        ERROR("could not inspect message: %s\n", strerror(status));
+        return status;
+    }
+    if (type != B_MESSAGE_TYPE) {
+        ERROR("unexpected plugin reply, %s has to be of type BMessage!\n", SENSEI_ITEM);
+        return B_BAD_VALUE;
+    }
+    if (count == 0) {
+        LOG("BOGUS: reached empty item node, skipping.\n");
+        return B_OK;    // no items, but then we would fail above already actually - done (at this level)
+    }
+
+    BMessage itemMsg;
+    BString  itemId;
+
+    // add a unique Snowflake ID for all items in this level
+    for (int32 item = 0; item < count; item++) {
+        itemMsg.MakeEmpty();
+        status = pluginReply->FindMessage(SENSEI_ITEM, item, &itemMsg);
+
+        if (status == B_OK) {
+            // enrich IF plugin has not added its own ID at current index
+            if (! pluginReply->HasString(SENSEI_ITEM_ID, item)) {
+                if (itemMsg.IsEmpty()) {    // ignore empty fillers for ID generation
+                    itemId = "";            // but still add empty ID to keep structure intact!
+                } else {
+                    itemId = GenerateId();  // only generate for items with content
+                }
+                pluginReply->AddString(SENSEI_ITEM_ID, itemId);
+            }
+
+            // and recurse to enrich sub item
+            status = AddItemIdToPluginResult(&itemMsg);
+
+            if (status == B_OK) {
+                status = pluginReply->ReplaceMessage(SENSEI_ITEM, item, &itemMsg);
+            }
+        }
+        if (status != B_OK) {
+            ERROR("error handling item %d: %s\n", item, strerror(status));
+            return status;
+        }
+    }
+
+    return status;
 }
 
 status_t RelationHandler::GetPluginsForTypeAndFeature(
