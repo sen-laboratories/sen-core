@@ -219,78 +219,161 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     refsMsg.PrintToStream();
 
     BMessenger pluginMessenger(pluginSig);
-    result = pluginMessenger.SendMessage(&refsMsg, reply);
+    BMessage   pluginReply;
 
+    result = pluginMessenger.SendMessage(&refsMsg, &pluginReply);
+
+    // check result from communication
     if (result != B_OK) {
         ERROR("failed to communicate with plugin %s: %s\n", pluginSig, strerror(result));
-        reply->PrintToStream();
+        pluginReply.PrintToStream();
         return result;
     }
 
+    // check actual plugin result
+    result = pluginReply.GetInt32("result", B_OK);
+    if (result != B_OK) {
+        ERROR("error in plugin execution: %s\n", strerror(result));
+        pluginReply.PrintToStream();
+        return result;
+    }
+
+    // remove plugin result
+    pluginReply.RemoveName("result");
+
     // add unique node ID to all nested nodes for easier tracking (e.g. Tracker selected node->relation folder)
-    result = AddItemIdToPluginResult(reply);
+    BMessage pluginReplyTransformed;
+    result = TransformPluginResult(&pluginReply, &pluginReplyTransformed);
+
+    if (result != B_OK) {
+        ERROR("could not transform plugin result: %s\nResult so far:\n", strerror(result));
+        pluginReplyTransformed.PrintToStream();
+        return result;
+    }
 
     reply->what = SENSEI_MESSAGE_RESULT;
     reply->AddRef("refs", sourceRef);
+    reply->Append(pluginReplyTransformed);
 
     return B_OK;
 }
 
-status_t RelationHandler::AddItemIdToPluginResult(BMessage* pluginReply)
+status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessage *itemResult)
 {
-    int32      count;
-    type_code  type;
-    status_t   status;
+    BMessage     propertiesMsg, childMsg, childResult;
+    int32        fieldCount, elementCount, itemCount;
+    type_code    type;
+    status_t     status;
 
-    status = pluginReply->GetInfo(SENSEI_ITEM, &type, &count);
+    // skip processing empty messages at any level
+    if (itemMsg->IsEmpty()) {
+        LOG("  - skipping empty sub message.\n");
+        return B_OK;
+    }
+
+    // get number of data members in this item message
+    fieldCount = itemMsg->CountNames(B_ANY_TYPE);
+
+    // get cardinality of items in this message (format requires a label and same count for all fields)
+    status = itemMsg->GetInfo(B_ANY_TYPE, 0, NULL, NULL, &itemCount);
     if (status != B_OK) {
-        if (status == B_NAME_NOT_FOUND) {
-            return B_OK;    // done, no items at this level
-        }
-        // else it's an error
         ERROR("could not inspect message: %s\n", strerror(status));
         return status;
     }
-    if (type != B_MESSAGE_TYPE) {
-        ERROR("unexpected plugin reply, %s has to be of type BMessage!\n", SENSEI_ITEM);
-        return B_BAD_VALUE;
-    }
-    if (count == 0) {
-        LOG("BOGUS: reached empty item node, skipping.\n");
-        return B_OK;    // no items, but then we would fail above already actually - done (at this level)
-    }
 
-    BMessage itemMsg;
-    BString  itemId;
+    LOG("processing itemMsg with %d data members and cardinality of %d.\n", fieldCount, itemCount);
 
-    // add a unique Snowflake ID for all items in this level
-    for (int32 item = 0; item < count; item++) {
-        itemMsg.MakeEmpty();
-        status = pluginReply->FindMessage(SENSEI_ITEM, item, &itemMsg);
+    for (int32 item = 0; item < itemCount; item++) {
+        // prepare for new item properties
+        propertiesMsg.MakeEmpty();
+
+        for (int32 field = 0; field < fieldCount; field++) {
+            char*        fieldName;
+            type_code    fieldType;
+
+            status = itemMsg->GetInfo(B_ANY_TYPE, field, &fieldName, &fieldType, &elementCount);
+
+            if (status != B_OK) {
+                ERROR("error inspecting item %d, field %d: %s\n", item, field, strerror(status));
+                return status;
+            }
+            if (itemCount != elementCount) {
+                ERROR("  ? invalid/unsupported message format: non-uniform item count at field %s, %d vs. %d (current).",
+                        fieldName, itemCount, elementCount);
+                return B_BAD_VALUE;
+            }
+
+            LOG("processing item %02d / %02d, field %s\t(%02d / %02d).\n",
+                item + 1, itemCount, fieldName, field + 1, fieldCount);
+
+            if (strncmp(fieldName, SENSEI_ITEM, strlen(fieldName)) == 0) {
+                childMsg.MakeEmpty();
+                childResult.MakeEmpty();
+
+                status = itemMsg->FindMessage(SENSEI_ITEM, item, &childMsg);
+
+                // only process B_MESSAGE_TYPE entries here
+                if (status == B_OK) {
+                    LOG("  > processing sub item...\n");
+
+                    // and recurse to enrich sub item
+                    status = TransformPluginResult(&childMsg, &childResult);
+                    LOG("status after recursion: %s\n", strerror(status));
+
+                    if (status == B_OK) {
+                        // add message in any case (even if empty) to keep structure intact
+                        if (status == B_OK) {
+                            status = propertiesMsg.Append(childResult);
+                        }
+                        if (status != B_OK) {
+                            ERROR("  x failed to add/generate item ID: %s\n", strerror(status));
+                            return status;
+                        }
+                    }
+                }
+            } else  {
+                // add flat properties
+                const void*  data;
+                ssize_t	     size;
+
+                status = itemMsg->FindData(fieldName, fieldType, item, &data, &size);
+
+                if (status == B_OK) {
+                    if (item == 0) {    // a little optimization since we know how many items we will add
+                        status = propertiesMsg.AddData(fieldName, fieldType, data, size, true, itemCount);
+                    } else {
+                        status = propertiesMsg.AddData(fieldName, fieldType, data, size);
+                    }
+                }
+
+                if (status != B_OK) {
+                    ERROR("  x failed to get or add data item for name '%s' for item %d at index %d: %s\n",
+                        fieldName, item, field, strerror(status));
+                    return status;
+                }
+            }
+
+            if (status != B_OK) {
+                ERROR(" X error processing item %d, field '%s' [%d]: %s\n", item, fieldName, field, strerror(status));
+                return status;
+            }
+        }  // field loop
 
         if (status == B_OK) {
-            // enrich IF plugin has not added its own ID at current index
-            if (! pluginReply->HasString(SENSEI_ITEM_ID, item)) {
-                if (itemMsg.IsEmpty()) {    // ignore empty fillers for ID generation
-                    itemId = "";            // but still add empty ID to keep structure intact!
-                } else {
-                    itemId = GenerateId();  // only generate for items with content
-                }
-                pluginReply->AddString(SENSEI_ITEM_ID, itemId);
+            // enrich IF plugin has not added its own ID
+            if (! propertiesMsg.HasString(SENSEI_ITEM_ID, item)) {
+                const char* itemId = GenerateId();
+                status = propertiesMsg.AddString(SENSEI_ITEM_ID, itemId);
             }
 
-            // and recurse to enrich sub item
-            status = AddItemIdToPluginResult(&itemMsg);
+            if (status == B_OK)
+                status = itemResult->AddMessage(SENSEI_ITEM, &propertiesMsg);
 
-            if (status == B_OK) {
-                status = pluginReply->ReplaceMessage(SENSEI_ITEM, item, &itemMsg);
+            if (status != B_OK) {
+                ERROR("  x failed to add properties to result: %s\n", strerror(status));
             }
         }
-        if (status != B_OK) {
-            ERROR("error handling item %d: %s\n", item, strerror(status));
-            return status;
-        }
-    }
+    }  // item loop
 
     return status;
 }

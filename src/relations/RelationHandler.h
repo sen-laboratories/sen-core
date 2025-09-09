@@ -73,7 +73,7 @@ protected:
         status_t    GetRelationConfig(const char* mimeType, BMessage* relationConfig);
         status_t    GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage);
         status_t    AddTypesToPluginsConfig(BMessage *pluginConfig);
-        status_t    AddItemIdToPluginResult(BMessage *pluginReply);
+        status_t    TransformPluginResult(const BMessage *pluginReply, BMessage *pluginResult);
 
 private:
         status_t    ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations,
