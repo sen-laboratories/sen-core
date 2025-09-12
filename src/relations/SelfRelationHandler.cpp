@@ -286,6 +286,7 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
     for (int32 item = 0; item < itemCount; item++) {
         // prepare for new item properties
         propertiesMsg.MakeEmpty();
+        int32 flatProperties = 0, nestedProperties = 0;
 
         for (int32 field = 0; field < fieldCount; field++) {
             char*        fieldName;
@@ -321,9 +322,10 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
                     LOG("status after recursion: %s\n", strerror(status));
 
                     if (status == B_OK) {
-                        // add message in any case (even if empty) to keep structure intact
-                        if (status == B_OK) {
-                            status = propertiesMsg.Append(childResult);
+                        // ommit empty child nodes
+                        if (! childResult.IsEmpty()) {
+                            status = propertiesMsg.AddMessage(SENSEI_ITEM, &childResult);
+                            nestedProperties++;
                         }
                         if (status != B_OK) {
                             ERROR("  x failed to add/generate item ID: %s\n", strerror(status));
@@ -332,7 +334,7 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
                     }
                 }
             } else  {
-                // add flat properties
+                // add flat property
                 const void*  data;
                 ssize_t	     size;
 
@@ -350,6 +352,8 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
                     ERROR("  x failed to get or add data item for name '%s' for item %d at index %d: %s\n",
                         fieldName, item, field, strerror(status));
                     return status;
+                } else {
+                    flatProperties++;
                 }
             }
 
@@ -360,15 +364,22 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
         }  // field loop
 
         if (status == B_OK) {
+            LOG("* got %d nested and %d flat properties\n", nestedProperties, flatProperties);
+
             // enrich IF plugin has not added its own ID
             if (! propertiesMsg.HasString(SENSEI_ITEM_ID, item)) {
                 const char* itemId = GenerateId();
                 status = propertiesMsg.AddString(SENSEI_ITEM_ID, itemId);
             }
 
-            if (status == B_OK)
-                status = itemResult->AddMessage(SENSEI_ITEM, &propertiesMsg);
-
+            if (status == B_OK) {
+                if (nestedProperties > 0 && flatProperties == 0) {
+                    // ommit empty intermediary nodes when there are just sub nodes at this level
+                    status = itemResult->Append(propertiesMsg);
+                } else {
+                    status = itemResult->AddMessage(SENSEI_ITEM, &propertiesMsg);
+                }
+            }
             if (status != B_OK) {
                 ERROR("  x failed to add properties to result: %s\n", strerror(status));
             }
