@@ -81,7 +81,7 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     BMessage relationConfigs;
     status = GetRelationConfigs(&relationTypes, &relationConfigs);
     if (status == B_OK) {
-        reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
+        reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfigs);
     }
 
     return status;
@@ -108,32 +108,25 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     const char* relationType = relationTypeParam.String();
 
     // retrieve relation config from MIME DB in the filesystem
-    BMessage relationConfigs;
-    BStringList types;
-    types.Add(relationType);
+    BMessage relationConfig;
 
-    status = GetRelationConfigs(&types, &relationConfigs);
+    status = GetRelationConfig(relationType, &relationConfig);
     if (status != B_OK) {
         LOG("failed to get relation config for type %s: %s\n", relationType, strerror(status));
         return status;
     }
 
     // add to reply
-    reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
-
-    BString pluginTypeParam;
-    // client may send the desired plugin signature already, saving us the hassle
-	if (GetMessageParameter(message, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true, false)  == B_OK) {
-        const char* pluginSig = pluginTypeParam.String();
-        LOG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
-		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, reply);
-	}
+    BMessage configMap;
+    configMap.AddMessage(relationType, &relationConfig);
+    reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfig);
 
     status_t result;
     bool clientHasConfig = false;
 
     // sender MAY send an existing plugin config for this type from a previous call to save re-query
     BMessage pluginConfig;
+
     result = message->FindMessage(SENSEI_PLUGIN_CONFIG_KEY, &pluginConfig);
     if (result != B_OK) {
         if (result == B_NAME_NOT_FOUND) {
@@ -153,7 +146,17 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
         clientHasConfig = true;
     }
 
+    LOG(("* got plugin config:\n"));
     pluginConfig.PrintToStream();
+
+    // client may send the desired plugin signature already, saving us the hassle
+    BString pluginTypeParam;
+
+	if (GetMessageParameter(message, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true, false)  == B_OK) {
+        const char* pluginSig = pluginTypeParam.String();
+        LOG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
+		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
+	}
 
     // get type->plugin map
     BMessage typeToPlugins;
@@ -175,7 +178,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     const char* pluginSig = pluginType.String();
 
-    result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, reply);
+    result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
     if (result != B_OK) {
         ERROR("failed to resolve relations of type %s with plugin %s: %s\n", relationType, pluginSig, strerror(result));
         return result;
@@ -192,6 +195,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     const char* pluginSig,
     const entry_ref* sourceRef,
+    const BMessage* pluginConfig,
     BMessage* reply)
 {
     LOG("got plugin app signature: %s\n", pluginSig);
@@ -239,11 +243,29 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     }
 
     // remove plugin result
-    pluginReply.RemoveName("result");
+    pluginReply.RemoveName(SENSEI_RESULT);
+
+    // convert to common relation properties mapped to MIME type attribute names, using the type_mapping
+    // provided by SENSEI (both technically optional but usually needed and encouraged)
+    BMessage typeMapping;
+    pluginConfig->FindMessage(SENSEI_TYPE_MAPPING, &typeMapping);
+
+    // same for attributes (e.g. page -> SEN:REL:page)
+    BMessage attrMapping;
+    pluginConfig->FindMessage(SENSEI_ATTR_MAPPING, &attrMapping);
+
+    // replace the placeholder "self" ID with the sourceRef's inode, we simply add it as mapping here
+    BString srcId;
+    GetInodeForRef(sourceRef, &srcId);
+
+    //TODO: map inode in valueMap or just as param?
+
+    // plugins may use an abstract item shortcut
+    attrMapping.AddString(SENSEI_ITEM, SEN_RELATIONS);
 
     // add unique node ID to all nested nodes for easier tracking (e.g. Tracker selected node->relation folder)
     BMessage pluginReplyTransformed;
-    result = TransformPluginResult(&pluginReply, &pluginReplyTransformed);
+    result = TransformPluginResult(&pluginReply, &typeMapping, &attrMapping, &pluginReplyTransformed);
 
     if (result != B_OK) {
         ERROR("could not transform plugin result: %s\nResult so far:\n", strerror(result));
@@ -258,7 +280,11 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     return B_OK;
 }
 
-status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessage *itemResult)
+status_t RelationHandler::TransformPluginResult(
+    const BMessage *itemMsg,
+    const BMessage *typeMapping,    // TODO: not yet handled here
+    const BMessage *attrMapping,
+    BMessage       *itemResult)
 {
     BMessage     propertiesMsg, childMsg, childResult;
     int32        fieldCount, elementCount, itemCount;
@@ -291,8 +317,12 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
         for (int32 field = 0; field < fieldCount; field++) {
             char*        fieldName;
             type_code    fieldType;
+            const void*  data;
+            ssize_t	     size;
 
             status = itemMsg->GetInfo(B_ANY_TYPE, field, &fieldName, &fieldType, &elementCount);
+            if (status == B_OK)
+                status = itemMsg->FindData(fieldName, fieldType, item, &data, &size);
 
             if (status != B_OK) {
                 ERROR("error inspecting item %d, field %d: %s\n", item, field, strerror(status));
@@ -307,58 +337,49 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
             LOG("processing item %02d / %02d, field %s\t(%02d / %02d).\n",
                 item + 1, itemCount, fieldName, field + 1, fieldCount);
 
-            if (strncmp(fieldName, SENSEI_ITEM, strlen(fieldName)) == 0) {
+            // map property name to common attribute name as per attribute map
+            // default is to keep the name if no mapping was defined.
+            // for self relations, the pseudo "SELF" ID maps to the inode (passed in by caller this way)
+            const char *commonName = attrMapping->GetString(fieldName, fieldName);
+
+            if (fieldType == B_MESSAGE_TYPE) {
                 childMsg.MakeEmpty();
                 childResult.MakeEmpty();
 
-                status = itemMsg->FindMessage(SENSEI_ITEM, item, &childMsg);
+                status = itemMsg->FindMessage(fieldName, item, &childMsg);
 
                 // only process B_MESSAGE_TYPE entries here
                 if (status == B_OK) {
                     LOG("  > processing sub item...\n");
 
                     // and recurse to enrich sub item
-                    status = TransformPluginResult(&childMsg, &childResult);
+                    status = TransformPluginResult(&childMsg, typeMapping, attrMapping, &childResult);
                     LOG("status after recursion: %s\n", strerror(status));
 
                     if (status == B_OK) {
                         // ommit empty child nodes
                         if (! childResult.IsEmpty()) {
-                            status = propertiesMsg.AddMessage(SENSEI_ITEM, &childResult);
+                            status = propertiesMsg.AddMessage(commonName, &childResult);
                             nestedProperties++;
-                        }
-                        if (status != B_OK) {
-                            ERROR("  x failed to add/generate item ID: %s\n", strerror(status));
-                            return status;
                         }
                     }
                 }
             } else  {
                 // add flat property
-                const void*  data;
-                ssize_t	     size;
-
-                status = itemMsg->FindData(fieldName, fieldType, item, &data, &size);
-
-                if (status == B_OK) {
-                    if (item == 0) {    // a little optimization since we know how many items we will add
-                        status = propertiesMsg.AddData(fieldName, fieldType, data, size, true, itemCount);
-                    } else {
-                        status = propertiesMsg.AddData(fieldName, fieldType, data, size);
-                    }
+                if (item == 0) {    // a little optimization since we know how many items we will add
+                    status = propertiesMsg.AddData(commonName, fieldType, data, size, true, itemCount);
+                } else {
+                    status = propertiesMsg.AddData(commonName, fieldType, data, size);
                 }
 
-                if (status != B_OK) {
-                    ERROR("  x failed to get or add data item for name '%s' for item %d at index %d: %s\n",
-                        fieldName, item, field, strerror(status));
-                    return status;
-                } else {
+                if (status == B_OK) {
                     flatProperties++;
                 }
             }
 
             if (status != B_OK) {
-                ERROR(" X error processing item %d, field '%s' [%d]: %s\n", item, fieldName, field, strerror(status));
+                ERROR("  x failed to process item %d, field '%s' ['%s']: %s\n",
+                        item, fieldName, commonName, strerror(status));
                 return status;
             }
         }  // field loop
@@ -366,8 +387,14 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
         if (status == B_OK) {
             LOG("* got %d nested and %d flat properties\n", nestedProperties, flatProperties);
 
-            // enrich IF plugin has not added its own ID
-            if (! propertiesMsg.HasString(SENSEI_ITEM_ID, item)) {
+            // enrich IF plugin has requested an inode as target
+            if (propertiesMsg.HasString(SEN_TO_INO)) {
+                const char* itemId = GenerateId();
+                status = propertiesMsg.AddString(SEN_TO_INO, itemId);
+            }
+
+            // enrich IF plugin has not added its own item ID
+            if (! propertiesMsg.HasString(SENSEI_ITEM_ID)) {
                 const char* itemId = GenerateId();
                 status = propertiesMsg.AddString(SENSEI_ITEM_ID, itemId);
             }
@@ -377,7 +404,7 @@ status_t RelationHandler::TransformPluginResult(const BMessage* itemMsg, BMessag
                     // ommit empty intermediary nodes when there are just sub nodes at this level
                     status = itemResult->Append(propertiesMsg);
                 } else {
-                    status = itemResult->AddMessage(SENSEI_ITEM, &propertiesMsg);
+                    status = itemResult->AddMessage(SEN_RELATIONS, &propertiesMsg);
                 }
             }
             if (status != B_OK) {
@@ -559,6 +586,30 @@ status_t RelationHandler::GetAttrMessage(const BNode* node, const char* name, BM
     }
 
     return attrMessage->Unflatten(attrValue);
+}
+
+status_t RelationHandler::GetInodeForRef(const entry_ref* srcRef, BString* inode)
+{
+	// get inode as folder ID instead of SEN:ID, no need to create one for now
+	BEntry srcEntry(srcRef);
+	status_t result = srcEntry.InitCheck();
+
+	if (result == B_OK) {
+		struct stat srcStat;
+		result = srcEntry.GetStat(&srcStat);
+
+		if (result == B_OK) {
+			*inode << srcStat.st_ino;
+		}
+	}
+	if (result != B_OK) {
+		LOG("WARNING: could not get inode for srcRef %s: %s\n", srcRef->name, strerror(result) );
+		// fall back
+		*inode << srcRef->device << "_" << srcRef->directory << "_" << srcRef->name;
+        result = B_OK;
+	}
+
+	return result;
 }
 
 const char* RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {

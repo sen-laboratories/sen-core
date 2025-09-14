@@ -48,7 +48,9 @@ public:
           * @return `B_OK` or the status code of the last error encountered.
           */
         status_t    ResolveInverseRelations (const entry_ref* sourceRef, BMessage* reply, const char* relationType = NULL);
-        status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef, BMessage* reply);
+        status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
+                                                   const BMessage* pluginConfig,
+                                                   BMessage* reply);
 
 virtual
         void MessageReceived(BMessage* message);
@@ -73,7 +75,10 @@ protected:
         status_t    GetRelationConfig(const char* mimeType, BMessage* relationConfig);
         status_t    GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage);
         status_t    AddTypesToPluginsConfig(BMessage *pluginConfig);
-        status_t    TransformPluginResult(const BMessage *pluginReply, BMessage *pluginResult);
+        status_t    TransformPluginResult(const BMessage *pluginReply,
+                                          const BMessage* typeMapping,    // TODO: not yet handled here
+                                          const BMessage* attrMapping,
+                                          BMessage *pluginResult);
 
 private:
         status_t    ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations,
@@ -91,6 +96,7 @@ private:
         // helper methods
         status_t    GetSubtype(const BString* type, BString* subtype);
         status_t    GetTypeForRef(entry_ref* ref, BString* mimeType);
+        status_t    GetInodeForRef(const entry_ref* srcRef, BString* inode);
         status_t    GetMessageParameter(const BMessage* message, const char* param,
                                         BString* buffer = NULL, entry_ref* ref = NULL,
                                         bool mandatory = true, bool stripSuperType = true);
