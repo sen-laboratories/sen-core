@@ -242,7 +242,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
         return result;
     }
 
-    // remove plugin result
+    // remove plugin result code
     pluginReply.RemoveName(SENSEI_RESULT);
 
     // convert to common relation properties mapped to MIME type attribute names, using the type_mapping
@@ -265,7 +265,16 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
 
     // add unique node ID to all nested nodes for easier tracking (e.g. Tracker selected node->relation folder)
     BMessage pluginReplyTransformed;
-    result = TransformPluginResult(&pluginReply, &typeMapping, &attrMapping, &pluginReplyTransformed);
+    // pass in root node if possible (convention)
+    BMessage rootNode;
+
+    result = pluginReply.FindMessage(SENSEI_ITEM, &rootNode);
+    if (result != B_OK) {
+        result = pluginReply.FindMessage(SEN_RELATIONS, &rootNode);
+    }
+
+    if (result == B_OK)
+        result = TransformPluginResult(&rootNode, &typeMapping, &attrMapping, &pluginReplyTransformed);
 
     if (result != B_OK) {
         ERROR("could not transform plugin result: %s\nResult so far:\n", strerror(result));
@@ -387,26 +396,20 @@ status_t RelationHandler::TransformPluginResult(
         if (status == B_OK) {
             LOG("* got %d nested and %d flat properties\n", nestedProperties, flatProperties);
 
-            // enrich IF plugin has requested an inode as target
-            if (propertiesMsg.HasString(SEN_TO_INO)) {
-                const char* itemId = GenerateId();
-                status = propertiesMsg.AddString(SEN_TO_INO, itemId);
+            // possibly enrich IF item contains an ID
+            const char* itemId = propertiesMsg.GetString(SENSEI_ITEM_ID);
+            if (itemId != NULL && strlen(itemId) == 0) {
+                const char* id = GenerateId();
+                status = propertiesMsg.ReplaceString(SENSEI_ITEM_ID, id);
             }
 
-            // enrich IF plugin has not added its own item ID
-            if (! propertiesMsg.HasString(SENSEI_ITEM_ID)) {
-                const char* itemId = GenerateId();
-                status = propertiesMsg.AddString(SENSEI_ITEM_ID, itemId);
+            if (nestedProperties > 0 && flatProperties == 0) {
+                // ommit empty intermediary nodes when there are just sub nodes at this level
+                status = itemResult->Append(propertiesMsg);
+            } else {
+                status = itemResult->AddMessage(SEN_RELATIONS, &propertiesMsg);
             }
 
-            if (status == B_OK) {
-                if (nestedProperties > 0 && flatProperties == 0) {
-                    // ommit empty intermediary nodes when there are just sub nodes at this level
-                    status = itemResult->Append(propertiesMsg);
-                } else {
-                    status = itemResult->AddMessage(SEN_RELATIONS, &propertiesMsg);
-                }
-            }
             if (status != B_OK) {
                 ERROR("  x failed to add properties to result: %s\n", strerror(status));
             }

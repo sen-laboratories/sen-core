@@ -486,7 +486,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         BMessage relationConfigs;
         status = GetRelationConfigs(&types, &relationConfigs);
         if (status == B_OK) {
-            reply->AddMessage(SEN_RELATION_CONFIG, &relationConfigs);
+            reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfigs);
         }
     }
 
