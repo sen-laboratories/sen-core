@@ -262,6 +262,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
 
     // plugins may use an abstract item shortcut
     attrMapping.AddString(SENSEI_ITEM, SEN_RELATIONS);
+    attrMapping.AddString(SENSEI_TO,   SEN_TO_ATTR);
 
     // add unique node ID to all nested nodes for easier tracking (e.g. Tracker selected node->relation folder)
     BMessage pluginReplyTransformed;
@@ -363,7 +364,6 @@ status_t RelationHandler::TransformPluginResult(
 
                     // and recurse to enrich sub item
                     status = TransformPluginResult(&childMsg, typeMapping, attrMapping, &childResult);
-                    LOG("status after recursion: %s\n", strerror(status));
 
                     if (status == B_OK) {
                         // ommit empty child nodes
@@ -398,9 +398,10 @@ status_t RelationHandler::TransformPluginResult(
 
             // possibly enrich IF item contains an ID
             const char* itemId = propertiesMsg.GetString(SENSEI_ITEM_ID);
-            if (itemId != NULL && strlen(itemId) == 0) {
-                const char* id = GenerateId();
-                status = propertiesMsg.ReplaceString(SENSEI_ITEM_ID, id);
+
+            if (itemId == NULL || strlen(itemId) == 0) {
+                propertiesMsg.RemoveName(SENSEI_ITEM_ID);
+                status = propertiesMsg.AddString("SEN:itemId", GenerateId() );
             }
 
             if (nestedProperties > 0 && flatProperties == 0) {
