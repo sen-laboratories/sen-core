@@ -119,7 +119,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     // add to reply
     BMessage configMap;
     configMap.AddMessage(relationType, &relationConfig);
-    reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfig);
+    reply->AddMessage(SEN_RELATION_CONFIG_MAP, &configMap);
 
     status_t result;
     bool clientHasConfig = false;
@@ -148,6 +148,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     LOG(("* got plugin config:\n"));
     pluginConfig.PrintToStream();
+    // TODO: merge optional relation config provided in plugin config into MIME relation config
 
     // client may send the desired plugin signature already, saving us the hassle
     BString pluginTypeParam;
@@ -401,7 +402,7 @@ status_t RelationHandler::TransformPluginResult(
 
             if (itemId == NULL || strlen(itemId) == 0) {
                 propertiesMsg.RemoveName(SENSEI_ITEM_ID);
-                status = propertiesMsg.AddString("SEN:itemId", GenerateId() );
+                status = propertiesMsg.AddString(SEN_RELATION_ITEM_ID, GenerateId() );
             }
 
             if (nestedProperties > 0 && flatProperties == 0) {
