@@ -102,7 +102,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     BString relationTypeParam;
     // relation type for self relations is one of the possible output types of compatible extractors.
-	if (GetMessageParameter(message, SEN_RELATION_TYPE, &relationTypeParam, NULL, true, false)  != B_OK) {
+	if (GetMessageParameter(message, SEN_RELATION_TYPE, &relationTypeParam, NULL, true)  != B_OK) {
 		return B_BAD_VALUE;
 	}
     const char* relationType = relationTypeParam.String();
@@ -153,7 +153,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     // client may send the desired plugin signature already, saving us the hassle
     BString pluginTypeParam;
 
-	if (GetMessageParameter(message, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true, false)  == B_OK) {
+	if (GetMessageParameter(message, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true)  == B_OK) {
         const char* pluginSig = pluginTypeParam.String();
         LOG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
 		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);

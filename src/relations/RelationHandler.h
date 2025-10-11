@@ -99,7 +99,7 @@ private:
         status_t    GetInodeForRef(const entry_ref* srcRef, BString* inode);
         status_t    GetMessageParameter(const BMessage* message, const char* param,
                                         BString* buffer = NULL, entry_ref* ref = NULL,
-                                        bool mandatory = true, bool stripSuperType = true);
+                                        bool mandatory = true);
         void        GetAttributeNameForRelation(const char* relationType, BString* attrName);
         status_t    AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
 
