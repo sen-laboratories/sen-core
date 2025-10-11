@@ -52,8 +52,11 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     BMessage typeMappings;
     status = pluginConfig.FindMessage(SENSEI_TYPE_MAPPING, &typeMappings);
     if (status != B_OK) {
-        ERROR("could not find expected type mappings, aborting.\n");
-        return status;
+        ERROR("could not find expected type mappings, aborting: %s\n", strerror(status));
+        if (status != B_NAME_NOT_FOUND)
+            return status;
+        else
+            return B_OK;    // empty
     }
 
     // add all types (values) as relations

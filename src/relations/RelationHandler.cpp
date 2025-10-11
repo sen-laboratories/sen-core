@@ -38,6 +38,9 @@ void RelationHandler::MessageReceived(BMessage* message)
     LOG("RelationHandler got message:\n");
     message->PrintToStream();
 
+    // optionally get relation configs
+    bool withConfigs = message->GetBool(SEN_MSG_CONFIGS);
+
     switch(message->what)
     {
         case SEN_RELATIONS_GET:
@@ -68,8 +71,8 @@ void RelationHandler::MessageReceived(BMessage* message)
 
             if (result == B_OK || result == B_NAME_NOT_FOUND) {     // e.g. for templates, search compatible relations
                 if (relationType == SEN_ASSOC_RELATION_TYPE) {      //      in that case, relationType is empty
-                    LOG("resolving association targets...\n");
-                    result = GetCompatibleTargetTypes(relationType, reply);
+                    LOG("resolving compatible targets...\n");
+                    result = GetCompatibleTargetTypes(relationType, withConfigs, reply);
                 } else {
                     LOG("resolving compatible relations...\n");
                     relationType = "<any>";
@@ -83,12 +86,13 @@ void RelationHandler::MessageReceived(BMessage* message)
             }
             break;
         }
-        case SEN_RELATIONS_GET_COMPATIBLE_TYPES:
+        case SEN_RELATIONS_GET_COMPATIBLE_TYPES:    // used e.g. for "New Related" Templates
         {
             BString relationType;
             result = message->FindString(SEN_RELATION_TYPE, &relationType);
-            if (result == B_OK)
-                result = GetCompatibleTargetTypes(relationType, reply);
+            if (result == B_OK) {
+                result = GetCompatibleTargetTypes(relationType, withConfigs, reply);
+            }
             break;
         }
         case SEN_RELATION_ADD:
@@ -477,7 +481,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
     relationTypes.PrintToStream();
 
     BStringList types;
-    relationTypes.FindStrings("types", &types);
+    relationTypes.FindStrings("types", &types);  // as per MimeType API spec
 
     // optionally get relation configs
     bool withConfigs = message->GetBool(SEN_MSG_CONFIGS, true);
@@ -487,6 +491,8 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         status = GetRelationConfigs(&types, &relationConfigs);
         if (status == B_OK) {
             reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfigs);
+        } else {
+            ERROR("could not get relation configs for compatible relations: %s\n", strerror(status));
         }
     }
 
@@ -499,7 +505,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
     return status;
 }
 
-status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, BMessage* reply)
+status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, bool withConfigs, BMessage* reply)
 {
     LOG("searching for types compatible with relation %s...\n", relationType.String());
     BMessage targetTypes;
@@ -521,11 +527,21 @@ status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, 
     }
 
     BStringList types;
-    targetTypes.FindStrings("types", &types);
+    targetTypes.FindStrings("types", &types);   // as per MimeType API spec
+
+    if (withConfigs) {
+        BMessage relationConfigs;
+        status = GetRelationConfigs(&types, &relationConfigs);
+        if (status == B_OK) {
+            reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfigs);
+        } else {
+            ERROR("could not get relation configs for compatible relations: %s\n", strerror(status));
+        }
+    }
 
     reply->what = SEN_RESULT_RELATIONS;
-    reply->AddString(SEN_MSG_FILTER, "compatible");
-    reply->AddStrings(SEN_RELATION_COMPATIBLE_TYPES, types);
+    reply->AddString(SEN_MSG_FILTER, SEN_MSG_FILTER_COMPATIBLE);
+    reply->AddStrings(SEN_RELATION_TARGET_TYPE, types);
     reply->AddString("status", BString("got ") << types.CountStrings()
                  << " compatible target(s) for " << relationType.String());
 
@@ -574,8 +590,8 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     int32 numberOfRelations = relations.CountNames(B_MESSAGE_TYPE);
 
     if (status == B_OK) {
-        if ( (numberOfRelations == 0) && (! relationConfig.GetBool(SEN_RELATION_IS_BIDIR, true)) ) {
-            // if we get no result, we may be at the other end of a unary relation, then we need to fetch in reverse
+        // add any inverse relations
+        if (! relationConfig.GetBool(SEN_RELATION_IS_BIDIR, true)) {
             status = ResolveInverseRelations(&sourceRef, &relations, relationType);
         }
     }
@@ -823,6 +839,8 @@ status_t RelationHandler::ResolveInverseRelations(const entry_ref* sourceRef, BM
     char sourceId[SEN_ID_LEN];
     BMessage idToRef;
     BMessage inverseRelations;
+
+    LOG("resolving INVERSE relations for type %s...\n", relationType);
 
     status_t status = GetOrCreateId(sourceRef, sourceId, true);
 

@@ -23,7 +23,7 @@ public:
 
         status_t    AddRelation             (const BMessage* message, BMessage* reply);
         status_t    GetCompatibleRelations  (const BMessage* message, BMessage* reply);
-        status_t    GetCompatibleTargetTypes(const BString&  relationType, BMessage* reply);
+        status_t    GetCompatibleTargetTypes(const BString&  relationType, bool withConfigs, BMessage* reply);
         status_t    GetRelationsOfType      (const BMessage* message, BMessage* reply);
         status_t    GetAllRelations         (const BMessage* message, BMessage* reply);
         status_t    GetSelfRelations        (const BMessage* message, BMessage* reply);
