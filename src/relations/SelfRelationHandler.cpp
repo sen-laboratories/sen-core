@@ -18,8 +18,8 @@
 #include <Volume.h>
 
 #include "RelationHandler.h"
-#include "Sen.h"
-#include "Sensei.h"
+#include <sen/Sen.h>
+#include <sen/Sensei.h>
 
 status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
 	entry_ref sourceRef;

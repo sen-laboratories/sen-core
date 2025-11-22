@@ -4,8 +4,8 @@
  * Distributed under the terms of the MIT License.
  */
 
+#include <sen/Sen.h>
 #include "SenServer.h"
-#include "Sen.h"
 #include "../relations/RelationHandler.h"
 
 #include <stdio.h>
@@ -165,16 +165,43 @@ void SenServer::MessageReceived(BMessage* message)
             reply->AddBool("testPassed", result == B_OK);
             break;
         }
-        case SEN_QUERY_ID:
+        case SEN_QUERY_REF_FOR_ID:
         {
             result = B_OK;
             BString id;
             entry_ref ref;
 
+            // TODO: support arrays like in SEN_QUERY_ID_FOR_REF, needs slight refactoring
             if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
                 if ((result = relationHandler->QueryForUniqueSenId(id.String(), &ref)) == B_OK) {
                     reply->AddRef("ref", new entry_ref(ref.device, ref.directory, ref.name));
                 }
+            }
+            break;
+        }
+        case SEN_QUERY_ID_FOR_REF:
+        {
+            type_code   type;
+            int32       count;
+
+            result = message->GetInfo("refs", &type, &count);
+            if (result != B_OK || type != B_REF_TYPE) {
+                ERROR("unexpected type / missing refs parameter!\n");
+                result = B_BAD_VALUE;
+                break;
+            }
+
+            char        id[SEN_ID_LEN];
+            entry_ref   ref;
+            bool        createIfMissing = message->GetBool("createIfMissing");
+
+            for (int i = 0; i < count; i++) {
+                if ((result = message->FindRef("refs", i, &ref)) == B_OK) {
+                    result = relationHandler->GetOrCreateId(&ref, id, createIfMissing);
+                    if (result == B_OK) {
+                        reply->AddString("ids", id);
+                    }
+                } // ignore not found or failed queries, caller will get valid result or no result
             }
             break;
         }
@@ -240,7 +267,7 @@ void SenServer::MessageReceived(BMessage* message)
             break;
         }
         case SEN_CONFIG_CLASS_ADD:
-        case SEN_CONFIG_CLASS_GET: 
+        case SEN_CONFIG_CLASS_GET:
         case SEN_CONFIG_CLASS_FIND:	// fallthrough
         {
             senConfigHandler->MessageReceived(message);
@@ -266,6 +293,7 @@ void SenServer::MessageReceived(BMessage* message)
             LOG("SEN Server: unknown message '%u' received." B_UTF8_ELLIPSIS "\n", message->what);
 		}
 	}
+
 	reply->AddInt32("resultCode", result);
 	reply->AddString("result", strerror(result));
 

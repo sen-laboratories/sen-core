@@ -13,8 +13,9 @@
 #include <Query.h>
 #include <StringList.h>
 
+#include <sen/Sensei.h>
+
 #include "IceDustGenerator.h"
-#include "Sensei.h"
 
 class RelationHandler : public BHandler {
 
