@@ -19,7 +19,7 @@ def catattr(attr, path):
         return None
 
 def main():
-    outsvg = sys.argv[1] if len(sys.argv) > 1 else '/tmp/sen-graph.svg'
+    outsvg = sys.argv[2] if len(sys.argv) > 1 else '/tmp/sen-graph.svg'
 
     print('querying SEN:ID index...')
     paths = query('SEN:ID=="*"')
@@ -33,9 +33,9 @@ def main():
     edges = []   # (src_id, tgt_id)
 
     for path in paths:
-        if not os.path.isfile(path):
-            print(f'  [?] skipping non-file: {path}')
-            continue
+#        if not os.path.isfile(path):
+#            print(f'  [?] skipping non-file: {path}')
+#            continue
         sen_id = catattr('SEN:ID', path)
         if not sen_id:
             continue
