@@ -2,19 +2,24 @@
 # sen-graph.py — visualize SEN relations as SVG via graphviz
 # usage: python3 sen-graph.py [output.svg]
 
-import sys, subprocess, tempfile, os
+import sys, subprocess, os
+
+DOTFILE = '/tmp/sen-graph.dot'
 
 def query(predicate):
     r = subprocess.run(['query', predicate], capture_output=True, text=True)
     return [l.strip() for l in r.stdout.splitlines() if l.strip()]
 
 def catattr(attr, path):
-    r = subprocess.run(['catattr', '-r', attr, path],
-                       capture_output=True, text=True, timeout=2)
-    return r.stdout.strip() if r.returncode == 0 else None
+    try:
+        r = subprocess.run(['catattr', '-r', attr, path],
+                           capture_output=True, text=True, timeout=2)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
 
 def main():
-    outsvg = sys.argv[1] if len(sys.argv) > 1 else 'sen-graph.svg'
+    outsvg = sys.argv[1] if len(sys.argv) > 1 else '/tmp/sen-graph.svg'
 
     print('querying SEN:ID index...')
     paths = query('SEN:ID=="*"')
@@ -24,12 +29,13 @@ def main():
         print('no results — is the SEN:ID attribute indexed?')
         sys.exit(1)
 
-    # id -> label
-    nodes = {}
-    # (src_id, tgt_id) edges
-    edges = []
+    nodes = {}   # id -> label
+    edges = []   # (src_id, tgt_id)
 
     for path in paths:
+        if not os.path.isfile(path):
+            print(f'  [?] skipping non-file: {path}')
+            continue
         sen_id = catattr('SEN:ID', path)
         if not sen_id:
             continue
@@ -44,9 +50,8 @@ def main():
                 edges.append((sen_id, tgt))
                 print(f'       -> {tgt}')
 
-    # dot output
-    def safe(s):
-        return s.replace('-', '_').replace('.', '_')
+    def q(s):   # dot-safe quoting, no mangling needed
+        return '"' + s.replace('"', '\\"') + '"'
 
     lines = [
         'digraph SEN {',
@@ -57,23 +62,21 @@ def main():
     ]
 
     for sen_id, label in nodes.items():
-        lines.append(f'  "{safe(sen_id)}" [label="{label.replace(chr(34), chr(39))}"]')
+        lines.append(f'  {q(sen_id)} [label={q(label)}]')
 
     for src, tgt in edges:
         if tgt not in nodes:
-            lines.append(f'  "{safe(tgt)}" [label="?" style=dashed'
+            lines.append(f'  {q(tgt)} [label="?" style=dashed'
                          f' fillcolor="#1a0a0a" fontcolor="#444444"]')
-        lines.append(f'  "{safe(src)}" -> "{safe(tgt)}"')
+        lines.append(f'  {q(src)} -> {q(tgt)}')
 
     lines.append('}')
-    dot = '\n'.join(lines)
 
-    with tempfile.NamedTemporaryFile('w', suffix='.dot', delete=False) as f:
-        f.write(dot)
-        dotfile = f.name
+    with open(DOTFILE, 'w') as f:
+        f.write('\n'.join(lines))
+    print(f'dot written to {DOTFILE}')
 
-    subprocess.run(['dot', '-Tsvg', '-o', outsvg, dotfile], check=True)
-    os.unlink(dotfile)
+    subprocess.run(['dot', '-Tsvg', '-o', outsvg, DOTFILE], check=True)
     print(f'written: {outsvg}')
 
 if __name__ == '__main__':
