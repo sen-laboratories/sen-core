@@ -14,10 +14,12 @@ echo "querying SEN:ID index..."
     echo '         fontcolor="#00C8C8" color="#00C8C8" fontname="Calibri" fontsize=11]'
     echo '  edge  [color="#5B89C8" fontcolor="#888888" fontname="Calibri" fontsize=9]'
 
-    query 'SEN:ID=="*"' | while IFS=$'\n' read -r path; do
-        path="${path## }"   # trim leading spaces
-        path="${path%% }"   # trim trailing spaces
-        
+    query 'SEN:ID=="*"' | while IFS= read -r escaped_path; do
+        [ -z "$escaped_path" ] && continue
+
+        # unescape backslash-space from query output
+        path=$(echo "$escaped_path" | sed 's/\\ / /g')
+
         sen_id=$(catattr -r SEN:ID "$path" 2>/dev/null)
         [ -z "$sen_id" ] && continue
 
