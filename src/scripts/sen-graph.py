@@ -4,31 +4,41 @@
 
 import os, sys, subprocess, tempfile
 
+SKIP_DIRS = {'/boot/system', '/boot/home/config', '/dev', '/pipe',
+             '/proc', '/tmp', '/bin', '/sbin'}
+
 def catattr(attr, path):
     try:
         r = subprocess.run(['catattr', '-r', attr, path],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, timeout=2)
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
         return None
 
 def collect_nodes(root):
-    # id -> {name, path, to: [ids], label}
     nodes = {}
-    for dirpath, _, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(root):
+        # prune dirs in-place to avoid deep/system trees
+        dirs[:] = [d for d in dirs
+                   if os.path.join(dirpath, d) not in SKIP_DIRS
+                   and not d.startswith('.')]
+
         for fname in files:
             path = os.path.join(dirpath, fname)
+            print(f'  checking {path}', end='\r', flush=True)
             sen_id = catattr('SEN:ID', path)
             if not sen_id:
                 continue
             sen_to  = catattr('SEN:TO',    path) or ''
             label   = catattr('META:name', path) or fname
+            print(f'  [SEN] {path}  id={sen_id}  to={sen_to or "-"}')
             nodes[sen_id] = {
                 'name':  fname,
                 'label': label,
                 'path':  path,
                 'to':    [t.strip() for t in sen_to.split(',') if t.strip()],
             }
+    print()  # clear \r line
     return nodes
 
 def to_dot(nodes):
@@ -50,7 +60,6 @@ def to_dot(nodes):
                 safe_tgt = target_id.replace('-', '_').replace('.', '_')
                 lines.append(f'  "{safe_src}" -> "{safe_tgt}"')
             else:
-                # dangling ref — show as grey phantom node
                 safe_tgt = target_id.replace('-', '_').replace('.', '_')
                 lines.append(f'  "{safe_tgt}" [label="?" style=dashed'
                              f' fillcolor="#1a0a0a" fontcolor="#444444"]')
