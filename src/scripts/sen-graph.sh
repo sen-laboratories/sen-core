@@ -14,17 +14,17 @@ echo "querying SEN:ID index..."
     echo '         fontcolor="#00C8C8" color="#00C8C8" fontname="Calibri" fontsize=11]'
     echo '  edge  [color="#5B89C8" fontcolor="#888888" fontname="Calibri" fontsize=9]'
 
-    query 'SEN:ID=="*"' | while IFS= read -r path; do
-        [ -z "$path" ] && continue
-
+    query 'SEN:ID=="*"' | while IFS=$'\n' read -r path; do
+        path="${path## }"   # trim leading spaces
+        path="${path%% }"   # trim trailing spaces
+        
         sen_id=$(catattr -r SEN:ID "$path" 2>/dev/null)
         [ -z "$sen_id" ] && continue
 
-        # basename works even for metadata-only files
         fname=$(basename "$path")
         label=$(catattr -r META:name "$path" 2>/dev/null)
         [ -z "$label" ] && label="$fname"
-        label="${label//\"/\'}"   # escape quotes
+        label="${label//\"/\'}"
 
         echo "  [+] $fname  id=$sen_id" >&2
         echo "  \"$sen_id\" [label=\"$label\"]"
@@ -45,6 +45,5 @@ echo "querying SEN:ID index..."
 } > "$DOTFILE"
 
 echo "generating $OUTSVG..."
-# fdp gives force-directed layout, much better than flat dot for graphs
 fdp -Tsvg -o "$OUTSVG" "$DOTFILE" && rm "$DOTFILE"
 echo "done: $OUTSVG"
