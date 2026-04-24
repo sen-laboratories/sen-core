@@ -439,6 +439,8 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
 	query.SetVolume(&bootVolume);
 	query.SetPredicate(predicate.String());
 
+	LOG("  > issue query: %s\n", predicate.String());
+	
     status_t result;
 	if ((result = query.Fetch()) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
