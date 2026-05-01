@@ -458,7 +458,7 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
                                     folderName.Append("s"); // quick hack, todo: move to MIME Type config
                                 } else {
                                     ERROR("failed to get short description for type %s, falling back to type name: %s.\n",
-                                          typeName, strerror(status));
+                                          typeName.String(), strerror(status));
                                     folderName = typeName;
                                 }
 
@@ -492,7 +492,7 @@ status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
 
     // esp. must not exist already
     if (status != B_OK) {
-        ERROR("could not create directory for context '%s' with type '%s': %s",
+        ERROR("could not create directory for context '%s': %s",
               name, strerror(status));
         return status;
     }

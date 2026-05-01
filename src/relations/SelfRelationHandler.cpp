@@ -196,6 +196,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     return result;
 }
 
+//TODO: move to separate class and support dynamic relations via plugins for all relation types!
 status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     const char* pluginSig,
     const entry_ref* sourceRef,
@@ -222,6 +223,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
 
     BMessage refsMsg(B_REFS_RECEIVED);
     refsMsg.AddRef("refs", sourceRef);
+    refsMsg.AddBool(SEN_RELATION_IS_SELF, true);
 
     LOG("Sending refs to plugin %s:\n", pluginSig);
     refsMsg.PrintToStream();
@@ -261,8 +263,6 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     // replace the placeholder "self" ID with the sourceRef's inode, we simply add it as mapping here
     BString srcId;
     GetInodeForRef(sourceRef, &srcId);
-
-    //TODO: map inode in valueMap or just as param?
 
     // plugins may use an abstract item shortcut
     attrMapping.AddString(SENSEI_ITEM, SEN_RELATIONS);
@@ -313,10 +313,16 @@ status_t RelationHandler::TransformPluginResult(
 
     // get number of data members in this item message
     fieldCount = itemMsg->CountNames(B_ANY_TYPE);
+    char *itemMsgName;
 
-    // get cardinality of items in this message (format requires a label and same count for all fields)
-    status = itemMsg->GetInfo(B_ANY_TYPE, 0, NULL, NULL, &itemCount);
+    // get cardinality of fields in this item message (format requires a label and same count for all fields)
+    status = itemMsg->GetInfo(SENSEI_LABEL, &type, &itemCount);
     if (status != B_OK) {
+        if (status == B_NAME_NOT_FOUND || type != B_STRING_TYPE) {
+            ERROR("could not find expected LABEL in item message of plugin result.\n");
+            return B_OK;    // fail gracefully
+        }
+
         ERROR("could not inspect message: %s\n", strerror(status));
         return status;
     }
@@ -440,7 +446,7 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
 	query.SetPredicate(predicate.String());
 
 	LOG("  > issue query: %s\n", predicate.String());
-	
+
     status_t result;
 	if ((result = query.Fetch()) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
