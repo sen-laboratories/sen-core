@@ -1003,9 +1003,19 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
         status_t mimeNodeStatus = mimeNode.InitCheck();
 
         if (mimeNodeStatus != B_OK) {
-            // relation subtype was never registered in the MIME DB - this is
-            // optional (e.g. for dynamically defined relation types), so just
-            // use the same defaults as a missing SEN_RELATION_CONFIG_ATTR below.
+            // relation subtype was never registered in the MIME DB - this
+            // happens for any dynamically defined relation type (e.g. one
+            // declared by a plugin's SEN:type_mapping) that has never been
+            // used before. Register it now: this is also what makes the
+            // type show up under BMimeType::GetInstalledTypes(SEN_RELATION_SUPERTYPE, ...),
+            // which GetCompatibleRelations() relies on to enumerate relation
+            // types at all - without it, that call fails with B_NAME_NOT_FOUND
+            // because the "relation" supertype itself was never created.
+            status_t installStatus = relationType.Install();
+            if (installStatus != B_OK) {
+                ERROR("could not install relation type %s in MIME DB: %s\n",
+                    mimeType, strerror(installStatus));
+            }
             LOG("no MIME type file found at '%s' (%s), using defaults for type %s.\n",
                 path.Path(), strerror(mimeNodeStatus), mimeType);
 
