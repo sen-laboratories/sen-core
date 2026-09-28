@@ -982,7 +982,10 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
     BMimeType relationType(relation);
     BMessage relationInfo;
 
-    status_t result = relationType.InitCheck() && relationType.IsValid();
+    status_t result = relationType.InitCheck();
+    if (result == B_OK && ! relationType.IsValid()) {
+        result = B_BAD_VALUE;
+    }
     if (result == B_OK) {
         // we need to get this from the MIME DB directly as it is not part of
         // the MimeType but stored as a custom attribute in the file system.
@@ -997,51 +1000,60 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
         path.Append(relation.String());
 
         BNode mimeNode(path.Path());
-        if (mimeNode.InitCheck() != B_OK) {
-            ERROR( "error accessing MIME type file at '%s': %s\n", path.Path(), strerror(result));
-            return result;
-        }
+        status_t mimeNodeStatus = mimeNode.InitCheck();
 
-        // FIXME: we need to take into account the default relation config from the supertype!
-        //        BMessage::Append() will not overwrite existing properties but append them,
-        //        but we need a real merge with overwriting config from super in subtypes!
-        attr_info attrInfo;
-        result = mimeNode.GetAttrInfo(SEN_RELATION_CONFIG_ATTR, &attrInfo);
+        if (mimeNodeStatus != B_OK) {
+            // relation subtype was never registered in the MIME DB - this is
+            // optional (e.g. for dynamically defined relation types), so just
+            // use the same defaults as a missing SEN_RELATION_CONFIG_ATTR below.
+            LOG("no MIME type file found at '%s' (%s), using defaults for type %s.\n",
+                path.Path(), strerror(mimeNodeStatus), mimeType);
 
-        if (result != B_OK) {
-            // this attribute is optional for relation subtypes, just add defaults
-            if (result == B_ENTRY_NOT_FOUND) {
-                LOG("no relation config found for type %s, using defaults.\n", mimeType);
-
-                // quick hack to add defaults here, see above
-                relationInfo.AddBool(SEN_RELATION_IS_BIDIR, true);
-                relationInfo.AddBool(SEN_RELATION_IS_DYNAMIC, false);
-                relationInfo.AddBool(SEN_RELATION_IS_SELF, false);
-
-                result = B_OK;  // we fixed it:)
-            } else {
-                ERROR("could not get attrInfo for sen relation config for type %s: %s", mimeType, strerror(result));
-                return result;
-            }
+            relationInfo.AddBool(SEN_RELATION_IS_BIDIR, true);
+            relationInfo.AddBool(SEN_RELATION_IS_DYNAMIC, false);
+            relationInfo.AddBool(SEN_RELATION_IS_SELF, false);
         } else {
-            // read config msg from fs attr
-            char buffer[attrInfo.size];
+            // FIXME: we need to take into account the default relation config from the supertype!
+            //        BMessage::Append() will not overwrite existing properties but append them,
+            //        but we need a real merge with overwriting config from super in subtypes!
+            attr_info attrInfo;
+            result = mimeNode.GetAttrInfo(SEN_RELATION_CONFIG_ATTR, &attrInfo);
 
-            size_t sizeResult = mimeNode.ReadAttr(
-                SEN_RELATION_CONFIG_ATTR, B_MESSAGE_TYPE, 0, buffer, attrInfo.size);
+            if (result != B_OK) {
+                // this attribute is optional for relation subtypes, just add defaults
+                if (result == B_ENTRY_NOT_FOUND) {
+                    LOG("no relation config found for type %s, using defaults.\n", mimeType);
 
-            if (sizeResult < attrInfo.size) {
-                if (sizeResult < 0)
-                    result = sizeResult;
-                else
-                    result = B_ERROR;
+                    // quick hack to add defaults here, see above
+                    relationInfo.AddBool(SEN_RELATION_IS_BIDIR, true);
+                    relationInfo.AddBool(SEN_RELATION_IS_DYNAMIC, false);
+                    relationInfo.AddBool(SEN_RELATION_IS_SELF, false);
 
-                ERROR("error reading SEN:CONFIG attribute from MIME type file '%s': %s\n", path.Path(), strerror(result));
-                return result;
+                    result = B_OK;  // we fixed it:)
+                } else {
+                    ERROR("could not get attrInfo for sen relation config for type %s: %s", mimeType, strerror(result));
+                    return result;
+                }
+            } else {
+                // read config msg from fs attr
+                char buffer[attrInfo.size];
+
+                size_t sizeResult = mimeNode.ReadAttr(
+                    SEN_RELATION_CONFIG_ATTR, B_MESSAGE_TYPE, 0, buffer, attrInfo.size);
+
+                if (sizeResult < attrInfo.size) {
+                    if (sizeResult < 0)
+                        result = sizeResult;
+                    else
+                        result = B_ERROR;
+
+                    ERROR("error reading SEN:CONFIG attribute from MIME type file '%s': %s\n", path.Path(), strerror(result));
+                    return result;
+                }
+
+                // materialize the flattened message
+                result = relationInfo.Unflatten(buffer);
             }
-
-            // materialize the flattened message
-            result = relationInfo.Unflatten(buffer);
         }
     }
 
@@ -1054,8 +1066,12 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
     result = relationType.GetShortDescription(shortName);
 
     if (result != B_OK) {
+        // relation type has no short description installed in the MIME DB
+        // (e.g. never registered via BMimeType::Install()) - fall back to
+        // the type name itself rather than losing the config gathered above.
         ERROR("could not get short name for MIME type %s, falling back to type name: %s\n", mimeType, strerror(result));
-        return result;
+        strlcpy(shortName, mimeType, sizeof(shortName));
+        result = B_OK;
     }
 
     relationInfo.AddString(SEN_RELATION_NAME, shortName);
