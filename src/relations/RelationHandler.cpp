@@ -4,6 +4,7 @@
  * Distributed under the terms of the MIT License.
  */
 
+#include <AppFileInfo.h>
 #include <cassert>
 #include <fs_attr.h>
 #include <FindDirectory.h>
@@ -1015,6 +1016,21 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
             if (installStatus != B_OK) {
                 ERROR("could not install relation type %s in MIME DB: %s\n",
                     mimeType, strerror(installStatus));
+            } else {
+                // also assign a preferred app so self relations can be opened:
+                // TTracker::HandleSenMessage's self-relation branch looks up
+                // the relation type's preferred app via BMimeType::GetPreferredApp()
+                // to find the navigator to launch (see TrackerSen.cpp). Nothing
+                // else ever sets this, even though navigator plugins already
+                // declare the relation types they support via their own
+                // file_types resource (e.g. SenTextNavigator declares support
+                // for this exact type) - so without this, GetPreferredApp()
+                // fails and the self-relation click silently aborts.
+                status_t navStatus = AssignPreferredNavigator(&relationType);
+                if (navStatus != B_OK) {
+                    LOG("no installed navigator plugin declares support for relation type %s: %s\n",
+                        mimeType, strerror(navStatus));
+                }
             }
             LOG("no MIME type file found at '%s' (%s), using defaults for type %s.\n",
                 path.Path(), strerror(mimeNodeStatus), mimeType);
@@ -1091,6 +1107,54 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
     relationConfig->Append(relationInfo);
 
     return result;
+}
+
+status_t RelationHandler::AssignPreferredNavigator(BMimeType* relationType)
+{
+    BString predicate;
+    predicate << SEN_TYPE << "==" << SENSEI_PLUGIN_TYPE << " && "
+              << SENSEI_PLUGIN_FEATURE_ATTR << ":" << SENSEI_FEATURE_NAVIGATE << "==1";
+
+    BVolumeRoster volRoster;
+    BVolume bootVolume;
+    volRoster.GetBootVolume(&bootVolume);
+
+    BQuery query;
+    query.SetVolume(&bootVolume);
+    query.SetPredicate(predicate.String());
+
+    status_t result = query.Fetch();
+    if (result != B_OK) {
+        return result;
+    }
+
+    entry_ref pluginRef;
+    while (query.GetNextRef(&pluginRef) == B_OK) {
+        BFile pluginFile(&pluginRef, B_READ_ONLY);
+        BAppFileInfo appInfo(&pluginFile);
+        if (appInfo.InitCheck() != B_OK) {
+            continue;
+        }
+
+        BMessage supportedTypes;
+        if (appInfo.GetSupportedTypes(&supportedTypes) != B_OK) {
+            continue;
+        }
+
+        BString type;
+        for (int i = 0; supportedTypes.FindString("types", i, &type) == B_OK; i++) {
+            if (type == relationType->Type()) {
+                char signature[B_MIME_TYPE_LENGTH];
+                if (appInfo.GetSignature(signature) == B_OK) {
+                    LOG("assigning %s as preferred app for relation type %s (navigator %s)\n",
+                        signature, relationType->Type(), pluginRef.name);
+                    return relationType->SetPreferredApp(signature);
+                }
+            }
+        }
+    }
+
+    return B_NAME_NOT_FOUND;
 }
 
 status_t RelationHandler::GetSubtype(const BString* mimeTypeStr, BString* subType) {

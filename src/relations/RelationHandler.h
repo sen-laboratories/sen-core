@@ -9,6 +9,7 @@
 #include <Application.h>
 #include <File.h>
 #include <Message.h>
+#include <Mime.h>
 #include <ObjectList.h>
 #include <Query.h>
 #include <StringList.h>
@@ -74,6 +75,13 @@ protected:
          * @see #GetRelationConfigs
          */
         status_t    GetRelationConfig(const char* mimeType, BMessage* relationConfig);
+        /**
+         * finds an installed navigator plugin (SEN:plugin:navigate == 1) whose
+         * declared file_types include relationType, and assigns it as that
+         * relation type's preferred app - needed for self relations to be
+         * openable at all, see TTracker::HandleSenMessage's self-relation branch.
+         */
+        status_t    AssignPreferredNavigator(BMimeType* relationType);
         status_t    GetAttrMessage(const BNode* node, const char* name, BMessage* attrMessage);
         status_t    AddTypesToPluginsConfig(BMessage *pluginConfig);
         status_t    TransformPluginResult(const BMessage *pluginReply,
