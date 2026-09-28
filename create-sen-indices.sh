@@ -7,13 +7,24 @@
 #
 # Safe to re-run: mkindex is a no-op (exit 0) if an index already exists.
 #
-# Usage: create-sen-indices.sh [volume-path]
-#   volume-path defaults to /boot (the boot volume), matching the current
-#   assumption in sen-core's relation queries (see RelationHandler.cpp).
+# Also reindexes existing files under rebuild-path: BFS only inserts a file
+# into an index going forward from when BOTH the index and the attribute
+# exist - an attribute written before its index was created is invisible to
+# queries until its file is explicitly reindexed. This matters whenever SEN
+# indices are (re-)created on a filesystem that already has SEN-tagged
+# files (e.g. after an upgrade, or a repair) - on a genuinely fresh install
+# there won't be any such files yet, so this step is just a harmless no-op.
+#
+# Usage: create-sen-indices.sh [volume-path] [rebuild-path]
+#   volume-path   defaults to /boot (the boot volume), matching the current
+#                 assumption in sen-core's relation queries (see RelationHandler.cpp).
+#   rebuild-path  defaults to $HOME; the directory tree to reindex existing
+#                 SEN-tagged files under.
 
 set -e
 
 VOLUME="${1:-/boot}"
+REBUILD_PATH="${2:-$HOME}"
 
 # attribute -> type, derived from actual BQuery predicates in sen-core
 # (RelationHandler.cpp, SelfRelationHandler.cpp) and senryu (PoseViewSen.cpp):
@@ -34,6 +45,7 @@ VOLUME="${1:-/boot}"
 
 STRING_ATTRS="SEN:ID SEN:TO SEN:TYPE"
 INT_ATTRS="SEN:plugin:extract SEN:plugin:enrich SEN:plugin:identify SEN:plugin:navigate SEN:plugin:search"
+ALL_ATTRS="$STRING_ATTRS $INT_ATTRS"
 
 echo "Creating SEN indices on volume $VOLUME ..."
 
@@ -43,6 +55,12 @@ done
 
 for attr in $INT_ATTRS; do
     mkindex -d "$VOLUME" -t int -v "$attr"
+done
+
+echo "Reindexing existing SEN-tagged files under $REBUILD_PATH ..."
+
+for attr in $ALL_ATTRS; do
+    reindex -rv "$attr" "$REBUILD_PATH"
 done
 
 echo "Done."
