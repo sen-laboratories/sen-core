@@ -8,6 +8,8 @@
 
 #include <AppFileInfo.h>
 #include <fs_attr.h>
+#include <Looper.h>
+#include <Messenger.h>
 #include <Node.h>
 #include <NodeInfo.h>
 #include <Path.h>
@@ -196,6 +198,62 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     return result;
 }
 
+namespace {
+
+// Receives a plugin's reply in a port owned by sen_server. A synchronous
+// BMessenger::SendMessage() with reply hands ownership of the reply port to the
+// target's team, so a plugin that quits right after replying (as they all do)
+// takes the port, and the not yet read reply, down with it - sen_server then
+// fails with B_BAD_PORT_ID. This is easy to hit on a single CPU where the reader
+// is often not scheduled before the plugin has exited.
+class PluginReplyCollector : public BLooper {
+public:
+    PluginReplyCollector()
+        :
+        BLooper("sen plugin reply"),
+        fSem(create_sem(0, "sen plugin reply"))
+    {
+    }
+
+    virtual ~PluginReplyCollector()
+    {
+        delete_sem(fSem);
+    }
+
+    virtual void MessageReceived(BMessage* message)
+    {
+        fReply = *message;
+        release_sem(fSem);
+    }
+
+    status_t WaitForReply(BMessage* reply, team_id pluginTeam)
+    {
+        for (;;) {
+            status_t status = acquire_sem_etc(fSem, 1, B_RELATIVE_TIMEOUT, 250000);
+            if (status == B_TIMED_OUT) {
+                team_info info;
+                if (get_team_info(pluginTeam, &info) == B_OK)
+                    continue;
+
+                // plugin is gone: give a reply that is still in flight some time to arrive
+                status = acquire_sem_etc(fSem, 1, B_RELATIVE_TIMEOUT, 1000000);
+                if (status == B_TIMED_OUT)
+                    return B_BAD_TEAM_ID;
+            }
+            if (status == B_OK)
+                *reply = fReply;
+
+            return status;
+        }
+    }
+
+private:
+    sem_id   fSem;
+    BMessage fReply;
+};
+
+}   // namespace
+
 //TODO: move to separate class and support dynamic relations via plugins for all relation types!
 status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     const char* pluginSig,
@@ -206,7 +264,11 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     LOG("got plugin app signature: %s\n", pluginSig);
 
     // execute plugin and return result
-    status_t result = be_roster->Launch(pluginSig);
+    // plugins are B_MULTIPLE_LAUNCH and quit right after replying, so talk to exactly
+    // the instance we launch here: resolving the messenger by signature alone may pick
+    // a previous instance that is already shutting down (B_BAD_PORT_ID).
+    team_id pluginTeam = -1;
+    status_t result = be_roster->Launch(pluginSig, (BMessage*)NULL, &pluginTeam);
     if (result != B_OK) {
         ERROR("failed to launch plugin %s: %s\n", pluginSig, strerror(result));
         return result;
@@ -228,10 +290,18 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     LOG("Sending refs to plugin %s:\n", pluginSig);
     refsMsg.PrintToStream();
 
-    BMessenger pluginMessenger(pluginSig);
+    BMessenger pluginMessenger(pluginSig, pluginTeam);
     BMessage   pluginReply;
 
-    result = pluginMessenger.SendMessage(&refsMsg, &pluginReply);
+    PluginReplyCollector* collector = new PluginReplyCollector();
+    collector->Run();
+
+    result = pluginMessenger.SendMessage(&refsMsg, BMessenger(collector));
+    if (result == B_OK)
+        result = collector->WaitForReply(&pluginReply, pluginTeam);
+
+    if (collector->Lock())
+        collector->Quit();
 
     // check result from communication
     if (result != B_OK) {
