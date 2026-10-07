@@ -19,7 +19,7 @@ for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; don
 sleep 2
 
 echo "== compiling the test"
-g++ -std=c++20 -Wall -Wno-multichar -I$HEADERS -I/Develop/SEN/sento/tests -o /tmp/relation-test $SRC/RelationTest.cpp -lbe 2>&1 | grep -E "error|Error" | head -20
+g++ -std=c++20 -Wall -Wno-multichar -I$HEADERS -I${SENTO_TESTS:-/Develop/SEN/sento/tests} -o /tmp/relation-test $SRC/RelationTest.cpp -lbe 2>&1 | grep -E "error|Error" | head -20
 [ -x /tmp/relation-test ] || { echo "FAIL the test did not compile"; touch "$DONE"; exit 1; }
 
 SEN_LOG_LEVEL=info $SERVER > /tmp/sen_server.log 2>&1 &

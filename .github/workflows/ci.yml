@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 SEN Labs e.U.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  haiku:
+    name: Build and relation tests on Haiku
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: sen-core
+      # the API headers, the ontology installer and the generated ontology headers
+      - uses: actions/checkout@v7
+        with:
+          repository: sen-laboratories/sento
+          path: sento
+      - uses: actions/checkout@v7
+        with:
+          repository: sen-laboratories/sen-oni
+          path: sen-oni
+
+      - name: Start Haiku VM
+        uses: cross-platform-actions/action@v1.6.0
+        with:
+          operating_system: haiku
+          architecture: x86-64
+          version: 'r1beta6'
+
+      # the steps below run inside the VM, files are synced both ways
+      - name: Install build dependencies
+        shell: cpa.sh {0}
+        run: pkgman install -y cmd:gcc gcc_syslibs_devel cmd:make spdlog_devel libfmt_devel
+
+      - name: Install the API headers, build the ontology installer and install the core ontology
+        shell: cpa.sh {0}
+        run: |
+          (cd sento && ./install.sh)
+          cd sen-oni
+          ./install-headers.sh
+          make -j4
+          ./scripts/oni.sh ontologies/core
+
+      - name: Build the server
+        shell: cpa.sh {0}
+        run: |
+          cd sen-core
+          make -j4
+
+      - name: Relation tests against a live server
+        shell: cpa.sh {0}
+        run: |
+          mkdir -p /tmp/senci
+          cd sen-core
+          export TEST_DIR=/tmp/senci SERVER=$PWD/bin/sen_server SRC=$PWD/tests/vm SENTO_TESTS=$PWD/../sento/tests
+          tests/vm/relations.sh
+          cat /tmp/sen-relations.out
+          ! grep -q '^FAIL' /tmp/sen-relations.out
+          grep -q ' 0 failure(s)' /tmp/sen-relations.out
