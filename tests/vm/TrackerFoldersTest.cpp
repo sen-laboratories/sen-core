@@ -54,6 +54,32 @@ Relate(const entry_ref& source, const entry_ref& target, const BMessage* propert
 		printf("  could not relate: status %d\n", (int) SenStatus(reply));
 }
 
+/** The watcher works in a thread of its own: wait (up to five seconds) until what the user did has arrived at the server. */
+template<typename Condition>
+static bool
+WaitFor(Condition condition)
+{
+	for (int i = 0; i < 50; i++) {
+		if (condition())
+			return true;
+		snooze(100000);
+	}
+	return condition();
+}
+
+/** the relation files are written by the Tracker; what it writes is not an edit by the user */
+static void
+LetTheFilesSettle()
+{
+	snooze(1700000);
+}
+
+static void
+Shell(const BString& command)
+{
+	system(command.String());
+}
+
 // ---- stored relations are shown as files
 
 TEST(StoredRelationsAreShownAsFilesNamedAfterTheirTargets)
@@ -161,20 +187,19 @@ TEST(DeletingAFileRemovesTheRelation)
 	entry_ref typeDir;
 	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
 
+	// anyone deletes the file: the node monitor of the folder tells
 	entry_ref file = RefOf(BPath(&typeDir).Path(), "file1");
 	node_ref node = NodeOf(file);
 	BEntry(&file).Remove();
-	CHECK(RelationFolders::Instance().EntryRemoved(node));
 
 	std::string a = IdOf(f.refs[0]), b = IdOf(f.refs[1]), c = IdOf(f.refs[2]);
-	CHECK_EQ(Sets(f.refs[0], kReference, b), 0);
-	CHECK_EQ(Sets(f.refs[1], kReference, a), 0);        // the opposite direction, too
-	CHECK_EQ(Sets(f.refs[0], kReference, c), 1);        // the other relation is untouched
+	CHECK(WaitFor([&]() { return Sets(f.refs[0], kReference, b) == 0; }));
+	CHECK(WaitFor([&]() { return Sets(f.refs[1], kReference, a) == 0; }));      // the opposite direction, too
+	CHECK_EQ(Sets(f.refs[0], kReference, c), 1);                                // the other relation is untouched
 	CHECK(!RelationFolders::Instance().IsRelationFile(node));
-	CHECK(!RelationFolders::Instance().EntryRemoved(node));     // reported twice (two windows): nothing happens
 }
 
-TEST(MovingAFileToTheTrashRemovesTheRelation)
+TEST(MovingAFileOutOfTheFolderRemovesTheRelation)
 {
 	Fixture f("trash", 2);
 	Relate(f.refs[0], f.refs[1]);
@@ -185,10 +210,40 @@ TEST(MovingAFileToTheTrashRemovesTheRelation)
 	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
 
 	entry_ref file = RefOf(BPath(&typeDir).Path(), "file1");
-	node_ref node = NodeOf(file);
-	node_ref trash = NodeOf(f.Create("trash-stand-in"));        // any other folder
-	CHECK(RelationFolders::Instance().EntryMoved(node, trash));
-	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 0);
+	Shell(BString("mv '") << BPath(&file).Path() << "' '" << f.dir << "/moved-away'");      // Trash or any other folder
+	CHECK(WaitFor([&]() { return Sets(f.refs[0], kReference, IdOf(f.refs[1])) == 0; }));
+}
+
+TEST(RenamingAFileIsNotAnEditOfTheRelation)
+{
+	Fixture f("rename", 2);
+	Relate(f.refs[0], f.refs[1]);
+	RelationFolders::Instance().Clear();
+	BString view;
+	TrackerSenRelations::NewViewId(&view);
+	entry_ref typeDir;
+	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
+
+	entry_ref file = RefOf(BPath(&typeDir).Path(), "file1");
+	Shell(BString("mv '") << BPath(&file).Path() << "' '" << BPath(&typeDir).Path() << "/a new name'");
+	snooze(1000000);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);      // the relation is still there
+
+	// and the file is still the relation: deleting it under its new name removes it
+	Shell(BString("rm '") << BPath(&typeDir).Path() << "/a new name'");
+	CHECK(WaitFor([&]() { return Sets(f.refs[0], kReference, IdOf(f.refs[1])) == 0; }));
+}
+
+TEST(AFolderThatIsNotARelationFolderIsNotWatched)
+{
+	Fixture f("other", 2);
+	Relate(f.refs[0], f.refs[1]);
+	RelationFolders::Instance().Clear();
+	// a file of the relation sits in a normal folder: deleting a normal file changes no relation
+	entry_ref normal = f.Create("normal");
+	BEntry(&normal).Remove();
+	snooze(500000);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
 }
 
 TEST(EditingAnAttributeChangesTheProperties)
@@ -202,29 +257,65 @@ TEST(EditingAnAttributeChangesTheProperties)
 	entry_ref typeDir;
 	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
 	entry_ref file = RefOf(BPath(&typeDir).Path(), "file1");
+	std::string a = IdOf(f.refs[0]), b = IdOf(f.refs[1]);
 
-	// what the file system reports while the file is written is not an edit
-	CHECK(RelationFolders::Instance().AttributesChanged(NodeOf(file), "schema:pageStart"));
-	CHECK_EQ(Stored(f.refs[0], kReference).CountNames(B_MESSAGE_TYPE), 1);
-	snooze(1700000);
+	// what the file system reports while the Tracker writes the file is not an edit
+	LetTheFilesSettle();
+	BMessage x, y;
+	BMessage unchanged = Stored(f.refs[0], kReference);
+	CHECK(unchanged.FindMessage(b.c_str(), &x) == B_OK);
+	CHECK_EQ(x.GetInt32("schema:pageStart", 0), 3);
 
+	// the user edits a column: the node monitor of the folder tells, no window needed
 	BNode node(&file);
 	int32 nine = 9;
 	node.WriteAttr("schema:pageStart", B_INT32_TYPE, 0, &nine, sizeof(nine));
-	CHECK(RelationFolders::Instance().AttributesChanged(NodeOf(file), "schema:pageStart"));
 
-	std::string a = IdOf(f.refs[0]), b = IdOf(f.refs[1]);
-	BMessage forward = Stored(f.refs[0], kReference), inverse = Stored(f.refs[1], kReference), x, y;
-	CHECK(forward.FindMessage(b.c_str(), &x) == B_OK);
+	CHECK(WaitFor([&]() {
+		BMessage forward = Stored(f.refs[0], kReference), set;
+		return forward.FindMessage(b.c_str(), &set) == B_OK && set.GetInt32("schema:pageStart", 0) == 9;
+	}));
+	BMessage inverse = Stored(f.refs[1], kReference);
 	CHECK(inverse.FindMessage(a.c_str(), &y) == B_OK);
-	CHECK_EQ(x.GetInt32("schema:pageStart", 0), 9);
-	CHECK_EQ(y.GetInt32("schema:pageStart", 0), 9);
+	CHECK_EQ(y.GetInt32("schema:pageStart", 0), 9);                         // the opposite direction, too
 
 	// the identity of the relation is not a property
 	BString other("x");
 	node.WriteAttrString(sen::attr::kRelationTarget, &other);
-	CHECK(RelationFolders::Instance().AttributesChanged(NodeOf(file), sen::attr::kRelationTarget));
+	snooze(800000);
 	CHECK_EQ(Sets(f.refs[0], kReference, b), 1);
+}
+
+TEST(AFileThatIsAddedLaterIsWatchedToo)
+{
+	Fixture f("later", 3);
+	Relate(f.refs[0], f.refs[1]);
+	RelationFolders::Instance().Clear();
+	BString view;
+	TrackerSenRelations::NewViewId(&view);
+	entry_ref typeDir;
+	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
+
+	// a relation is added by dropping a file; its file did not exist when the folder was watched
+	BMessage drop(B_SIMPLE_DATA);
+	drop.AddRef("refs", &f.refs[2]);
+	CHECK(RelationFolders::Instance().HandleDrop(drop, NodeOf(typeDir)));
+	LetTheFilesSettle();
+
+	entry_ref file = RefOf(BPath(&typeDir).Path(), "file2");
+	CHECK(Exists(file));
+	BNode node(&file);
+	int32 seven = 7;
+	node.WriteAttr("schema:pageStart", B_INT32_TYPE, 0, &seven, sizeof(seven));
+
+	std::string c = IdOf(f.refs[2]);
+	CHECK(WaitFor([&]() {
+		BMessage forward = Stored(f.refs[0], kReference), set;
+		return forward.FindMessage(c.c_str(), &set) == B_OK && set.GetInt32("schema:pageStart", 0) == 7;
+	}));
+
+	BEntry(&file).Remove();
+	CHECK(WaitFor([&]() { return Sets(f.refs[0], kReference, c) == 0; }));
 }
 
 TEST(DroppingAFileCreatesARelationAndItsFile)
