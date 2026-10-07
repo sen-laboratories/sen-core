@@ -32,7 +32,8 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
 		return status;
 	}
 
-    const char* sourceType = GetMimeTypeForRef(&sourceRef);
+    BString sourceTypeString = GetMimeTypeForRef(&sourceRef);
+    const char* sourceType = sourceTypeString.String();
 
     // query for all compatible extractors and return their generated collected output type
     spdlog::info("query for extractors to handle file type {}", sourceType);
@@ -101,10 +102,11 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 		return status;
 	}
 
-    const char* sourceMimeType = GetMimeTypeForRef(&sourceRef);
-    if (sourceMimeType == NULL) {
+    BString sourceMimeTypeString = GetMimeTypeForRef(&sourceRef);
+    if (sourceMimeTypeString.IsEmpty()) {
         return B_ERROR;
     }
+    const char* sourceMimeType = sourceMimeTypeString.String();
 
     BString relationTypeParam;
     // relation type for self relations is one of the possible output types of compatible extractors.
@@ -174,12 +176,13 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
         return result;
     }
 
-    // filter for plugins that generate the requested relationType
+    // the plugin that handles this type of file (the map is keyed by the MIME type of the source, see GetPluginConfig)
     // todo: check for 1:N mappings, shouldn't happen, we assume 1:1
     BString pluginType;
-    result = typeToPlugins.FindString(relationType, &pluginType);
+    result = typeToPlugins.FindString(sourceMimeType, &pluginType);
     if (result != B_OK) {
-        spdlog::error("failed to look up plugin signature for relation type {}: {}", relationType, strerror(result));
+        spdlog::error("failed to look up the plugin for file type {} (relation type {}): {}", sourceMimeType, relationType,
+            strerror(result));
         return result;
     }
 
@@ -677,23 +680,31 @@ status_t RelationHandler::GetInodeForRef(const entry_ref* srcRef, BString* inode
 	return result;
 }
 
-const char* RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
+BString RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
     BNode sourceNode(ref);
     status_t result;
     if ((result = sourceNode.InitCheck()) != B_OK) {
         spdlog::error("could not initialize source node {}: {}", ref->name, strerror(result));
-        return NULL;
+        return BString();
     }
     BNodeInfo sourceInfo(&sourceNode);
     if ((result = sourceInfo.InitCheck()) != B_OK) {
         spdlog::error("could not initialize source node info for {}: {}", ref->name, strerror(result));
-        return NULL;
-    }
-    char sourceType[B_MIME_TYPE_LENGTH];
-    if ((result = sourceInfo.GetType(sourceType)) != B_OK) {
-        spdlog::error("could not get MIME type for source node {}: {}", ref->name, strerror(result));
-        return NULL;
+        return BString();
     }
 
-    return (new BString(sourceType))->String();
+    char sourceType[B_MIME_TYPE_LENGTH];
+    if (sourceInfo.GetType(sourceType) == B_OK && sourceType[0] != '\0')
+        return BString(sourceType);
+
+    // a file without a type (made by a program that did not set it, or from the command line): guess it from the name and
+    // the content, the way Tracker does
+    BMimeType guessed;
+    if (BMimeType::GuessMimeType(ref, &guessed) == B_OK && guessed.InitCheck() == B_OK) {
+        spdlog::info("{} has no MIME type, guessed {}", ref->name, guessed.Type());
+        return BString(guessed.Type());
+    }
+
+    spdlog::error("could not get MIME type for source node {}", ref->name);
+    return BString();
 }

@@ -47,7 +47,8 @@ public:
         status_t    QueryAllForSenId        (const char* senId, std::vector<entry_ref>* refs);
         status_t    QueryForTargetsById     (const char* sourceId, BMessage* idToRef);
 
-        const char* GetMimeTypeForRef       (const entry_ref* ref);
+        /** @return the MIME type of a file, guessed if it has none; empty if there is none */
+        BString     GetMimeTypeForRef       (const entry_ref* ref);
         status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
                                                    const BMessage* pluginConfig,
                                                    BMessage* reply);
