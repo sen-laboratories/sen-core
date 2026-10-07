@@ -19,7 +19,7 @@
 #   SEN:TO     the targets of the normal relations, chunked    ("SEN:TO == '*<id>*'")
 #   SEN:META   the targets of the meta relations (same)        ("SEN:META == '*<id>*'")
 #   META:TYPE  the semantic type; plugins carry the plugin type here, so they are found by it
-# The feature flags of plugins (SEN:plugin:*) are 16 bit values: BFS cannot index those, the server reads them.
+# The feature flags of plugins (SEN:plugin:*, int32) are not indexed: a query needs only one indexed attribute (META:TYPE).
 
 set -e
 

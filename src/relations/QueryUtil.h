@@ -5,9 +5,7 @@
 #pragma once
 
 #include <Entry.h>
-#include <Node.h>
 #include <String.h>
-#include <fs_attr.h>
 
 #include <sen/Sen.h>
 #include <Query.h>
@@ -74,39 +72,11 @@ QueryAllVolumes(const char* predicate, std::vector<entry_ref>* refs)
 }
 
 /**
- * @brief Does a plugin declare a feature? The flag is the 16 bit attribute `SEN:plugin:<feature>`.
- *
- * BFS cannot index 16 bit values, so plugins are found by their type (indexed) and filtered with this. Plugins that were
- * built with a 32 bit flag are understood, too.
- *
- * @param plugin  the plugin file
- * @param feature one of sensei::feature
- * @return true if the flag is set (greater than 0)
- */
-inline bool
-PluginHasFeature(const entry_ref& plugin, const char* feature)
-{
-    BNode node(&plugin);
-    BString attrName;
-    attrName << sensei::kFeatureAttrPrefix << ":" << feature;
-
-    attr_info info;
-    if (node.InitCheck() != B_OK || node.GetAttrInfo(attrName.String(), &info) != B_OK)
-        return false;
-
-    if (info.type == B_INT16_TYPE) {
-        int16 value = 0;
-        return node.ReadAttr(attrName.String(), B_INT16_TYPE, 0, &value, sizeof(value)) == (ssize_t) sizeof(value) && value > 0;
-    }
-    if (info.type == B_INT32_TYPE) {
-        int32 value = 0;
-        return node.ReadAttr(attrName.String(), B_INT32_TYPE, 0, &value, sizeof(value)) == (ssize_t) sizeof(value) && value > 0;
-    }
-    return false;
-}
-
-/**
  * @brief Find the plugins that declare a feature, on all mounted volumes.
+ *
+ * The feature flags (`SEN:plugin:<feature>`, int32) are not indexed. A BFS query needs only one indexed attribute, so
+ * the plugin type (`META:TYPE`, indexed) must come first in the predicate; the flag is then compared on those files.
+ *
  * @param feature one of sensei::feature
  * @param plugins receives the plugin files
  * @return B_OK, or the error of the query
@@ -115,18 +85,9 @@ inline status_t
 FindPlugins(const char* feature, std::vector<entry_ref>* plugins)
 {
     BString predicate;
-    predicate << sen::attr::kType << "==" << sen::mime::kPlugin;
+    predicate << sen::attr::kType << "==" << sen::mime::kPlugin << " && " << sensei::kFeatureAttrPrefix << ":" << feature << "==1";
 
-    std::vector<entry_ref> all;
-    status_t result = QueryAllVolumes(predicate.String(), &all);
-    if (result != B_OK)
-        return result;
-
-    for (const entry_ref& plugin : all) {
-        if (PluginHasFeature(plugin, feature))
-            plugins->push_back(plugin);
-    }
-    return B_OK;
+    return QueryAllVolumes(predicate.String(), plugins);
 }
 
 }   // namespace sen
