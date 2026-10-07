@@ -1,6 +1,6 @@
 /*
- * Copyright 2023, Gregor B. Rosenauer <gregor.rosenauer@gmail.com>
- * All rights reserved. Distributed under the terms of the MIT license.
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2023-2026 SEN Labs e.U.
  */
 #pragma once
 

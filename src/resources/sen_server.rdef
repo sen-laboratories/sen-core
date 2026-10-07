@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2020-2026 SEN Labs e.U.
+
 resource app_signature "application/x-vnd.sen-labs.sen-server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;

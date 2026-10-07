@@ -1,4 +1,7 @@
 #!/bin/bash
+#
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 SEN Labs e.U.
 # sen-graph.sh — visualize SEN relations as SVG via graphviz
 # usage: sen-graph.sh [root-path] [output.svg]
 

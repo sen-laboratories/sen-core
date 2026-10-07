@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2020-2026 SEN Labs e.U.
+
 NAME = sen_server
 ARCH = $(shell getarch)
 

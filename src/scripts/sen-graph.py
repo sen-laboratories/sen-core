@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+#
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 SEN Labs e.U.
 # sen-graph.py — visualize SEN relations as SVG via graphviz
 # usage: python3 sen-graph.py [output.svg]
 
