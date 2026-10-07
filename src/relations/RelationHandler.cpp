@@ -20,6 +20,7 @@
 
 #include "RelationHandler.h"
 #include "QueryUtil.h"
+#include "../server/Reply.h"
 #include <sen/Sen.h>
 #include <spdlog/spdlog.h>
 
@@ -84,7 +85,7 @@ void RelationHandler::MessageReceived(BMessage* message)
             if (result != B_OK) {
                 BString error("failed to resolve compatible relations for type '");
                         error << relationType << "': " << strerror(result);
-                reply->AddString("error", error.String());
+                reply->AddString(sen::key::kDetail, error.String());
             }
             break;
         }
@@ -107,6 +108,11 @@ void RelationHandler::MessageReceived(BMessage* message)
             result = RemoveRelation(message, reply);
             break;
         }
+        case sen::cmd::kRelationUpdate:
+        {
+            result = UpdateRelation(message, reply);
+            break;
+        }
         case sen::cmd::kRelationsRemoveAll:
         {
             result = RemoveAllRelations(message, reply);
@@ -115,7 +121,7 @@ void RelationHandler::MessageReceived(BMessage* message)
         default:
         {
             spdlog::info("RelationHandler: unkown message received: {}", message->what);
-            reply->AddString("error", "cannot handle this message.");
+            reply->AddString(sen::key::kDetail, "cannot handle this message.");
         }
     }
 
@@ -125,279 +131,10 @@ void RelationHandler::MessageReceived(BMessage* message)
         spdlog::error("RelationHandler encountered an error while processing the request: {}", strerror(result));
     }
 
-    reply->AddInt32 ("status", result);
-    reply->AddString("result", strerror(result));
+    sen::reply::Finish(reply, result);
     reply->PrintToStream();
 
     message->SendReply(reply);
-}
-
-status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
-{
-    status_t  status;
-    entry_ref srcRef;
-
-    if ((status = GetMessageParameter(message, sen::key::kSourceRef, NULL, &srcRef))  != B_OK) {
-        return status;
-    }
-
-    BString relationTypeStr;
-    if ((status = GetMessageParameter(message, sen::key::kRelationType, &relationTypeStr))  != B_OK) {
-        return status;
-    }
-    const char* relationType = relationTypeStr.String();
-
-    entry_ref targetRef;
-    if ((status = GetMessageParameter(message, sen::key::kTargetRef, NULL, &targetRef))  != B_OK) {
-        return status;
-    }
-
-    // get relation config
-    BMessage relationConf;
-    status = GetRelationConfig(relationType, &relationConf);
-    if (status != B_OK) {
-        spdlog::info("failed to get relation config for type {}: {}", relationType, strerror(status));
-
-        BString error("failed to get relation config for type '");
-                error << relationType << "'";
-
-        reply->AddString("error", error.String());
-
-        return status;  // bail out
-    }
-
-    spdlog::info("got relation config:");
-    relationConf.PrintToStream();
-
-    // special case for relations to classification entities (used for associations): here we don't link back
-    // as to not overload the SEN:TO targetId attribute. The targets are then resolved via back-Query.
-    // exception: relations between 2 association entities, e.g. Concept hierarchies: here we allow bidirectional linking.
-    bool linkToTarget = true;
-
-    // relations are bidirectional by default (makes sense in 95% of cases)
-    if (! relationConf.GetBool(sen::conf::kBidirectional, true)) {
-        spdlog::info("relation is unidirectional, checking for meta types...");
-        BString srcType;
-        status = GetTypeForRef(&srcRef, &srcType);
-        if (status != B_OK) {
-            return status;
-        }
-
-        if (srcType.StartsWith(sen::mime::kClassificationSupertype)) {
-            // allow back linking *between* classification entities to form classification networks (aka nerd mode)
-            BString targetType;
-            status = GetTypeForRef(&targetRef, &targetType);
-            if (status != B_OK) {
-                return status;
-            }
-
-            if (! targetType.StartsWith(sen::mime::kClassificationSupertype)) {
-                linkToTarget = false;
-                spdlog::info("source is META entity but target is NOT, storing relation info without linking back to targets.");
-            }
-        }
-    } else {
-        spdlog::info("relation is bidirectional.");
-    }
-
-    // prepare new relation properties with properties from message received
-    BMessage newProperties;
-    // we take what we get but don't check as properties are optional
-    message->FindMessage(sen::key::kRelationProperties, &newProperties);
-
-    // check for existing properties with same key/values
-    BMessage existingRelations;
-
-    if (linkToTarget) {
-        spdlog::info("* adding relation {} with link to target...", relationType);
-
-        // get existing relations of the given type from the source file
-        status = ReadRelationsOfType(&srcRef, relationType, &existingRelations);
-        if (status != B_OK) {
-            spdlog::error("failed to read relations of type {} from file {}", relationType, srcRef.name);
-            return B_ERROR;
-        } else if (existingRelations.IsEmpty()) {
-            spdlog::info("creating new relation {} for file {}", relationType, srcRef.name);
-        } else {
-            spdlog::info("adding new properties to existing relation {} and file {}.", relationType, srcRef.name);
-        }
-
-        // prepare target
-        char targetId[sen::id::kLength];
-        status = GetOrCreateId(&targetRef, targetId, true);
-        if (status != B_OK) {
-            return status;
-        }
-
-        // Note: we allow multipe relations of the same type to the same target
-        // (e.g. a note for the same text referencing different locations in the referenced text).
-        // Hence, we have a Message with targetId as *key* pointing to 1-N messages with relation properties
-        // for that target.
-
-        // We need to check if a src->target relation with the same properties already exists and only
-        // add a new mapping when no existing targetId->property message has been found.
-        BMessage existingProperties;
-        int index = 0;
-
-        while ((status = existingRelations.FindMessage(targetId, index, &existingProperties)) == B_OK) {
-            // bail out if new properties for particular relation and target are the same as existing ones
-            if (existingProperties.HasSameData(newProperties)) {
-                spdlog::info("skipping add relation {} for target {} with same properties:", relationType, targetId);
-                existingProperties.PrintToStream();
-
-                reply->what = sen::cmd::kReplyRelations;
-                reply->AddString("status", BString("relation with same properties already exists"));
-
-                return B_OK;    // done
-            }
-            index++;
-        }
-
-        if (status != B_OK) {
-            if (status != B_NAME_NOT_FOUND) {
-                spdlog::error("error reading properties of existing relation {} from file {}: {}",
-                    relationType, srcRef.name, strerror(status));
-                return status;
-            } else {
-                index = -1; // no existing properties for target found, OK
-            }
-        }
-
-        if (index >= 0) {
-            spdlog::info("  > adding new properties to existing relation {} and target {} at index {}",
-                relationType, targetId, index);
-        } else {
-            spdlog::info("  > creating new properties for target {} [{}] for relation {}", targetRef.name, targetId, relationType);
-        }
-
-        // add new relation properties for target to any existing relations
-        existingRelations.AddMessage(targetId, &newProperties);
-        existingRelations.PrintToStream();
-
-        status = WriteRelation(&srcRef, targetId, relationType, &existingRelations);
-
-        if (status == B_OK) {
-            spdlog::info("* created relation {} from source {} to target {} [{}].",
-                    relationType, srcRef.name, targetRef.name, targetId);
-
-            reply->AddString("detail", BString("created relation '") << relationType << "' from "
-                << srcRef.name << " -> " <<  targetRef.name << " [" << targetId << "]");
-        } else {
-            reply->AddString("detail", BString("failed to create relation '") << relationType << "' from "
-                << srcRef.name << " -> " <<  targetRef.name << " [" << targetId << "]");
-        }
-
-        // write inverse relation if it doesn't already exist
-        spdlog::info("  > checking for inverse relations of type {}...", relationType);
-
-        BMessage inverseRelationsReply;
-        status = ResolveInverseRelations(&targetRef, &inverseRelationsReply, relationType);
-
-        if (status == B_OK) {
-            // bail out if back link already exists
-            BMessage inverseRelations;
-            status = inverseRelationsReply.FindMessage(sen::key::kRelations, &inverseRelations);
-            if (! inverseRelations.IsEmpty()) {
-                // done
-                spdlog::info("  > backlink already exists, skipping.");
-                return status;
-            }
-
-            // now we need the ID of the original source for linking back to it
-            char srcId[sen::id::kLength];
-            status = GetOrCreateId(&srcRef, srcId, false);
-
-            if (status == B_OK) {
-                spdlog::info("* linking back inverse relation from target {} [{}] -> source {} [{}].",
-                    targetRef.name, targetId, srcRef.name, srcId);
-
-                // get inverse relation properties (e.g. suitable label)
-                BMessage inverseConfig;
-                status = relationConf.FindMessage(sen::conf::kInverse, &inverseConfig);
-
-                // todo: separate config from properties
-                inverseRelations.AddMessage(srcId, &inverseConfig);
-
-                if (status == B_OK || status == B_NAME_NOT_FOUND) {  // optional
-                    // write inverse relations with swapped src/target
-                    status = WriteRelation(&targetRef, srcId, relationType, &inverseRelations);
-                }
-             }
-
-        }
-    } else { // if linkToTarget
-        spdlog::info("adding shallow relation with source-only config...");
-
-        // add empty relations message for consistency
-        status = WriteRelation(&srcRef, NULL, relationType, &existingRelations);
-
-        if (status == B_OK) {
-            spdlog::info("created relation {} from source {} to target ID {} with properties:",
-                    relationType, srcRef.name, targetRef.name);
-
-            reply->AddString("detail", BString("created shallow relation '") << relationType << "' from "
-                << srcRef.name << " -> " << targetRef.name);
-        } else {
-            reply->AddString("detail", BString("failed to create relation '") << relationType << "' from "
-                << srcRef.name << " -> " <<  targetRef.name);
-        }
-    }
-
-    return status;
-}
-
-status_t RelationHandler::WriteRelation(const entry_ref *srcRef,  const char* targetId,
-                                        const char *relationType, const BMessage* properties)
-{
-    char srcId[sen::id::kLength];
-    status_t status = GetOrCreateId(srcRef, srcId, true);
-    if (status != B_OK) {
-        return status;
-    }
-
-    // write new relation to designated attribute
-    BString attrName;
-    GetAttributeNameForRelation(relationType, &attrName);
-    spdlog::info("writing new relation '{}' from {} [{}] -> {} into attribute '{}'...",
-        relationType, srcRef->name, srcId, targetId, attrName.String());
-
-    BNode node(srcRef); // has been checked already at least once here
-
-    ssize_t msgSize = properties->FlattenedSize();
-    char msgBuffer[msgSize];
-    status_t flatten_status = properties->Flatten(msgBuffer, msgSize);
-
-    if (flatten_status != B_OK) {
-        spdlog::error("failed to store relation properties for relation {} in file {}", relationType, srcRef->name);
-        return flatten_status;
-    }
-
-    // only now that all is clean, write relation to disk
-    if (targetId) {
-        spdlog::info("adding relation target attr with targetId {}...", targetId);
-        status = AddRelationTargetIdAttr(node, targetId, relationType);
-
-        if (status != B_OK) {
-            spdlog::error("failed to store targetId {} in file attrs of {}: {}", targetId, srcRef->name, strerror(status));
-            return status;
-        }
-    }
-
-    // write complete relation config into target attribute with the canonical relation type name
-    // Note: we also write relation config when not linking to a target, currently unused and empty.
-    ssize_t result = node.WriteAttr(
-        attrName.String(),
-        B_MESSAGE_TYPE,
-        0,
-        msgBuffer,
-        msgSize);
-
-    if (result <= 0) {
-        spdlog::error("failed to store relation {} for file {}: {}", relationType, srcRef->name, strerror(result));
-        return result;
-    }
-
-    return B_OK;
 }
 
 status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* reply)
@@ -446,7 +183,7 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
     reply->AddStrings(sen::key::kRelations, relationNames);
     reply->AddInt32(sen::key::kCount, relationNames.CountStrings());
 
-    reply->AddString("status", BString("got ")
+    reply->AddString(sen::key::kDetail, BString("got ")
         << relationNames.CountStrings() << " relation(s) from " << sourceRef.name);
 
     return status;
@@ -501,7 +238,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
     // todo: filter out relations that exclude this type
     reply->what = sen::cmd::kReplyRelations;
     reply->AddStrings(sen::key::kRelations, types);
-    reply->AddString("status", BString("got ")
+    reply->AddString(sen::key::kDetail, BString("got ")
                     << types.CountStrings() << " relation(s) from " << sourceRef.name);
 
     return status;
@@ -544,7 +281,7 @@ status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, 
     reply->what = sen::cmd::kReplyRelations;
     reply->AddString(sen::key::kFilter, sen::filter::kCompatible);
     reply->AddStrings(sen::key::kTargetType, types);
-    reply->AddString("status", BString("got ") << types.CountStrings()
+    reply->AddString(sen::key::kDetail, BString("got ") << types.CountStrings()
                  << " compatible target(s) for " << relationType.String());
 
     return status;
@@ -592,16 +329,17 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     int32 numberOfRelations = relations.CountNames(B_MESSAGE_TYPE);
 
     if (status == B_OK) {
-        // add any inverse relations
+        // unidirectional relations (associations) are not stored with their target: what points to this file is found by query
         if (! relationConfig.GetBool(sen::conf::kBidirectional, true)) {
-            status = ResolveInverseRelations(&sourceRef, &relations, relationType);
+            status = ResolveReverseRelations(&sourceRef, relationType, relationConfig, &relations,
+                                             returnIdToRefMap ? &idToRefMap : NULL);
         }
     }
 
     if (status != B_OK) {
         BString error("failed to retrieve relations of type ");
                 error << relationType;
-        reply->AddString("cause", strerror(status));
+        reply->AddString(sen::key::kDetail, strerror(status));
 
         return status;
     }
@@ -615,7 +353,7 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     }
 
     reply->AddInt32("count", numberOfRelations);
-    reply->AddString("status", BString("retrieved ") << numberOfRelations
+    reply->AddString(sen::key::kDetail, BString("retrieved ") << numberOfRelations
                  << " relations from " << sourceRef.name);
 
     reply->PrintToStream();
@@ -721,45 +459,6 @@ status_t RelationHandler::ReadRelationsOfType(
     return status;
 }
 
-status_t RelationHandler::RemoveRelation(const BMessage* message, BMessage* reply)
-{
-    entry_ref sourceRef;
-    status_t  status;
-
-    BString sourceParam;
-    if ((status = GetMessageParameter(message, sen::key::kSourceRef, NULL, &sourceRef))  != B_OK) {
-        return status;
-    }
-
-    BString relationType;
-    if ((status = GetMessageParameter(message, sen::key::kRelationType, &relationType))  != B_OK) {
-        return status;
-    }
-  const char* relation = relationType.String();
-
-  // todo: implement!
-
-    reply->what = sen::cmd::kReplyRelations;
-    reply->AddString("status", BString("removed relation ") << relation << " from " << &sourceRef.name);
-
-    return B_OK;
-}
-
-status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
-{
-    entry_ref sourceRef;
-    status_t  status;
-
-    if (status = GetMessageParameter(message, sen::key::kSourceRef, NULL, &sourceRef)  != B_OK) {
-        return status;
-    }
-
-    reply->what = sen::cmd::kReplyRelations;
-    reply->AddString("status", BString("removed all relations from ") << &sourceRef.name);
-
-    return B_OK;
-}
-
 /*
  * private methods
  */
@@ -834,63 +533,6 @@ status_t RelationHandler::ResolveRelationTargets(BStringList* ids, BMessage *ids
     }
 
     return B_OK;
-}
-
-status_t RelationHandler::ResolveInverseRelations(const entry_ref* sourceRef, BMessage* reply, const char* relationType)
-{
-    char sourceId[sen::id::kLength];
-    BMessage idToRef;
-    BMessage inverseRelations;
-
-    spdlog::info("resolving INVERSE relations for type {}...", relationType);
-
-    status_t status = GetOrCreateId(sourceRef, sourceId, true);
-
-    if (status != B_OK) {
-        spdlog::error("failed to get inverse relation targets for sourceId {}: {}", sourceId, strerror(status));
-        // not enough info for reply message, bail out
-        return status;
-    }
-
-    // filter for optional relationType to narrow down result to specific relation type
-    if (relationType != NULL) {
-        status = ReadRelationsOfType(sourceRef, relationType, &inverseRelations, &idToRef);
-        if (status == B_OK) {
-            reply->AddMessage(sen::key::kRelations, &inverseRelations);
-        }
-    } else {
-        // get all inverse relations
-        status = QueryForTargetsById(sourceId, &idToRef);
-    }
-
-    reply->what = sen::cmd::kReplyRelations;
-    // add resolved sourceId to speed up further relation calls
-    reply->AddString(sen::key::kSourceId, sourceId);
-    reply->AddMessage(sen::key::kIdToRefMap, &idToRef);
-    reply->AddString("status", BString("got ") << idToRef.CountNames(B_REF_TYPE)
-                  << " inverse target(s) for " << sourceId);
-
-    spdlog::info("sending reply for inverse relations for type {}::", relationType != NULL ? relationType : "ALL");
-    reply->PrintToStream();
-
-    return status;
-}
-
-// adds new targetId to existing IDs stored in SEN:TO for quick search and possible back linking.
-status_t RelationHandler::AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType)
-{
-    BString targetIds;
-    status_t status = node.ReadAttrString(sen::attr::kTo, &targetIds);
-
-    if (targetIds.FindFirst(targetId) < 0) {
-        if (! targetIds.IsEmpty())
-            targetIds.Append(",");
-
-        targetIds.Append(targetId);
-    }
-
-    return node.WriteAttrString(sen::attr::kTo, &targetIds);
-
 }
 
 //
@@ -1243,6 +885,12 @@ status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cre
     return B_OK;
 }
 
+status_t RelationHandler::QueryAllForSenId(const char* senId, std::vector<entry_ref>* refs)
+{
+    BString predicate(BString(sen::attr::kId) << "==" << senId);
+    return sen::QueryAllVolumes(predicate.String(), refs);
+}
+
 status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound)
 {
     BString predicate(BString(sen::attr::kId) << "==" << sourceId);
@@ -1279,12 +927,14 @@ status_t RelationHandler::QueryForTargetsById(const char* sourceId, BMessage* id
     spdlog::info("query for inverse relation targets with sourceId {}", sourceId);
 
     // query for files with a SEN:TO attr containing our sourceId
-    BString predicate(BString(sen::attr::kTo) << "== '*" << sourceId << "*'");
+    BString predicate("(");
+    predicate << sen::idlist::ContainsPredicate(sen::attr::kTo, sourceId).c_str() << ") || ("
+              << sen::idlist::ContainsPredicate(sen::attr::kMeta, sourceId).c_str() << ")";
 
     std::vector<entry_ref> refs;
     status_t result = sen::QueryAllVolumes(predicate.String(), &refs);
     if (result != B_OK) {
-        spdlog::error("could not execute query for {} == {}: {}", sen::attr::kTo, sourceId, strerror(result));
+        spdlog::error("could not execute query for the targets of {}: {}", sourceId, strerror(result));
         return result;
     }
 
@@ -1334,6 +984,10 @@ status_t RelationHandler::GetTypeForRef(entry_ref* ref, BString* typeName)
     char srcType[B_MIME_TYPE_LENGTH];
 
     status = srcInfo.GetType(srcType);
+    if (status == B_ENTRY_NOT_FOUND) {      // no type yet: not an error
+        typeName->SetTo("");
+        return B_OK;
+    }
     if (status != B_OK) {
         spdlog::error("could not get type info for ref {}: {}",
                 ref->name, strerror(status));

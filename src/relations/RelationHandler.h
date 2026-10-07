@@ -14,8 +14,12 @@
 #include <Query.h>
 #include <StringList.h>
 
+#include <vector>
+
 #include <sen/Sensei.h>
 
+
+namespace sen { class AttrSnapshot; }
 
 class RelationHandler : public BHandler {
 
@@ -29,27 +33,22 @@ public:
         status_t    GetAllRelations         (const BMessage* message, BMessage* reply);
         status_t    GetSelfRelations        (const BMessage* message, BMessage* reply);
         status_t    GetSelfRelationsOfType  (const BMessage* message, BMessage* reply);
+        /** remove a relation (and its opposite direction), see RelationWrite.cpp */
         status_t    RemoveRelation          (const BMessage* message, BMessage* reply);
-        // delete all relations of a given type, e.g. when a related file is deleted
+        /** change the properties of a relation, or move it to another target or type */
+        status_t    UpdateRelation          (const BMessage* message, BMessage* reply);
+        /** remove all relations of a file (of one type if given) */
         status_t    RemoveAllRelations      (const BMessage* message, BMessage* reply);
 
         /** @return a new TSID, see sen::id::New() */
         BString     GenerateId();
         status_t    GetOrCreateId           (const entry_ref* ref, char* id, bool createIfMissing = false);
         status_t    QueryForUniqueSenId     (const char* sourceId, entry_ref* ref);
+        /** @brief All files that carry a `SEN:ID`, on all volumes: more than one means copies. */
+        status_t    QueryAllForSenId        (const char* senId, std::vector<entry_ref>* refs);
         status_t    QueryForTargetsById     (const char* sourceId, BMessage* idToRef);
 
         const char* GetMimeTypeForRef       (const entry_ref* ref);
-        /**
-          * query for any file with a `SEN:TO` attributeS that contains the sourceId for `sourceRef`.
-          *
-          * @param sourceRef        an entry_ref pointing to the source of the relation
-          * @param reply            an empty message for the relations result
-          * @param relationType     an optional relationType to search for
-          *
-          * @return `B_OK` or the status code of the last error encountered.
-          */
-        status_t    ResolveInverseRelations (const entry_ref* sourceRef, BMessage* reply, const char* relationType = NULL);
         status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
                                                    const BMessage* pluginConfig,
                                                    BMessage* reply);
@@ -96,11 +95,23 @@ private:
         status_t    ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
         status_t    ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
 
-        // write/delete
-        status_t    WriteRelation(const entry_ref *srcRef, const char* targetId,
-                                          const char *relationType, const BMessage* properties);
-        status_t    RemoveRelationForTypeAndTarget(const entry_ref *ref, const char *relationType, const char *targetId);
-        status_t    RemoveAllRelations(const entry_ref *ref);
+        // write/delete (RelationWrite.cpp); every operation is all-or-nothing, see sen::AttrSnapshot
+        status_t    ReadRelationMessage(const entry_ref& ref, const char* relationType, BMessage* relations);
+        status_t    StoreRelationMessage(const entry_ref& ref, const char* relationType, const BMessage& relations,
+                                         sen::AttrSnapshot* tx);
+        status_t    ChangeTargetList(const entry_ref& ref, const char* relationType, const char* targetId, bool add,
+                                     sen::AttrSnapshot* tx);
+        status_t    AddRelationTx(const entry_ref& source, const entry_ref& target, const char* relationType,
+                                  const BMessage& properties, const BMessage& relationConfig, sen::AttrSnapshot* tx,
+                                  BString* relationId, bool* created);
+        status_t    RemoveRelationTx(const entry_ref& source, const char* relationType, const char* targetId,
+                                     const char* relationId, bool allSets, sen::AttrSnapshot* tx, BString* removedRelationId);
+        status_t    GetTargetIdParameter(const BMessage* message, BString* targetId);
+        bool        ShouldWriteInverse(const BMessage& relationConfig, const BString& sourceType, const BString& targetType);
+        BMessage    InverseProperties(const BMessage& relationConfig, const BMessage& properties);
+        /** the relations of unidirectional types that point to a file, found by query for its ID in SEN:META / SEN:TO */
+        status_t    ResolveReverseRelations(const entry_ref* ref, const char* relationType, const BMessage& relationConfig,
+                                            BMessage* relations, BMessage* idToRefMap);
 
         // helper methods
         status_t    GetSubtype(const BString* type, BString* subtype);
@@ -110,6 +121,5 @@ private:
                                         BString* buffer = NULL, entry_ref* ref = NULL,
                                         bool mandatory = true);
         void        GetAttributeNameForRelation(const char* relationType, BString* attrName);
-        status_t    AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
 
 };

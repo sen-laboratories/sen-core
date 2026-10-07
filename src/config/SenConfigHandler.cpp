@@ -16,6 +16,7 @@
 #include <Path.h>
 #include <Resources.h>
 #include <spdlog/spdlog.h>
+#include "../server/Reply.h"
 
 SenConfigHandler::SenConfigHandler()
     : BHandler("SenConfigHandler")
@@ -215,7 +216,7 @@ void SenConfigHandler::MessageReceived(BMessage* message)
             spdlog::info("SenConfigHandler: unknown config message received.");
     }
 
-    reply->AddInt32("result", status);
+    sen::reply::Finish(reply, status);
 
     spdlog::info("SEN ConfigHandler sending reply:");
     reply->PrintToStream();
@@ -373,7 +374,7 @@ status_t SenConfigHandler::FindClassification(
     }
 
     if (status != B_OK) {
-        reply->AddString("detail", strerror(status));
+        reply->AddString(sen::key::kDetail, strerror(status));
     }
 
     return status;

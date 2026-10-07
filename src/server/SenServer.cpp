@@ -6,12 +6,19 @@
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
 #include "SenServer.h"
+#include "Reply.h"
 #include "../relations/RelationHandler.h"
 
 #include <errno.h>
 #include <stdio.h>
 
 #include <fs_index.h>
+
+#include <sys/stat.h>
+
+#include <algorithm>
+#include <utility>
+#include <vector>
 
 #include <AppFileInfo.h>
 #include <Directory.h>
@@ -133,7 +140,7 @@ void SenServer::MessageReceived(BMessage* message)
                     version << versionInfo.major << "." << versionInfo.middle << "." << versionInfo.minor;
                     info << " " << version;
 
-                    reply->AddString("result", info.String());
+                    reply->AddString("info", info.String());
                     reply->AddString("shortDescription", versionInfo.short_info);
                     reply->AddString("longDescription", versionInfo.long_info);
                     reply->AddString("version", version);
@@ -144,7 +151,7 @@ void SenServer::MessageReceived(BMessage* message)
                     break;
                 }
             }
-            reply->AddString("result", "Error retrieving appInfo from resource!");
+            reply->AddString(sen::key::kDetail, "Error retrieving appInfo from resource!");
 		 	break;
 		}
 		case sen::cmd::kCoreStatus:
@@ -152,7 +159,7 @@ void SenServer::MessageReceived(BMessage* message)
 		 	result = B_OK;
 		 	reply->what = sen::cmd::kReplyStatus;
 
-		 	reply->AddString("status", "operational");
+		 	reply->AddString("state", "operational");
 		 	reply->AddBool("healthy", true);
 
 		 	break;
@@ -275,20 +282,38 @@ void SenServer::MessageReceived(BMessage* message)
                             break;
                         }
 
-                        // the ID is queried on all volumes: a second file with the same ID means that this entry is a copy
-                        entry_ref existingEntry;
-                        result = relationHandler->QueryForUniqueSenId(id, &existingEntry);
-                        if (result == B_DUPLICATE_REPLY) {
-                            spdlog::info("SEN:ID {} of {} exists already, this is a copy: removing its identity.", id, path.Path());
-
-                            int32 attrCount = RemoveIdentityAttrs(&node);
-                            if (attrCount >= 0) {
-                                spdlog::info("removed {} attribute(s) from file {}", attrCount, path.Path());
-                            } else  {
-                                spdlog::error("failed to remove attributes from node {}: {}", path.Path(), strerror(attrCount));
+                        // The ID is queried on all volumes: files that share it are copies of each other. The oldest keeps
+                        // the ID (creation time, then inode as the tie breaker: a copy preserves the times of the original), the
+                        // others are new objects. It is decided by the files, not by the entry of this event: an event can
+                        // arrive late, when the copy exists already.
+                        std::vector<entry_ref> holders;
+                        relationHandler->QueryAllForSenId(id, &holders);
+                        if (holders.size() > 1) {
+                            std::vector<std::pair<std::pair<int64, int64>, entry_ref>> byAge;
+                            for (const entry_ref& holder : holders) {
+                                struct stat st;
+                                BNode holderNode(&holder);
+                                if (holderNode.GetStat(&st) != B_OK)
+                                    continue;
+                                int64 created = (int64) st.st_crtim.tv_sec * 1000000000LL + st.st_crtim.tv_nsec;
+                                byAge.push_back({{created, (int64) st.st_ino}, holder});
                             }
-                        } else {
-                            spdlog::info("ignoring possible move of {}, SEN:ID {} is still unique.", name.String(), id);
+                            std::sort(byAge.begin(), byAge.end(),
+                                [](const auto& a, const auto& b) { return a.first < b.first; });
+
+                            for (size_t i = 1; i < byAge.size(); i++) {
+                                BNode copyNode(&byAge[i].second);
+                                BPath copyPath(&byAge[i].second);
+                                spdlog::info("SEN:ID {} is shared with {}: {} is a copy, removing its identity.",
+                                    id, BPath(&byAge[0].second).Path(), copyPath.Path());
+
+                                int32 attrCount = RemoveIdentityAttrs(&copyNode);
+                                if (attrCount >= 0) {
+                                    spdlog::info("removed {} attribute(s) from file {}", attrCount, copyPath.Path());
+                                } else {
+                                    spdlog::error("failed to remove attributes from node {}: {}", copyPath.Path(), strerror(attrCount));
+                                }
+                            }
                         }
                         break;
                     }
@@ -318,6 +343,7 @@ void SenServer::MessageReceived(BMessage* message)
         case sen::cmd::kRelationsGetCompatibleTypes:
 		case sen::cmd::kRelationAdd:
 		case sen::cmd::kRelationRemove:
+		case sen::cmd::kRelationUpdate:
 		case sen::cmd::kRelationsRemoveAll: // fallthrough
         {
             relationHandler->MessageReceived(message);
@@ -330,8 +356,7 @@ void SenServer::MessageReceived(BMessage* message)
 		}
 	}
 
-	reply->AddInt32("resultCode", result);
-	reply->AddString("result", strerror(result));
+	sen::reply::Finish(reply, result);
 
 	message->SendReply(reply);
 }
