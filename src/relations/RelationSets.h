@@ -16,7 +16,7 @@
  * one document), a "set of properties" (page, label, ...). The sets are in the order in which they were added.
  *
  * A single relation is identified by source, type and target. Only when there are several sets for the same target each
- * set also has a relation id (`SEN:relationId`, a TSID), added when the second set is created and removed again when only
+ * set also has a relation id (`SEN:REL:relationId`, a TSID), added when the second set is created and removed again when only
  * one is left. A relation and its opposite direction are kept in step: the same index, the same relation id.
  *
  * Nothing here touches the file system: the functions work on the message only.

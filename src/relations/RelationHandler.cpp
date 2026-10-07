@@ -20,6 +20,7 @@
 
 #include "RelationHandler.h"
 #include "QueryUtil.h"
+#include "RelationSets.h"
 #include "../server/Reply.h"
 #include <sen/Sen.h>
 #include <spdlog/spdlog.h>
@@ -323,8 +324,28 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     }
 
     BMessage relations;
-    status = ReadRelationsOfType(&sourceRef, relationType,
-                                 &relations, returnIdToRefMap ? &idToRefMap : NULL, NULL);
+    // the targets are resolved always: a target that cannot be resolved is marked as missing (dangling relation)
+    BMessage resolved;
+    status = ReadRelationsOfType(&sourceRef, relationType, &relations, &resolved, NULL);
+    if (status == B_OK) {
+        char* targetName;
+        type_code targetType;
+        for (int32 i = 0; relations.GetInfo(B_MESSAGE_TYPE, i, &targetName, &targetType) == B_OK; i++) {
+            if (resolved.HasRef(targetName))
+                continue;
+            int32 sets = sen::relation::CountSets(relations, targetName);
+            for (int32 s = 0; s < sets; s++) {
+                BMessage set;
+                if (sen::relation::GetSet(relations, targetName, s, &set) == B_OK) {
+                    set.RemoveName(sen::key::kTargetMissing);
+                    set.AddBool(sen::key::kTargetMissing, true);
+                    relations.ReplaceMessage(targetName, s, &set);
+                }
+            }
+        }
+        if (returnIdToRefMap)
+            idToRefMap = resolved;
+    }
 
     int32 numberOfRelations = relations.CountNames(B_MESSAGE_TYPE);
 
@@ -346,6 +367,11 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
 
     reply->what = sen::cmd::kReplyRelations;
     reply->AddMessage(sen::key::kRelations, &relations);
+
+    // the ID of the source, so clients can name it without a second request
+    char sourceId[sen::id::kLength];
+    if (GetOrCreateId(&sourceRef, sourceId, false) == B_OK)
+        reply->AddString(sen::key::kSourceId, sourceId);
 
     // hand back filled in id_to_ref map if it was passed in
     if (returnIdToRefMap) {
