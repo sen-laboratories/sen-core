@@ -1,14 +1,17 @@
-/**
- * @author Gregor Rosenauer <gregor.rosenauer@gmail.com>
- * All Rights Reserved.
- * Distributed under the terms of the MIT License.
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2024-2026 SEN Labs e.U.
  */
 
 #include <sen/Sen.h>
+#include <sen/SenOntoCore.h>
 #include "SenServer.h"
 #include "../relations/RelationHandler.h"
 
+#include <errno.h>
 #include <stdio.h>
+
+#include <fs_index.h>
 
 #include <AppFileInfo.h>
 #include <Directory.h>
@@ -50,13 +53,40 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
     relationHandler  = new RelationHandler();
     senConfigHandler = new SenConfigHandler();
 
-	// see also https://www.haiku-os.org/legacy-docs/bebook/BQuery_Overview.html#id611851
-    BVolumeRoster volRoster;
-	BVolume bootVolume;
-	volRoster.GetBootVolume(&bootVolume);
+	// watch all mounted volumes for new entries to ensure that copies get their own SEN:ID, and be told about volumes that
+	// are mounted later
+	BVolumeRoster volRoster;
+	BVolume volume;
+	while (volRoster.GetNextVolume(&volume) == B_OK)
+		WatchVolume(volume.Device());
 
-    // watch for move (rename) and copy operations to ensure our SEN ID stays unique.
-    watch_volume(bootVolume.Device(), B_WATCH_NAME, this);
+	watch_node(NULL, B_WATCH_MOUNT, this);
+}
+
+void SenServer::WatchVolume(dev_t device)
+{
+	BVolume volume(device);
+	if (volume.InitCheck() != B_OK || ! volume.KnowsQuery() || ! volume.KnowsAttr() || volume.IsReadOnly())
+		return;
+
+	EnsureIndices(device);
+
+	status_t result = watch_volume(device, B_WATCH_NAME, this);
+	if (result != B_OK) {
+		spdlog::error("failed to watch volume {}: {}", (int)device, strerror(result));
+	}
+}
+
+void SenServer::EnsureIndices(dev_t device)
+{
+	for (unsigned i = 0; i < sen::onto::core::kIndexCount; i++) {
+		const sen::onto::core::Index& index = sen::onto::core::kIndices[i];
+		if (fs_create_index(device, index.name, index.type, 0) == 0) {
+			spdlog::info("created index {} on volume {}", index.name, (int)device);
+		} else if (errno != B_FILE_EXISTS) {
+			spdlog::error("failed to create index {} on volume {}: {}", index.name, (int)device, strerror(errno));
+		}
+	}
 }
 
 SenServer::~SenServer()
@@ -218,6 +248,14 @@ void SenServer::MessageReceived(BMessage* message)
 
             if (message->FindInt32("opcode", &opcode) == B_OK) {
                 switch (opcode) {
+                    case B_DEVICE_MOUNTED: {
+                        dev_t device;
+                        if (message->FindInt32("new device", &device) == B_OK) {
+                            spdlog::info("volume {} mounted", (int)device);
+                            WatchVolume(device);
+                        }
+                        break;
+                    }
                     case B_ENTRY_CREATED: {
                         entry_ref ref;
                         BString name;
@@ -230,38 +268,30 @@ void SenServer::MessageReceived(BMessage* message)
                         BNode node(&ref);
                         BPath path(&ref);
 
+                        // only files that already have an ID can be copies
                         char id[sen::id::kLength];
                         result = relationHandler->GetOrCreateId(&ref, id);
                         if (result != B_OK) {
                             break;
                         }
 
+                        // the ID is queried on all volumes: a second file with the same ID means that this entry is a copy
                         entry_ref existingEntry;
+                        result = relationHandler->QueryForUniqueSenId(id, &existingEntry);
+                        if (result == B_DUPLICATE_REPLY) {
+                            spdlog::info("SEN:ID {} of {} exists already, this is a copy: removing its identity.", id, path.Path());
 
-                        if ((result = relationHandler->QueryForUniqueSenId(id, &existingEntry)) == B_OK) {
-                            BNode existingNode(&existingEntry);
-                            if (existingNode == node) {
-                                spdlog::info("SEN:ID {} refers to same node {}, nothing to do.",
-                                    id, node.Dup());
-                                break;
-                            }
-                            // delete all SEN attributes of copy
-                            spdlog::info("found SEN:ID {} with exising node {}, removing attributes from copy...",
-                                id, path.Path());
-
-                            int32 attrCount = RemoveSenAttrs(&node);
+                            int32 attrCount = RemoveIdentityAttrs(&node);
                             if (attrCount >= 0) {
                                 spdlog::info("removed {} attribute(s) from file {}", attrCount, path.Path());
                             } else  {
-                                spdlog::error("failed to remove attributes from node {}: {}", path.Path(), strerror(result));
+                                spdlog::error("failed to remove attributes from node {}: {}", path.Path(), strerror(attrCount));
                             }
                         } else {
-                            spdlog::info("ignoring possible move of {}, SEN:ID {} is still unique.",
-                                name.String(), id);
+                            spdlog::info("ignoring possible move of {}, SEN:ID {} is still unique.", name.String(), id);
                         }
                         break;
                     }
-                    break;
                 }
             }
             break;
@@ -306,32 +336,30 @@ void SenServer::MessageReceived(BMessage* message)
 	message->SendReply(reply);
 }
 
-int32 SenServer::RemoveSenAttrs(BNode* node) {
+int32 SenServer::RemoveIdentityAttrs(BNode* node) {
+    // collect first: removing while iterating would skip attributes
+    std::vector<BString> names;
     char attrName[B_ATTR_NAME_LENGTH];
-    int attrCount = 0;
-    status_t result;
+    node->RewindAttrs();
+    while (node->GetNextAttrName(attrName) == B_OK) {
+        BString name(attrName);
+        if (name == sen::attr::kId
+                || name.StartsWith(sen::attr::kTo)
+                || name.StartsWith(sen::attr::kMeta)
+                || name.StartsWith(sen::attr::kRelationPrefix)) {
+            names.push_back(name);
+        }
+    }
 
-    while ((result = node->GetNextAttrName(attrName)) >= 0) {
-        if (result < 0) {
-            spdlog::error("failed to get next attribute from file: {}, " "possible SEN attributes left!", result);
-            break;
+    int32 removed = 0;
+    for (const BString& name : names) {
+        status_t result = node->RemoveAttr(name.String());
+        if (result != B_OK) {
+            spdlog::error("failed to remove SEN attribute {}: {}", name.String(), strerror(result));
+            return result;
         }
-        if (BString(attrName).StartsWith(sen::attr::kPrefix)) {
-            spdlog::info("checking SEN attribute {}...", attrName);
-            result = node->RemoveAttr(attrName);
-            if (result != B_OK) {
-                spdlog::error("failed to remove SEN attribute {}: {}",
-                        attrName, strerror(result));
-                break;
-            } else {
-                spdlog::info("removed SEN attribute {}", attrName);
-                attrCount++;
-            }
-        }
+        spdlog::info("removed SEN attribute {}", name.String());
+        removed++;
     }
-    if (result == B_OK) {
-        return attrCount;
-    } else {
-        return result;
-    }
+    return removed;
 }

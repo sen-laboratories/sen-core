@@ -19,6 +19,7 @@
 #include <Volume.h>
 
 #include "RelationHandler.h"
+#include "QueryUtil.h"
 #include <sen/Sen.h>
 #include <spdlog/spdlog.h>
 
@@ -902,51 +903,61 @@ status_t RelationHandler::GetMessageParameter(
     entry_ref* ref,     // todo: make this a BEntryList or a vector<entry_ref*>
     bool mandatory)
 {
-    status_t status;
+    type_code type;
+    int32     count;
 
-    // first check the value for mandatory parameters exist
-    const void *data;
-    ssize_t     size;
-    type_code   type;
-    int32       count;
-
-    // then parse parameter
-    status = message->GetInfo(param,    &type, &count);
-
-    if (status == B_OK)
-        status = message->FindData(param, type, &data, &size);
-
-    // possibly support int32 later
-
-    if (mandatory && status != B_OK) {
-        BString error;
-        if (status != B_NAME_NOT_FOUND)
-            error << "could not read message parameter " << param << ": " << strerror(status);
-        else
-            error << "missing required parameter " << param;
-
-        spdlog::error("{}", error.String());
-
+    status_t status = message->GetInfo(param, &type, &count);
+    if (status != B_OK) {
+        if (mandatory) {
+            if (status == B_NAME_NOT_FOUND)
+                spdlog::error("missing required parameter {}", param);
+            else
+                spdlog::error("could not read message parameter {}: {}", param, strerror(status));
+        }
         return status;
     }
 
+    // possibly support int32 later
     switch (type) {
         case B_STRING_TYPE: {
-            status = message->FindString(param, buffer);
+            const char* value = NULL;
+            status = message->FindString(param, &value);
+            if (status != B_OK)
+                break;
+
+            if (buffer != NULL) {
+                buffer->SetTo(value);
+            } else if (ref != NULL) {
+                // a path (e.g. from a script) where an entry_ref is wanted
+                BEntry entry(value, true);
+                status = entry.InitCheck();
+                if (status == B_OK)
+                    status = entry.GetRef(ref);
+            } else {
+                status = B_BAD_VALUE;
+            }
             break;
         }
-        case B_REF_TYPE:
+        case B_REF_TYPE: {
+            if (ref == NULL) {
+                status = B_BAD_VALUE;
+                break;
+            }
             status = message->FindRef(param, ref);
+            if (status == B_OK) {
+                // a symbolic link is the same object as its target: relations are found, shown and written the same way
+                BEntry entry(ref, true);
+                if (entry.InitCheck() == B_OK)
+                    entry.GetRef(ref);
+            }
             break;
-        default: {
-            status = B_NOT_SUPPORTED;
         }
+        default:
+            status = B_NOT_SUPPORTED;
     }
 
-    if (status != B_OK) {
-        *buffer << "failed to parse parameter " << param << ": " << strerror(status);
-        spdlog::error("failed to get parameter {}: {}", param, buffer->String());
-    }
+    if (status != B_OK)
+        spdlog::error("failed to get parameter {}: {}", param, strerror(status));
 
     return status;
 }
@@ -1111,25 +1122,13 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
 
 status_t RelationHandler::AssignPreferredNavigator(BMimeType* relationType)
 {
-    BString predicate;
-    predicate << sen::attr::kType << "==" << sen::mime::kPlugin << " && "
-              << sensei::kFeatureAttrPrefix << ":" << sensei::feature::kNavigate << "==1";
-
-    BVolumeRoster volRoster;
-    BVolume bootVolume;
-    volRoster.GetBootVolume(&bootVolume);
-
-    BQuery query;
-    query.SetVolume(&bootVolume);
-    query.SetPredicate(predicate.String());
-
-    status_t result = query.Fetch();
+    std::vector<entry_ref> plugins;
+    status_t result = sen::FindPlugins(sensei::feature::kNavigate, &plugins);
     if (result != B_OK) {
         return result;
     }
 
-    entry_ref pluginRef;
-    while (query.GetNextRef(&pluginRef) == B_OK) {
+    for (const entry_ref& pluginRef : plugins) {
         BFile pluginFile(&pluginRef, B_READ_ONLY);
         BAppFileInfo appInfo(&pluginFile);
         if (appInfo.InitCheck() != B_OK) {
@@ -1247,39 +1246,27 @@ status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cre
 status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound)
 {
     BString predicate(BString(sen::attr::kId) << "==" << sourceId);
-    // TODO: all relation queries currently assume we never leave the boot volume
-    BVolumeRoster volRoster;
-    BVolume bootVolume;
-    volRoster.GetBootVolume(&bootVolume);
 
-    BQuery query;
-    query.SetVolume(&bootVolume);
-    query.SetPredicate(predicate.String());
-
-    status_t result;
-    if ((result = query.Fetch()) != B_OK) {
+    std::vector<entry_ref> refs;
+    status_t result = sen::QueryAllVolumes(predicate.String(), &refs);
+    if (result != B_OK) {
         spdlog::error("could not execute query for {} == {}: {}", sen::attr::kId, sourceId, strerror(result));
         return result;
     }
 
-    if ((result = query.GetNextRef(refFound)) != B_OK) {
-        if (result == B_ENTRY_NOT_FOUND) {
-            spdlog::info("no matching file found for ID {}", sourceId);
-        } else {
-            // something other went wrong
-            spdlog::error("error resolving id {}: {}", sourceId, strerror(result));
-        }
-        return result;
+    if (refs.empty()) {
+        spdlog::info("no matching file found for ID {}", sourceId);
+        return B_ENTRY_NOT_FOUND;
     }
 
-    entry_ref ref;
-    if (query.GetNextRef(&ref) == B_OK) {
+    if (refs.size() > 1) {
         // this should never happen as the SEN:ID MUST be unique!
-        spdlog::error("Critical error SEN:ID {} is NOT unique!", sourceId);
+        spdlog::error("Critical error SEN:ID {} is NOT unique, found {} files!", sourceId, refs.size());
         return B_DUPLICATE_REPLY;
     }
+
+    *refFound = refs.front();
     spdlog::info("found entry {}", refFound->name);
-    query.Clear();
 
     return B_OK;
 }
@@ -1289,49 +1276,30 @@ status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* r
 //       e.g. for inverse relations with Classification entities!
 status_t RelationHandler::QueryForTargetsById(const char* sourceId, BMessage* idToRef)
 {
-    status_t result;
     spdlog::info("query for inverse relation targets with sourceId {}", sourceId);
 
     // query for files with a SEN:TO attr containing our sourceId
     BString predicate(BString(sen::attr::kTo) << "== '*" << sourceId << "*'");
-    // TODO: all relation queries currently assume we never leave the boot volume
-    BVolumeRoster volRoster;
-    BVolume bootVolume;
-    volRoster.GetBootVolume(&bootVolume);
 
-    BQuery query;
-    query.SetVolume(&bootVolume);
-    query.SetPredicate(predicate.String());
-
-    if ((result = query.Fetch()) != B_OK) {
+    std::vector<entry_ref> refs;
+    status_t result = sen::QueryAllVolumes(predicate.String(), &refs);
+    if (result != B_OK) {
         spdlog::error("could not execute query for {} == {}: {}", sen::attr::kTo, sourceId, strerror(result));
         return result;
     }
 
-    entry_ref refFound;
-    while (result == B_OK) {
-        result = query.GetNextRef(&refFound);
-        if (result == B_OK) {
-            char senId[sen::id::kLength];
-            result = GetOrCreateId(&refFound, senId);
-            if (result == B_OK) {
-                idToRef->AddRef(senId, new entry_ref(refFound));
-            } else {
-                // unexpected error, abort
-                spdlog::error("error resolving SEN:ID for entry {}, aborting: {}",
-                    refFound.name, strerror(result));
-                return result;
-            }
+    for (const entry_ref& refFound : refs) {
+        char senId[sen::id::kLength];
+        result = GetOrCreateId(&refFound, senId);
+        if (result != B_OK) {
+            // unexpected error, abort
+            spdlog::error("error resolving SEN:ID for entry {}, aborting: {}", refFound.name, strerror(result));
+            return result;
         }
+        idToRef->AddRef(senId, new entry_ref(refFound));
     }
-    // done, check result
-    if (result == B_ENTRY_NOT_FOUND) {  // expected
-        return B_OK;
-    } else {
-        // something other went wrong
-        spdlog::error("error resolving id {}: {}", sourceId, strerror(result));
-        return result;
-    }
+
+    return B_OK;
 }
 
 //

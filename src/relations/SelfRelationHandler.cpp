@@ -20,6 +20,7 @@
 #include <Volume.h>
 
 #include "RelationHandler.h"
+#include "QueryUtil.h"
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
 #include <spdlog/spdlog.h>
@@ -506,33 +507,19 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
     const char* feature,
     BMessage* pluginConfig)
 {
-    BString predicate;
-    predicate << sen::attr::kType << "==" << sen::mime::kPlugin << " && " << sensei::kFeatureAttrPrefix << ":" << feature << "==1";
-	BVolumeRoster volRoster;
-	BVolume bootVolume;
-	volRoster.GetBootVolume(&bootVolume);
+    spdlog::info("  > looking for {} plugins", feature);
 
-	BQuery query;
-	query.SetVolume(&bootVolume);
-	query.SetPredicate(predicate.String());
-
-	spdlog::info("  > issue query: {}", predicate.String());
-
-    status_t result;
-	if ((result = query.Fetch()) != B_OK) {
-        if (result == B_ENTRY_NOT_FOUND) {
-            spdlog::info("no matching extractor found for type {}, query was: {}", mimeType, predicate.String());
-            return B_OK;
-        }
-        // something else went wrong
+    std::vector<entry_ref> plugins;
+    status_t result = sen::FindPlugins(feature, &plugins);
+    if (result != B_OK) {
         spdlog::error("could not execute query for suitable SENSEI extractors: {}", strerror(result));
         return result;
     }
-    BEntry entry;
+
     int32 pluginCount = 0;
-    while ((result = query.GetNextEntry(&entry)) == B_OK) {
-        BPath path;
-        entry.GetPath(&path);
+    for (const entry_ref& pluginRef : plugins) {
+        BEntry entry(&pluginRef);
+        BPath path(&pluginRef);
         spdlog::info("found plugin with path {}", path.Path());
 
         // get MIME-Type == application_signature of plugin to use as key later
@@ -556,8 +543,7 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
             // returning different output type - later we need to detect and handle overlaps!
             spdlog::info("Adding extractor plugin {} for handling type {}", pluginAppSig, mimeType);
 
-            entry_ref ref;
-            entry.GetRef(&ref);
+            entry_ref ref(pluginRef);
             result = GetPluginConfig(pluginAppSig, &ref, mimeType, pluginConfig);
             if (result != B_OK){
                 spdlog::error("skipping compatible extractor plugin {} due to error: {}.", pluginAppSig, strerror(result));
@@ -569,24 +555,17 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
         } else {
             spdlog::info("extractor plugin {} does not support type {}", pluginAppSig, mimeType);
         }
-    } // while
-
-    if (result == B_ENTRY_NOT_FOUND) {  // expected, just check if we found someting
-        if (pluginCount == 0) {
-            spdlog::info("no matching extractor found for type {}", mimeType);
-            return B_OK;
-        } else {
-            spdlog::info("found {} suitable plugins.", pluginCount);
-            spdlog::info("plugin output map is:");
-            pluginConfig->PrintToStream();
-        }
-    } else {
-        // something else went wrong
-        spdlog::error("error resolving extractor query for {}: {}", mimeType, strerror(result));
-        return result;
     }
 
-    query.Clear();
+    if (pluginCount == 0) {
+        spdlog::info("no matching extractor found for type {}", mimeType);
+        return B_OK;
+    }
+
+    spdlog::info("found {} suitable plugins.", pluginCount);
+    spdlog::info("plugin output map is:");
+    pluginConfig->PrintToStream();
+
     return B_OK;
 }
 
