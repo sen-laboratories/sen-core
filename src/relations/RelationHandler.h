@@ -16,7 +16,6 @@
 
 #include <sen/Sensei.h>
 
-#include "IceDustGenerator.h"
 
 class RelationHandler : public BHandler {
 
@@ -34,7 +33,8 @@ public:
         // delete all relations of a given type, e.g. when a related file is deleted
         status_t    RemoveAllRelations      (const BMessage* message, BMessage* reply);
 
-        const char* GenerateId();
+        /** @return a new TSID, see sen::id::New() */
+        BString     GenerateId();
         status_t    GetOrCreateId           (const entry_ref* ref, char* id, bool createIfMissing = false);
         status_t    QueryForUniqueSenId     (const char* sourceId, entry_ref* ref);
         status_t    QueryForTargetsById     (const char* sourceId, BMessage* idToRef);
@@ -112,5 +112,4 @@ private:
         void        GetAttributeNameForRelation(const char* relationType, BString* attrName);
         status_t    AddRelationTargetIdAttr(BNode& node, const char* targetId, const BString& relationType);
 
-        IceDustGenerator*   tsidGenerator;
 };

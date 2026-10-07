@@ -14,13 +14,12 @@ APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 
 SRCS := src/relations/RelationHandler.cpp \
     	src/relations/SelfRelationHandler.cpp \
-    	src/relations/IceDustGenerator.cpp \
 	src/config/SenConfigHandler.cpp \
 	src/server/SenServer.cpp
 
 RDEFS = src/resources/sen_server.rdef
 
-LIBS = be $(STDCPPLIBS)
+LIBS = be spdlog fmt $(STDCPPLIBS)
 #	Specify the level of optimization that you want. Specify either NONE (O0),
 #	SOME (O1), FULL (O2), or leave blank (for the default optimization level).
 
@@ -55,7 +54,7 @@ LOCALES = en
 #	use. For example, setting DEFINES to "DEBUG=1" will cause the compiler
 #	option "-DDEBUG=1" to be used. Setting DEFINES to "DEBUG" would pass
 #	"-DDEBUG" on the compiler's command line.
-DEFINES = HAIKU_TARGET_PLATFORM_HAIKU
+DEFINES = HAIKU_TARGET_PLATFORM_HAIKU SPDLOG_COMPILED_LIB SPDLOG_FMT_EXTERNAL
 
 #	Specify the warning level. Either NONE (suppress all warnings),
 #	ALL (enable all warnings), or leave blank (enable default warnings).

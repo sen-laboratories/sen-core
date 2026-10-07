@@ -22,10 +22,15 @@
 #include <String.h>
 #include <VolumeRoster.h>
 #include <Volume.h>
+#include <spdlog/spdlog.h>
 
 
 int main(int argc, char* argv[])
 {
+	spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
+	if (const char* level = getenv("SEN_LOG_LEVEL"))
+		spdlog::set_level(spdlog::level::from_str(level));
+
 	SenServer* app = new(std::nothrow) SenServer();
     status_t status = app->InitCheck();
 	if (status != B_OK) {
@@ -39,7 +44,7 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
+SenServer::SenServer() : BApplication(sen::kServerSignature)
 {
 	// setup feature-specific handlers for initializing SEN modules and later redirecting messages appropriately
     relationHandler  = new RelationHandler();
@@ -56,7 +61,7 @@ SenServer::SenServer() : BApplication(SEN_SERVER_SIGNATURE)
 
 SenServer::~SenServer()
 {
-    LOG("Goodbye:)\n");
+    spdlog::info("Goodbye:)");
     stop_watching(this);
 }
 
@@ -65,7 +70,7 @@ void SenServer::ReadyToRun()
     status_t status = senConfigHandler->Init();
     if (status != B_OK) {
         // critical, abort
-        LOG("critical error, aborting.\n");
+        spdlog::info("critical error, aborting.");
         Quit();
     }
 
@@ -78,10 +83,10 @@ void SenServer::MessageReceived(BMessage* message)
 	status_t result;
 
 	switch (message->what) {
-		case SEN_CORE_INFO:
+		case sen::cmd::kCoreInfo:
 		{
 		 	result = B_OK;
-		 	reply->what = SEN_RESULT_INFO;
+		 	reply->what = sen::cmd::kReplyInfo;
 		 	// get info from resource
             app_info appInfo;
             be_app->GetAppInfo(&appInfo);
@@ -112,33 +117,33 @@ void SenServer::MessageReceived(BMessage* message)
             reply->AddString("result", "Error retrieving appInfo from resource!");
 		 	break;
 		}
-		case SEN_CORE_STATUS:
+		case sen::cmd::kCoreStatus:
 		{
 		 	result = B_OK;
-		 	reply->what = SEN_RESULT_STATUS;
+		 	reply->what = sen::cmd::kReplyStatus;
 
 		 	reply->AddString("status", "operational");
 		 	reply->AddBool("healthy", true);
 
 		 	break;
 		}
-        case SEN_CORE_TEST:
+        case sen::cmd::kCoreTest:
 		{
             result = B_OK;
-            reply->what = SEN_CORE_TEST;
+            reply->what = sen::cmd::kCoreTest;
 
-            LOG("TSID test...");
+            spdlog::info("TSID test...");
             BPath path;
             if (find_directory(B_SYSTEM_TEMP_DIRECTORY, &path) != B_OK)
             {
-                ERROR("could not find user settings directory, falling back to /tmp.\n");
+                spdlog::error("could not find user settings directory, falling back to /tmp.");
                 path.SetTo("/tmp");
             }
             path.Append("sen");
             BDirectory outputDir;
             result = outputDir.CreateDirectory(path.Path(), NULL);
             if (result != B_OK && result != B_FILE_EXISTS) {
-                ERROR("failed to set up test directory: %s\n", strerror(result));
+                spdlog::error("failed to set up test directory: {}", strerror(result));
                 break;
             }
             outputDir.SetTo(path.Path());
@@ -147,16 +152,17 @@ void SenServer::MessageReceived(BMessage* message)
 
             // create some temp files and ensure they are unique
             for (int32 i = 0; i < numFiles; i++) {
-                const char* tsid = relationHandler->GenerateId();
-                LOG("TSID: %s\n", tsid);
+                BString tsidString = relationHandler->GenerateId();
+                const char* tsid = tsidString.String();
+                spdlog::info("TSID: {}", tsid);
                 result = file.SetTo(&outputDir, tsid, B_CREATE_FILE);
                 if (result == B_OK) {
                     result = file.Flush();
                 } else {
                     if (result == B_FILE_EXISTS) {
-                        ERROR("test FAILED, ID %s not unique!\n", tsid);
+                        spdlog::error("test FAILED, ID {} not unique!", tsid);
                     } else {
-                        ERROR("aborting test, internal error: %s\n", strerror(result));
+                        spdlog::error("aborting test, internal error: {}", strerror(result));
                     }
                     break;
                 }
@@ -165,33 +171,33 @@ void SenServer::MessageReceived(BMessage* message)
             reply->AddBool("testPassed", result == B_OK);
             break;
         }
-        case SEN_QUERY_REF_FOR_ID:
+        case sen::cmd::kQueryRefForId:
         {
             result = B_OK;
             BString id;
             entry_ref ref;
 
-            // TODO: support arrays like in SEN_QUERY_ID_FOR_REF, needs slight refactoring
-            if ((result = message->FindString(SEN_ID_ATTR, &id)) == B_OK) {
+            // TODO: support arrays like in sen::cmd::kQueryIdForRef, needs slight refactoring
+            if ((result = message->FindString(sen::attr::kId, &id)) == B_OK) {
                 if ((result = relationHandler->QueryForUniqueSenId(id.String(), &ref)) == B_OK) {
                     reply->AddRef("ref", new entry_ref(ref.device, ref.directory, ref.name));
                 }
             }
             break;
         }
-        case SEN_QUERY_ID_FOR_REF:
+        case sen::cmd::kQueryIdForRef:
         {
             type_code   type;
             int32       count;
 
             result = message->GetInfo("refs", &type, &count);
             if (result != B_OK || type != B_REF_TYPE) {
-                ERROR("unexpected type / missing refs parameter!\n");
+                spdlog::error("unexpected type / missing refs parameter!");
                 result = B_BAD_VALUE;
                 break;
             }
 
-            char        id[SEN_ID_LEN];
+            char        id[sen::id::kLength];
             entry_ref   ref;
             bool        createIfMissing = message->GetBool("createIfMissing");
 
@@ -224,7 +230,7 @@ void SenServer::MessageReceived(BMessage* message)
                         BNode node(&ref);
                         BPath path(&ref);
 
-                        char id[SEN_ID_LEN];
+                        char id[sen::id::kLength];
                         result = relationHandler->GetOrCreateId(&ref, id);
                         if (result != B_OK) {
                             break;
@@ -235,22 +241,22 @@ void SenServer::MessageReceived(BMessage* message)
                         if ((result = relationHandler->QueryForUniqueSenId(id, &existingEntry)) == B_OK) {
                             BNode existingNode(&existingEntry);
                             if (existingNode == node) {
-                                LOG("SEN:ID %s refers to same node %d, nothing to do.",
+                                spdlog::info("SEN:ID {} refers to same node {}, nothing to do.",
                                     id, node.Dup());
                                 break;
                             }
                             // delete all SEN attributes of copy
-                            LOG("found SEN:ID %s with exising node %s, removing attributes from copy...\n",
+                            spdlog::info("found SEN:ID {} with exising node {}, removing attributes from copy...",
                                 id, path.Path());
 
                             int32 attrCount = RemoveSenAttrs(&node);
                             if (attrCount >= 0) {
-                                LOG("removed %d attribute(s) from file %s\n", attrCount, path.Path());
+                                spdlog::info("removed {} attribute(s) from file {}", attrCount, path.Path());
                             } else  {
-                                ERROR("failed to remove attributes from node %s: %s\n", path.Path(), strerror(result));
+                                spdlog::error("failed to remove attributes from node {}: {}", path.Path(), strerror(result));
                             }
                         } else {
-                            LOG("ignoring possible move of %s, SEN:ID %s is still unique.\n",
+                            spdlog::info("ignoring possible move of {}, SEN:ID {} is still unique.",
                                 name.String(), id);
                         }
                         break;
@@ -261,28 +267,28 @@ void SenServer::MessageReceived(BMessage* message)
             break;
         }
         // Config - redirect to SenConfigHandler, except for trivial case
-        case SEN_CONFIG_GET:
+        case sen::cmd::kConfigGet:
         {
             senConfigHandler->GetConfig(reply);
             break;
         }
-        case SEN_CONFIG_CLASS_ADD:
-        case SEN_CONFIG_CLASS_GET:
-        case SEN_CONFIG_CLASS_FIND:	// fallthrough
+        case sen::cmd::kClassificationAdd:
+        case sen::cmd::kClassificationGet:
+        case sen::cmd::kClassificationFind:	// fallthrough
         {
             senConfigHandler->MessageReceived(message);
             return; // done
         }
         // Relations - redirect to separate RelationsHndler
-        case SEN_RELATIONS_GET:
-        case SEN_RELATIONS_GET_ALL:
-        case SEN_RELATIONS_GET_SELF:
-        case SEN_RELATIONS_GET_ALL_SELF:
-        case SEN_RELATIONS_GET_COMPATIBLE:
-        case SEN_RELATIONS_GET_COMPATIBLE_TYPES:
-		case SEN_RELATION_ADD:
-		case SEN_RELATION_REMOVE:
-		case SEN_RELATIONS_REMOVE_ALL: // fallthrough
+        case sen::cmd::kRelationsGet:
+        case sen::cmd::kRelationsGetAll:
+        case sen::cmd::kRelationsGetSelf:
+        case sen::cmd::kRelationsGetAllSelf:
+        case sen::cmd::kRelationsGetCompatible:
+        case sen::cmd::kRelationsGetCompatibleTypes:
+		case sen::cmd::kRelationAdd:
+		case sen::cmd::kRelationRemove:
+		case sen::cmd::kRelationsRemoveAll: // fallthrough
         {
             relationHandler->MessageReceived(message);
             return; // done
@@ -290,7 +296,7 @@ void SenServer::MessageReceived(BMessage* message)
 		default:
 		{
             result = B_UNSUPPORTED;
-            LOG("SEN Server: unknown message '%u' received." B_UTF8_ELLIPSIS "\n", message->what);
+            spdlog::info("SEN Server: unknown message '{}' received." B_UTF8_ELLIPSIS, message->what);
 		}
 	}
 
@@ -307,19 +313,18 @@ int32 SenServer::RemoveSenAttrs(BNode* node) {
 
     while ((result = node->GetNextAttrName(attrName)) >= 0) {
         if (result < 0) {
-            ERROR("failed to get next attribute from file: %u, "
-                  "possible SEN attributes left!\n", result);
+            spdlog::error("failed to get next attribute from file: {}, " "possible SEN attributes left!", result);
             break;
         }
-        if (BString(attrName).StartsWith(SEN_ATTR_PREFIX)) {
-            LOG("checking SEN attribute %s...\n", attrName);
+        if (BString(attrName).StartsWith(sen::attr::kPrefix)) {
+            spdlog::info("checking SEN attribute {}...", attrName);
             result = node->RemoveAttr(attrName);
             if (result != B_OK) {
-                ERROR("failed to remove SEN attribute %s: %s\n",
+                spdlog::error("failed to remove SEN attribute {}: {}",
                         attrName, strerror(result));
                 break;
             } else {
-                LOG("removed SEN attribute %s\n", attrName);
+                spdlog::info("removed SEN attribute {}", attrName);
                 attrCount++;
             }
         }

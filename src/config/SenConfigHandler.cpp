@@ -15,6 +15,7 @@
 #include <NodeInfo.h>
 #include <Path.h>
 #include <Resources.h>
+#include <spdlog/spdlog.h>
 
 SenConfigHandler::SenConfigHandler()
     : BHandler("SenConfigHandler")
@@ -35,7 +36,7 @@ status_t SenConfigHandler::Init()
     status_t status = LoadSettings(fSettingsMsg);
 
     if (status != B_OK) {
-        ERROR("failed to read settings: %s\n", strerror(status));
+        spdlog::error("failed to read settings: {}", strerror(status));
     }
 
     return status;
@@ -46,7 +47,7 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
     BPath path;
     status_t status = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
 	if (status != B_OK) {
-        ERROR("could not find user settings directory: %s\n", strerror(status));
+        spdlog::error("could not find user settings directory: {}", strerror(status));
 		return status;
     }
 
@@ -61,14 +62,14 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
     if (! settingsDirEntry.Exists() || ! settingsFileEntry.Exists()) {
         status = InitDefaultSettings(&path, settingsMessage);
         if (status == B_OK) {
-            LOG("successfully initialized settings.\n");
+            spdlog::info("successfully initialized settings.");
             status = SaveSettings(settingsMessage);
         } else {
-            ERROR("failed to initialize settings: %s\n", strerror(status));
+            spdlog::error("failed to initialize settings: {}", strerror(status));
             return status;
         }
     } else {
-        LOG("reading exising settings from %s" B_UTF8_ELLIPSIS "\n", path.Path());
+        spdlog::info("reading exising settings from {}" B_UTF8_ELLIPSIS, path.Path());
         BFile settingsFile(&settingsFileEntry, B_READ_WRITE);
 
         status = settingsFile.InitCheck();
@@ -76,11 +77,11 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
             status = settingsMessage->Unflatten(&settingsFile);
         }
         if (status != B_OK) {
-            ERROR("could not retrieve settings: %s\n", strerror(status));
+            spdlog::error("could not retrieve settings: {}", strerror(status));
             return status;
         }
     }
-    LOG("successfully retrieved settings:\n");
+    spdlog::info("successfully retrieved settings:");
     settingsMessage->PrintToStream();
 
     return status;
@@ -90,7 +91,7 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* se
 {
     status_t status;
 
-    LOG("setting up default settings in %s" B_UTF8_ELLIPSIS "\n", settingsPath->Path());
+    spdlog::info("setting up default settings in {}" B_UTF8_ELLIPSIS, settingsPath->Path());
 
     // checking and building sen settings directories incrementally
     BEntry settingsDirEntry(settingsPath->Path());
@@ -100,37 +101,37 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* se
 		status = settingsDir.CreateDirectory(settingsPath->Path(), NULL);
 
 	if (status != B_OK) {
-        ERROR("could not access settings path '%s': %s\n", settingsPath->Path(), strerror(status));
+        spdlog::error("could not access settings path '{}': {}", settingsPath->Path(), strerror(status));
         return status;
     }
 
     BPath path(*settingsPath);    // working path for setting up directories
 
-    settingsMessage->AddString(SEN_CONFIG_PATH, path.Path());
+    settingsMessage->AddString(sen::key::kConfigPath, path.Path());
     settingsDir.SetTo(path.Path());
 
     // set up context directories
-    path.Append(SEN_CONFIG_CONTEXT_PATH_NAME);
+    path.Append(sen::config::kContextsDir);
     settingsDirEntry.SetTo(path.Path());
 
     if (! settingsDirEntry.Exists()) {
         status = settingsDir.CreateDirectory(path.Leaf(), NULL);
         if (status != B_OK) {
-            ERROR("failed to set up context base path: %s\n", strerror(status));
+            spdlog::error("failed to set up context base path: {}", strerror(status));
             return status;
         }
     }
     settingsDir.SetTo(path.Path());
-    settingsMessage->AddString(SEN_CONFIG_CONTEXT_BASE_PATH, path.Path());
+    settingsMessage->AddString(sen::key::kContextPath, path.Path());
 
     entry_ref contextBaseRef;
     settingsDirEntry.GetRef(&contextBaseRef);
-    settingsMessage->AddRef(SEN_CONFIG_CONTEXT_BASE_PATH_REF, &contextBaseRef);
+    settingsMessage->AddRef(sen::key::kContextPathRef, &contextBaseRef);
 
     // create initial global context as default
     // Note: we do this manually here since CreateContext() rightfully relies on setup to be completed.
     // set up context directories
-    path.Append(SEN_CONFIG_CONTEXT_GLOBAL);
+    path.Append(sen::config::kContextGlobal);
     settingsDirEntry.SetTo(path.Path());
 
     if (! settingsDirEntry.Exists()) {
@@ -140,31 +141,31 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* se
             BDirectory contextDir(path.Path());
             BNodeInfo contextDirInfo(&contextDir);
 
-            status = contextDirInfo.SetType(SEN_CONTEXT_TYPE);
+            status = contextDirInfo.SetType(sen::mime::kContext);
         }
         if (status != B_OK) {
-            ERROR("failed to set up global context: %s\n", strerror(status));
+            spdlog::error("failed to set up global context: {}", strerror(status));
             return status;
         }
     }
     settingsDir.SetTo(path.Path());
 
     // set up default classification directory in global context setup above
-    path.Append(SEN_CONFIG_CLASS_PATH_NAME);
+    path.Append(sen::config::kClassificationsDir);
     settingsDirEntry.SetTo(path.Path());
 
     if (! settingsDirEntry.Exists()) {
         status = settingsDir.CreateDirectory(path.Leaf(), NULL);
         if (status != B_OK) {
-            ERROR("failed to set up classification base path: %s\n", strerror(status));
+            spdlog::error("failed to set up classification base path: {}", strerror(status));
             return status;
         }
     }
 
-    settingsMessage->AddString(SEN_CONFIG_CLASS_BASE_PATH, path.Path());
+    settingsMessage->AddString(sen::key::kClassificationPath, path.Path());
     entry_ref classBaseRef;
     settingsDirEntry.GetRef(&classBaseRef);
-    settingsMessage->AddRef(SEN_CONFIG_CLASS_BASE_PATH_REF, &classBaseRef);
+    settingsMessage->AddRef(sen::key::kClassificationPathRef, &classBaseRef);
 
     return status;
 }
@@ -179,7 +180,7 @@ status_t SenConfigHandler::SaveSettings(const BMessage* message)
         BAppFileInfo fileInfo(&settingsFile);
         status = fileInfo.SetType("application/x-vnd.Haiku-BMessage");
     } else {
-        ERROR("failed to write default settings to file: %s\n", strerror(status));
+        spdlog::error("failed to write default settings to file: {}", strerror(status));
     }
 
     return status;
@@ -190,33 +191,33 @@ void SenConfigHandler::MessageReceived(BMessage* message)
     BMessage* reply = new BMessage();
 	status_t status = B_OK;
 
-    LOG("in SEN ConfigHandler::MessageReceived\n");
+    spdlog::info("in SEN ConfigHandler::MessageReceived");
     message->PrintToStream();
 
     // for now, we always need these same parameters for context
     // if optional context is empty, use global default context
-    const char* context = message->GetString(SEN_MSG_CONTEXT, SEN_CONFIG_CONTEXT_GLOBAL);
-    const BString name = message->GetString(SEN_MSG_NAME, "");
-    const BString type = message->GetString(SEN_MSG_TYPE, "");
+    const char* context = message->GetString(sen::key::kContext, sen::config::kContextGlobal);
+    const BString name = message->GetString(sen::key::kName, "");
+    const BString type = message->GetString(sen::key::kType, "");
 
     switch(message->what)
     {
-        case SEN_CONFIG_CLASS_ADD:
+        case sen::cmd::kClassificationAdd:
             status = AddClassification(context, name, type, reply);
             break;
-        case SEN_CONFIG_CLASS_GET:
+        case sen::cmd::kClassificationGet:
             status = GetClassification(context, name.String(), type.String(), reply);
             break;
-        case SEN_CONFIG_CLASS_FIND:
+        case sen::cmd::kClassificationFind:
             status = FindClassification(context, &name, &type, reply);
             break;
         default:
-            LOG("SenConfigHandler: unknown config message received.\n");
+            spdlog::info("SenConfigHandler: unknown config message received.");
     }
 
     reply->AddInt32("result", status);
 
-    LOG("SEN ConfigHandler sending reply:\n");
+    spdlog::info("SEN ConfigHandler sending reply:");
     reply->PrintToStream();
 
 	message->SendReply(reply);
@@ -257,7 +258,7 @@ status_t SenConfigHandler::AddClassification(const char* context, const char* na
 
     // must not exist already
     if (status != B_OK) {
-        ERROR("could not create classification entity '%s' of type '%s' in context '%s': %s\n",
+        spdlog::error("could not create classification entity '{}' of type '{}' in context '{}': {}",
               name, type, context, strerror(status));
     } else {
         BNodeInfo classInfo(&classFile);
@@ -273,7 +274,7 @@ status_t SenConfigHandler::AddClassification(const char* context, const char* na
             }
         }
         if (status != B_OK) {
-            ERROR("could not set type of new classification '%s' of type '%s' in context '%s': %s\n",
+            spdlog::error("could not set type of new classification '{}' of type '{}' in context '{}': {}",
                 name, type, context, strerror(status));
         }
     }
@@ -292,7 +293,7 @@ status_t SenConfigHandler::GetClassification(const char* context, const char* na
     status = classFile.InitCheck();
 
     if (status != B_OK) {
-        ERROR("could not read classification entity '%s' of type '%s' in context '%s': %s",
+        spdlog::error("could not read classification entity '{}' of type '{}' in context '{}': {}",
               name, type, context, strerror(status));
     } else {
         entry_ref classFileRef;
@@ -314,7 +315,7 @@ status_t SenConfigHandler::FindClassification(
     entry_ref classtRef;
     status_t status = GetClassificationDir(context, type->String(), &classtRef, false);
 
-    LOG("searching for classification with name %s and type %s...\n",
+    spdlog::info("searching for classification with name {} and type {}...",
         name->IsEmpty() ? "*" : name->String(),
         type->IsEmpty() ? "*" : type->String());
 
@@ -344,7 +345,7 @@ status_t SenConfigHandler::FindClassification(
                 if (status == B_OK)
                     status = classNodeInfo.GetType(classType);
                 if (status != B_OK) {
-                    ERROR("  > skipping entry '%s', error resolving node(info/type): %s.\n",
+                    spdlog::error("  > skipping entry '{}', error resolving node(info/type): {}.",
                             classEntry.Name(), strerror(status));
                     continue;
                 }
@@ -353,7 +354,7 @@ status_t SenConfigHandler::FindClassification(
                     includeRef = false;
 
                 if (includeRef) {
-                    LOG("found matching classification entity %s, addding to list.\n", classEntry.Name());
+                    spdlog::info("found matching classification entity {}, addding to list.", classEntry.Name());
                     status = classEntry.GetRef(&classRef);
                     if (status == B_OK) {
                         // add refs and types separately under common names so they can be easier consumed
@@ -364,7 +365,7 @@ status_t SenConfigHandler::FindClassification(
             } // while
             // check for errors besides the obvious B_ENTRY_NOT_FOUND
             if (status != B_ENTRY_NOT_FOUND) {
-                ERROR("search encountered an error, result may be incomplete.\n");
+                spdlog::error("search encountered an error, result may be incomplete.");
             } else {
                 status = B_OK;
             }
@@ -385,7 +386,7 @@ status_t SenConfigHandler::FindClassification(
 status_t SenConfigHandler::GetContextDir(const char* context, entry_ref* ref)
 {
     entry_ref contextRef;
-    status_t status = fSettingsMsg->FindRef(SEN_CONFIG_CONTEXT_BASE_PATH_REF, &contextRef);
+    status_t status = fSettingsMsg->FindRef(sen::key::kContextPathRef, &contextRef);
 
     BPath contextPath(&contextRef);
     if (status == B_OK && contextPath.InitCheck() == B_OK) {
@@ -393,10 +394,10 @@ status_t SenConfigHandler::GetContextDir(const char* context, entry_ref* ref)
     }
     status = contextPath.InitCheck();
     if (status == B_OK) {
-        LOG("found context dir %s for context %s.\n", contextPath.Path(), context);
+        spdlog::info("found context dir {} for context {}.", contextPath.Path(), context);
         status = BEntry(contextPath.Path()).GetRef(ref);
     } else {
-        ERROR("failed to get dir for context %s: %s\n", context, strerror(status));
+        spdlog::error("failed to get dir for context {}: {}", context, strerror(status));
     }
     return status;
 }
@@ -410,7 +411,7 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
         BPath classPathBase(&contextRef);
 
         if (status == B_OK && classPathBase.InitCheck() == B_OK) {
-            classPathBase.Append(SEN_CONFIG_CLASS_PATH_NAME);
+            classPathBase.Append(sen::config::kClassificationsDir);
 
             // use MIME type for grouping classifications by type and context
             BMimeType mimeClass(type);
@@ -419,8 +420,8 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
             if (status == B_OK) {
                 // for valid MIME types, check we only get a classification type and then use just the subtype
                 BString typeName(type);
-                if (! typeName.StartsWith(SEN_CLASS_SUPERTYPE "/")) {
-                    ERROR("unsupported type for classification: %s\n", type);
+                if (! typeName.StartsWith(sen::mime::kClassificationPrefix)) {
+                    spdlog::error("unsupported type for classification: {}", type);
                     return B_BAD_VALUE;
                 }
                 BPath classPath(classPathBase);
@@ -428,18 +429,18 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
 
                 if (status == B_OK) {
                     // API does not have BMimeType.Subtype() sadly
-                    typeName.RemoveFirst(SEN_CLASS_SUPERTYPE "/");
+                    typeName.RemoveFirst(sen::mime::kClassificationPrefix);
                     classPath.Append(typeName.String());
 
                     status = classPath.InitCheck();
                     if (status == B_OK) {
-                        LOG("found classifications dir '%s' for context '%s' and type '%s'.\n",
+                        spdlog::info("found classifications dir '{}' for context '{}' and type '{}'.",
                             classPath.Path(), context, type);
 
                         BEntry classEntry(classPath.Path());
 
                         if (create && ! classEntry.Exists()) {
-                            LOG("creating new classification directory '%s'.\n", classPath.Path());
+                            spdlog::info("creating new classification directory '{}'.", classPath.Path());
 
                             BDirectory classDir(classPathBase.Path());
                             status = classDir.CreateDirectory(classPath.Leaf(), NULL);
@@ -457,12 +458,12 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
                                     folderName = shortName;
                                     folderName.Append("s"); // quick hack, todo: move to MIME Type config
                                 } else {
-                                    ERROR("failed to get short description for type %s, falling back to type name: %s.\n",
+                                    spdlog::error("failed to get short description for type {}, falling back to type name: {}.",
                                           typeName.String(), strerror(status));
                                     folderName = typeName;
                                 }
 
-                                status = classDir.WriteAttrString(META_FOLDER_NAME, &folderName);
+                                status = classDir.WriteAttrString(sen::attr::kFolderName, &folderName);
                             }
                         }
 
@@ -475,7 +476,7 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
         }
     }
     if (status != B_OK) {
-        ERROR("failed to get dir for classification with context '%s' and type '%s': %s\n",
+        spdlog::error("failed to get dir for classification with context '{}' and type '{}': {}",
                 context, type, strerror(status));
     }
     return status;
@@ -492,13 +493,13 @@ status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
 
     // esp. must not exist already
     if (status != B_OK) {
-        ERROR("could not create directory for context '%s': %s",
+        spdlog::error("could not create directory for context '{}': {}",
               name, strerror(status));
         return status;
     }
 
     BNodeInfo contextInfo(&contextFile);
-    status = contextInfo.SetType(SEN_CONTEXT_TYPE);
+    status = contextInfo.SetType(sen::mime::kContext);
 
     // optionally return the ref to the newly created context
     if (status == B_OK && ref != NULL) {

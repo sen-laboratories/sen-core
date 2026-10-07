@@ -33,9 +33,9 @@ REBUILD_PATH="${2:-$HOME}"
 #                           (QueryForUniqueSenId: "SEN:ID == <id>")
 #   SEN:TO                - list of target IDs on the source, for reverse
 #                           relation lookup (QueryForTargetsById: "SEN:TO == '*<id>*'")
-#   SEN:TYPE              - semantic file type, as opposed to the more
+#   META:TYPE              - semantic file type, as opposed to the more
 #                           technical BEOS:TYPE MIME type
-#                           (GetPluginsForTypeAndFeature: "SEN:TYPE == <plugin-type>")
+#                           (GetPluginsForTypeAndFeature: "META:TYPE == <plugin-type>")
 #   SEN:plugin:extract    - plugin feature flags, one index per feature since
 #   SEN:plugin:enrich       each is queried as its own attribute
 #   SEN:plugin:identify     ("SEN:plugin:<feature> == 1")
@@ -43,7 +43,7 @@ REBUILD_PATH="${2:-$HOME}"
 #   SEN:plugin:search       (defined in Sensei.h, not yet used by a plugin,
 #                           included for forward compatibility)
 
-STRING_ATTRS="SEN:ID SEN:TO SEN:TYPE"
+STRING_ATTRS="SEN:ID SEN:TO META:TYPE"
 INT_ATTRS="SEN:plugin:extract SEN:plugin:enrich SEN:plugin:identify SEN:plugin:navigate SEN:plugin:search"
 ALL_ATTRS="$STRING_ATTRS $INT_ATTRS"
 

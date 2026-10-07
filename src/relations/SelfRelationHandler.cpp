@@ -22,39 +22,40 @@
 #include "RelationHandler.h"
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
+#include <spdlog/spdlog.h>
 
 status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
 	entry_ref sourceRef;
 	status_t  status;
 
-    if ((status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, nullptr, &sourceRef))  != B_OK) {
+    if ((status = GetMessageParameter(message, sen::key::kSourceRef, nullptr, &sourceRef))  != B_OK) {
 		return status;
 	}
 
     const char* sourceType = GetMimeTypeForRef(&sourceRef);
 
     // query for all compatible extractors and return their generated collected output type
-    LOG("query for extractors to handle file type %s\n", sourceType);
+    spdlog::info("query for extractors to handle file type {}", sourceType);
     BMessage pluginConfig;
 
-    status = GetPluginsForTypeAndFeature(sourceType, SENSEI_FEATURE_EXTRACT, &pluginConfig);
+    status = GetPluginsForTypeAndFeature(sourceType, sensei::feature::kExtract, &pluginConfig);
     if (status != B_OK) {
         return status;
     }
 
-    LOG("got types/plugins config for source type %s:\n", sourceType);
+    spdlog::info("got types/plugins config for source type {}:", sourceType);
     pluginConfig.PrintToStream();
 
-    reply->what = SENSEI_MESSAGE_RESULT;
-    reply->AddMessage(SENSEI_PLUGIN_CONFIG_KEY, new BMessage(pluginConfig));
+    reply->what = sensei::cmd::kResult;
+    reply->AddMessage(sensei::key::kPluginConfig, new BMessage(pluginConfig));
 
     // transparently add type mappings as relations for consistent uniform handling from outside (e.g. Tracker)
     BStringList relationTypes;
 
     BMessage typeMappings;
-    status = pluginConfig.FindMessage(SENSEI_TYPE_MAPPING, &typeMappings);
+    status = pluginConfig.FindMessage(sensei::key::kTypeMapping, &typeMappings);
     if (status != B_OK) {
-        ERROR("could not find expected type mappings, aborting: %s\n", strerror(status));
+        spdlog::error("could not find expected type mappings, aborting: {}", strerror(status));
         if (status != B_NAME_NOT_FOUND)
             return status;
         else
@@ -70,23 +71,23 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
         if (status == B_OK)
             status = typeMappings.FindString(alias, t, &relationTypeName);
         if (status != B_OK) {
-            ERROR("failed to get type mapping #%d: %s\n", t, strerror(status));
+            spdlog::error("failed to get type mapping #{}: {}", t, strerror(status));
             continue;
         }
         relationTypes.Add(relationTypeName);
     }
 
-    BString defaultType = pluginConfig.GetString(SENSEI_DEFAULT_TYPE_KEY, "");
+    BString defaultType = pluginConfig.GetString(sensei::key::kDefaultType, "");
     if (! defaultType.IsEmpty())
         relationTypes.Add(defaultType);
 
-    reply->AddStrings(SEN_RELATIONS, relationTypes);
+    reply->AddStrings(sen::key::kRelations, relationTypes);
 
     // get relation configs (always needed for self relations)
     BMessage relationConfigs;
     status = GetRelationConfigs(&relationTypes, &relationConfigs);
     if (status == B_OK) {
-        reply->AddMessage(SEN_RELATION_CONFIG_MAP, &relationConfigs);
+        reply->AddMessage(sen::key::kRelationConfigMap, &relationConfigs);
     }
 
     return status;
@@ -96,7 +97,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     entry_ref sourceRef;
 	status_t  status;
 
-    if ((status = GetMessageParameter(message, SEN_RELATION_SOURCE_REF, nullptr, &sourceRef))  != B_OK) {
+    if ((status = GetMessageParameter(message, sen::key::kSourceRef, nullptr, &sourceRef))  != B_OK) {
 		return status;
 	}
 
@@ -107,7 +108,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     BString relationTypeParam;
     // relation type for self relations is one of the possible output types of compatible extractors.
-	if (GetMessageParameter(message, SEN_RELATION_TYPE, &relationTypeParam, NULL, true)  != B_OK) {
+	if (GetMessageParameter(message, sen::key::kRelationType, &relationTypeParam, NULL, true)  != B_OK) {
 		return B_BAD_VALUE;
 	}
     const char* relationType = relationTypeParam.String();
@@ -117,14 +118,14 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     status = GetRelationConfig(relationType, &relationConfig);
     if (status != B_OK) {
-        LOG("failed to get relation config for type %s: %s\n", relationType, strerror(status));
+        spdlog::info("failed to get relation config for type {}: {}", relationType, strerror(status));
         return status;
     }
 
     // add to reply
     BMessage configMap;
     configMap.AddMessage(relationType, &relationConfig);
-    reply->AddMessage(SEN_RELATION_CONFIG_MAP, &configMap);
+    reply->AddMessage(sen::key::kRelationConfigMap, &configMap);
 
     status_t result;
     bool clientHasConfig = false;
@@ -132,44 +133,44 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     // sender MAY send an existing plugin config for this type from a previous call to save re-query
     BMessage pluginConfig;
 
-    result = message->FindMessage(SENSEI_PLUGIN_CONFIG_KEY, &pluginConfig);
+    result = message->FindMessage(sensei::key::kPluginConfig, &pluginConfig);
     if (result != B_OK) {
         if (result == B_NAME_NOT_FOUND) {
-            LOG("fresh query for suitable plugins for relation type %s...\n", relationType);
+            spdlog::info("fresh query for suitable plugins for relation type {}...", relationType);
 
-            result = GetPluginsForTypeAndFeature(sourceMimeType, SENSEI_FEATURE_EXTRACT, &pluginConfig);
+            result = GetPluginsForTypeAndFeature(sourceMimeType, sensei::feature::kExtract, &pluginConfig);
             if (result != B_OK) {
                 return result;  // already handled, just pass on
             }
-            LOG("got fresh plugin config:\n");
+            spdlog::info("got fresh plugin config:");
          } else {
-            ERROR("couldn't look up plugins from message: %s", strerror(result));
+            spdlog::error("couldn't look up plugins from message: {}", strerror(result));
             return result;
          }
     } else {
-        LOG("got existing plugin config for relation type %s:\n", relationType);
+        spdlog::info("got existing plugin config for relation type {}:", relationType);
         clientHasConfig = true;
     }
 
-    LOG(("* got plugin config:\n"));
+    spdlog::info("* got plugin config:");
     pluginConfig.PrintToStream();
     // TODO: merge optional relation config provided in plugin config into MIME relation config
 
     // client may send the desired plugin signature already, saving us the hassle
     BString pluginTypeParam;
 
-	if (GetMessageParameter(message, SENSEI_PLUGIN_KEY, &pluginTypeParam, NULL, true)  == B_OK) {
+	if (GetMessageParameter(message, sensei::key::kPlugin, &pluginTypeParam, NULL, true)  == B_OK) {
         const char* pluginSig = pluginTypeParam.String();
-        LOG("got plugin signature %s, jumping to launch plugin.\n", pluginSig);
+        spdlog::info("got plugin signature {}, jumping to launch plugin.", pluginSig);
 		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
 	}
 
     // get type->plugin map
     BMessage typeToPlugins;
 
-    result = pluginConfig.FindMessage(SENSEI_TYPES_PLUGINS_KEY, &typeToPlugins);
+    result = pluginConfig.FindMessage(sensei::key::kTypesPlugins, &typeToPlugins);
     if (result != B_OK) {
-        ERROR("failed to look up type->plugin map for relation type %s: %s\n", relationType, strerror(result));
+        spdlog::error("failed to look up type->plugin map for relation type {}: {}", relationType, strerror(result));
         return result;
     }
 
@@ -178,7 +179,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     BString pluginType;
     result = typeToPlugins.FindString(relationType, &pluginType);
     if (result != B_OK) {
-        ERROR("failed to look up plugin signature for relation type %s: %s\n", relationType, strerror(result));
+        spdlog::error("failed to look up plugin signature for relation type {}: {}", relationType, strerror(result));
         return result;
     }
 
@@ -186,7 +187,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
     if (result != B_OK) {
-        ERROR("failed to resolve relations of type %s with plugin %s: %s\n", relationType, pluginSig, strerror(result));
+        spdlog::error("failed to resolve relations of type {} with plugin {}: {}", relationType, pluginSig, strerror(result));
         return result;
     }
 
@@ -261,7 +262,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     const BMessage* pluginConfig,
     BMessage* reply)
 {
-    LOG("got plugin app signature: %s\n", pluginSig);
+    spdlog::info("got plugin app signature: {}", pluginSig);
 
     // execute plugin and return result
     // plugins are B_MULTIPLE_LAUNCH and quit right after replying, so talk to exactly
@@ -270,7 +271,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     team_id pluginTeam = -1;
     status_t result = be_roster->Launch(pluginSig, (BMessage*)NULL, &pluginTeam);
     if (result != B_OK) {
-        ERROR("failed to launch plugin %s: %s\n", pluginSig, strerror(result));
+        spdlog::error("failed to launch plugin {}: {}", pluginSig, strerror(result));
         return result;
     }
 
@@ -279,15 +280,15 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     result = sourceEntry.InitCheck();
 
     if (result != B_OK) {
-        ERROR("failed to get ref for path %s: %s\n", sourceRef->name, strerror(result));
+        spdlog::error("failed to get ref for path {}: {}", sourceRef->name, strerror(result));
         return result;
     }
 
     BMessage refsMsg(B_REFS_RECEIVED);
     refsMsg.AddRef("refs", sourceRef);
-    refsMsg.AddBool(SEN_RELATION_IS_SELF, true);
+    refsMsg.AddBool(sen::conf::kSelf, true);
 
-    LOG("Sending refs to plugin %s:\n", pluginSig);
+    spdlog::info("Sending refs to plugin {}:", pluginSig);
     refsMsg.PrintToStream();
 
     BMessenger pluginMessenger(pluginSig, pluginTeam);
@@ -305,7 +306,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
 
     // check result from communication
     if (result != B_OK) {
-        ERROR("failed to communicate with plugin %s: %s\n", pluginSig, strerror(result));
+        spdlog::error("failed to communicate with plugin {}: {}", pluginSig, strerror(result));
         pluginReply.PrintToStream();
         return result;
     }
@@ -313,51 +314,51 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     // check actual plugin result
     result = pluginReply.GetInt32("result", B_OK);
     if (result != B_OK) {
-        ERROR("error in plugin execution: %s\n", strerror(result));
+        spdlog::error("error in plugin execution: {}", strerror(result));
         pluginReply.PrintToStream();
         return result;
     }
 
     // remove plugin result code
-    pluginReply.RemoveName(SENSEI_RESULT);
+    pluginReply.RemoveName(sensei::key::kResult);
 
     // convert to common relation properties mapped to MIME type attribute names, using the type_mapping
     // provided by SENSEI (both technically optional but usually needed and encouraged)
     BMessage typeMapping;
-    pluginConfig->FindMessage(SENSEI_TYPE_MAPPING, &typeMapping);
+    pluginConfig->FindMessage(sensei::key::kTypeMapping, &typeMapping);
 
     // same for attributes (e.g. page -> SEN:REL:page)
     BMessage attrMapping;
-    pluginConfig->FindMessage(SENSEI_ATTR_MAPPING, &attrMapping);
+    pluginConfig->FindMessage(sensei::key::kAttrMapping, &attrMapping);
 
     // replace the placeholder "self" ID with the sourceRef's inode, we simply add it as mapping here
     BString srcId;
     GetInodeForRef(sourceRef, &srcId);
 
     // plugins may use an abstract item shortcut
-    attrMapping.AddString(SENSEI_ITEM, SEN_RELATIONS);
-    attrMapping.AddString(SENSEI_TO,   SEN_TO_ATTR);
+    attrMapping.AddString(sensei::key::kItem, sen::key::kRelations);
+    attrMapping.AddString(sensei::key::kTo,   sen::attr::kTo);
 
     // add unique node ID to all nested nodes for easier tracking (e.g. Tracker selected node->relation folder)
     BMessage pluginReplyTransformed;
     // pass in root node if possible (convention)
     BMessage rootNode;
 
-    result = pluginReply.FindMessage(SENSEI_ITEM, &rootNode);
+    result = pluginReply.FindMessage(sensei::key::kItem, &rootNode);
     if (result != B_OK) {
-        result = pluginReply.FindMessage(SEN_RELATIONS, &rootNode);
+        result = pluginReply.FindMessage(sen::key::kRelations, &rootNode);
     }
 
     if (result == B_OK)
         result = TransformPluginResult(&rootNode, &typeMapping, &attrMapping, &pluginReplyTransformed);
 
     if (result != B_OK) {
-        ERROR("could not transform plugin result: %s\nResult so far:\n", strerror(result));
+        spdlog::error("could not transform plugin result: {}\nResult so far:", strerror(result));
         pluginReplyTransformed.PrintToStream();
         return result;
     }
 
-    reply->what = SENSEI_MESSAGE_RESULT;
+    reply->what = sensei::cmd::kResult;
     reply->AddRef("refs", sourceRef);
     reply->Append(pluginReplyTransformed);
 
@@ -377,7 +378,7 @@ status_t RelationHandler::TransformPluginResult(
 
     // skip processing empty messages at any level
     if (itemMsg->IsEmpty()) {
-        LOG("  - skipping empty sub message.\n");
+        spdlog::info("  - skipping empty sub message.");
         return B_OK;
     }
 
@@ -386,18 +387,18 @@ status_t RelationHandler::TransformPluginResult(
     char *itemMsgName;
 
     // get cardinality of fields in this item message (format requires a label and same count for all fields)
-    status = itemMsg->GetInfo(SENSEI_LABEL, &type, &itemCount);
+    status = itemMsg->GetInfo(sensei::key::kLabel, &type, &itemCount);
     if (status != B_OK) {
         if (status == B_NAME_NOT_FOUND || type != B_STRING_TYPE) {
-            ERROR("could not find expected LABEL in item message of plugin result.\n");
+            spdlog::error("could not find expected LABEL in item message of plugin result.");
             return B_OK;    // fail gracefully
         }
 
-        ERROR("could not inspect message: %s\n", strerror(status));
+        spdlog::error("could not inspect message: {}", strerror(status));
         return status;
     }
 
-    LOG("processing itemMsg with %d data members and cardinality of %d.\n", fieldCount, itemCount);
+    spdlog::info("processing itemMsg with {} data members and cardinality of {}.", fieldCount, itemCount);
 
     for (int32 item = 0; item < itemCount; item++) {
         // prepare for new item properties
@@ -415,16 +416,16 @@ status_t RelationHandler::TransformPluginResult(
                 status = itemMsg->FindData(fieldName, fieldType, item, &data, &size);
 
             if (status != B_OK) {
-                ERROR("error inspecting item %d, field %d: %s\n", item, field, strerror(status));
+                spdlog::error("error inspecting item {}, field {}: {}", item, field, strerror(status));
                 return status;
             }
             if (itemCount != elementCount) {
-                ERROR("  ? invalid/unsupported message format: non-uniform item count at field %s, %d vs. %d (current).",
+                spdlog::error("  ? invalid/unsupported message format: non-uniform item count at field {}, {} vs. {} (current).",
                         fieldName, itemCount, elementCount);
                 return B_BAD_VALUE;
             }
 
-            LOG("processing item %02d / %02d, field %s\t(%02d / %02d).\n",
+            spdlog::info("processing item {:02} / {:02}, field {}\t({:02} / {:02}).",
                 item + 1, itemCount, fieldName, field + 1, fieldCount);
 
             // map property name to common attribute name as per attribute map
@@ -440,7 +441,7 @@ status_t RelationHandler::TransformPluginResult(
 
                 // only process B_MESSAGE_TYPE entries here
                 if (status == B_OK) {
-                    LOG("  > processing sub item...\n");
+                    spdlog::info("  > processing sub item...");
 
                     // and recurse to enrich sub item
                     status = TransformPluginResult(&childMsg, typeMapping, attrMapping, &childResult);
@@ -467,32 +468,32 @@ status_t RelationHandler::TransformPluginResult(
             }
 
             if (status != B_OK) {
-                ERROR("  x failed to process item %d, field '%s' ['%s']: %s\n",
+                spdlog::error("  x failed to process item {}, field '{}' ['{}']: {}",
                         item, fieldName, commonName, strerror(status));
                 return status;
             }
         }  // field loop
 
         if (status == B_OK) {
-            LOG("* got %d nested and %d flat properties\n", nestedProperties, flatProperties);
+            spdlog::info("* got {} nested and {} flat properties", nestedProperties, flatProperties);
 
             // possibly enrich IF item contains an ID
-            const char* itemId = propertiesMsg.GetString(SENSEI_ITEM_ID);
+            const char* itemId = propertiesMsg.GetString(sensei::key::kItemId);
 
             if (itemId == NULL || strlen(itemId) == 0) {
-                propertiesMsg.RemoveName(SENSEI_ITEM_ID);
-                status = propertiesMsg.AddString(SEN_RELATION_ITEM_ID, GenerateId() );
+                propertiesMsg.RemoveName(sensei::key::kItemId);
+                status = propertiesMsg.AddString(sen::key::kItemId, GenerateId() );
             }
 
             if (nestedProperties > 0 && flatProperties == 0) {
                 // ommit empty intermediary nodes when there are just sub nodes at this level
                 status = itemResult->Append(propertiesMsg);
             } else {
-                status = itemResult->AddMessage(SEN_RELATIONS, &propertiesMsg);
+                status = itemResult->AddMessage(sen::key::kRelations, &propertiesMsg);
             }
 
             if (status != B_OK) {
-                ERROR("  x failed to add properties to result: %s\n", strerror(status));
+                spdlog::error("  x failed to add properties to result: {}", strerror(status));
             }
         }
     }  // item loop
@@ -505,8 +506,8 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
     const char* feature,
     BMessage* pluginConfig)
 {
-    BString predicate(SEN_TYPE "==" SENSEI_PLUGIN_TYPE " && " SENSEI_PLUGIN_FEATURE_ATTR ":");
-            predicate << feature << "==1";
+    BString predicate;
+    predicate << sen::attr::kType << "==" << sen::mime::kPlugin << " && " << sensei::kFeatureAttrPrefix << ":" << feature << "==1";
 	BVolumeRoster volRoster;
 	BVolume bootVolume;
 	volRoster.GetBootVolume(&bootVolume);
@@ -515,16 +516,16 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
 	query.SetVolume(&bootVolume);
 	query.SetPredicate(predicate.String());
 
-	LOG("  > issue query: %s\n", predicate.String());
+	spdlog::info("  > issue query: {}", predicate.String());
 
     status_t result;
 	if ((result = query.Fetch()) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
-            LOG("no matching extractor found for type %s, query was: %s\n", mimeType, predicate.String());
+            spdlog::info("no matching extractor found for type {}, query was: {}", mimeType, predicate.String());
             return B_OK;
         }
         // something else went wrong
-        ERROR("could not execute query for suitable SENSEI extractors: %s\n", strerror(result));
+        spdlog::error("could not execute query for suitable SENSEI extractors: {}", strerror(result));
         return result;
     }
     BEntry entry;
@@ -532,56 +533,56 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
     while ((result = query.GetNextEntry(&entry)) == B_OK) {
         BPath path;
         entry.GetPath(&path);
-        LOG("found plugin with path %s\n", path.Path());
+        spdlog::info("found plugin with path {}", path.Path());
 
         // get MIME-Type == application_signature of plugin to use as key later
         BFile pluginFile(&entry, B_READ_ONLY);
         if ((result = pluginFile.InitCheck()) != B_OK || !(pluginFile.IsFile())) {
-            ERROR("failed to get appInfo of plugin file %s: %s\n", entry.Name(), strerror(result));
+            spdlog::error("failed to get appInfo of plugin file {}: {}", entry.Name(), strerror(result));
             return result;
         }
         BAppFileInfo pluginInfo(&pluginFile);
         char pluginAppSig[B_MIME_TYPE_LENGTH];
         if ((result = pluginInfo.GetSignature(pluginAppSig)) != B_OK) {
-            ERROR("failed to get app signature of plugin file %s: %s\n", entry.Name(), strerror(result));
+            spdlog::error("failed to get app signature of plugin file {}: {}", entry.Name(), strerror(result));
             return result;
         }
-        LOG("got plugin app signature: %s\n", pluginAppSig);
+        spdlog::info("got plugin app signature: {}", pluginAppSig);
 
         // filter for supported input type
         if (pluginInfo.IsSupportedType(mimeType)) {
             // get supported output types and add to lookup map accordingly
             // todo: there may be more plugins per type, supporting different aspects and
             // returning different output type - later we need to detect and handle overlaps!
-            LOG("Adding extractor plugin %s for handling type %s\n", pluginAppSig, mimeType);
+            spdlog::info("Adding extractor plugin {} for handling type {}", pluginAppSig, mimeType);
 
             entry_ref ref;
             entry.GetRef(&ref);
             result = GetPluginConfig(pluginAppSig, &ref, mimeType, pluginConfig);
             if (result != B_OK){
-                ERROR("skipping compatible extractor plugin %s due to error: %s.\n", pluginAppSig, strerror(result));
+                spdlog::error("skipping compatible extractor plugin {} due to error: {}.", pluginAppSig, strerror(result));
                 // better luck next time?
                 continue;
             }
 
             pluginCount++;
         } else {
-            LOG("extractor plugin %s does not support type %s\n", pluginAppSig, mimeType);
+            spdlog::info("extractor plugin {} does not support type {}", pluginAppSig, mimeType);
         }
     } // while
 
     if (result == B_ENTRY_NOT_FOUND) {  // expected, just check if we found someting
         if (pluginCount == 0) {
-            LOG("no matching extractor found for type %s\n", mimeType);
+            spdlog::info("no matching extractor found for type {}", mimeType);
             return B_OK;
         } else {
-            LOG("found %u suitable plugins.\n", pluginCount);
-            LOG("plugin output map is:\n");
+            spdlog::info("found {} suitable plugins.", pluginCount);
+            spdlog::info("plugin output map is:");
             pluginConfig->PrintToStream();
         }
     } else {
         // something else went wrong
-        ERROR("error resolving extractor query for %s: %s\n", mimeType, strerror(result));
+        spdlog::error("error resolving extractor query for {}: {}", mimeType, strerror(result));
         return result;
     }
 
@@ -606,9 +607,9 @@ status_t RelationHandler::GetPluginConfig(
     BMessage typeMappings;
     BMessage attrMappings;
 
-    result = GetAttrMessage(&node, SENSEI_TYPE_MAPPING, &typeMappings);
+    result = GetAttrMessage(&node, sensei::key::kTypeMapping, &typeMappings);
     if (result == B_OK)
-        result = GetAttrMessage(&node, SENSEI_ATTR_MAPPING, &attrMappings);
+        result = GetAttrMessage(&node, sensei::key::kAttrMapping, &attrMappings);
 
     if (result != B_OK) {
         return result;
@@ -617,25 +618,25 @@ status_t RelationHandler::GetPluginConfig(
     // add mapping from plugin's output types to the plugin signature so we can resolve the relation later.
     BMessage typesToPlugins;
     typesToPlugins.AddString(pluginMimeType, pluginSig);
-    pluginConfig->AddMessage(SENSEI_TYPES_PLUGINS_KEY, &typesToPlugins);
+    pluginConfig->AddMessage(sensei::key::kTypesPlugins, &typesToPlugins);
 
     // store default type separately if available for easier access and remove from individual type mappings
     BString defaultType;
-    result = typeMappings.FindString(SENSEI_DEFAULT_TYPE, &defaultType);
+    result = typeMappings.FindString(sensei::key::kDefault, &defaultType);
 
     if (result == B_OK) {
-        pluginConfig->AddString(SENSEI_DEFAULT_TYPE_KEY, defaultType);
+        pluginConfig->AddString(sensei::key::kDefaultType, defaultType);
         // and remove from type mappings
-        typeMappings.RemoveData(SENSEI_DEFAULT_TYPE);
+        typeMappings.RemoveData(sensei::key::kDefault);
     }
 
     // add default attribute mappings if not specified otherwise
-    if (!attrMappings.HasString(SENSEI_LABEL))
-        attrMappings.AddString(SENSEI_LABEL, "SEN:REL:Label");
+    if (!attrMappings.HasString(sensei::key::kLabel))
+        attrMappings.AddString(sensei::key::kLabel, "SEN:REL:Label");
 
     // add mapping configs to plugin config
-    pluginConfig->AddMessage(SENSEI_TYPE_MAPPING, &typeMappings);
-    pluginConfig->AddMessage(SENSEI_ATTR_MAPPING, &attrMappings);
+    pluginConfig->AddMessage(sensei::key::kTypeMapping, &typeMappings);
+    pluginConfig->AddMessage(sensei::key::kAttrMapping, &attrMappings);
 
     return result;
 }
@@ -647,9 +648,9 @@ status_t RelationHandler::GetAttrMessage(const BNode* node, const char* name, BM
 
     if ((result = node->GetAttrInfo(name, &attrInfo)) != B_OK) {
         if (result == B_ENTRY_NOT_FOUND) {
-            ERROR("expected plugin config attribute '%s' not found in plugin.\n", name);
+            spdlog::error("expected plugin config attribute '{}' not found in plugin.", name);
         } else {
-            ERROR("error getting plugin config for '%s' from attribute info for plugin: %s\n",
+            spdlog::error("error getting plugin config for '{}' from attribute info for plugin: {}",
                 name, strerror(result));
         }
         return result;
@@ -664,10 +665,10 @@ status_t RelationHandler::GetAttrMessage(const BNode* node, const char* name, BM
             attrInfo.size);
 
     if (result == 0) {
-        ERROR("no %s config found for plugin.\n", name);
+        spdlog::error("no {} config found for plugin.", name);
         return B_ENTRY_NOT_FOUND;
     } else if (result < 0) {
-        ERROR("failed to read mappings from attribute %s of plugin: %s\n", name, strerror(result));
+        spdlog::error("failed to read mappings from attribute {} of plugin: {}", name, strerror(result));
         return result;
     }
 
@@ -689,7 +690,7 @@ status_t RelationHandler::GetInodeForRef(const entry_ref* srcRef, BString* inode
 		}
 	}
 	if (result != B_OK) {
-		LOG("WARNING: could not get inode for srcRef %s: %s\n", srcRef->name, strerror(result) );
+		spdlog::info("WARNING: could not get inode for srcRef {}: {}", srcRef->name, strerror(result) );
 		// fall back
 		*inode << srcRef->device << "_" << srcRef->directory << "_" << srcRef->name;
         result = B_OK;
@@ -702,17 +703,17 @@ const char* RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
     BNode sourceNode(ref);
     status_t result;
     if ((result = sourceNode.InitCheck()) != B_OK) {
-        ERROR("could not initialize source node %s: %s\n", ref->name, strerror(result));
+        spdlog::error("could not initialize source node {}: {}", ref->name, strerror(result));
         return NULL;
     }
     BNodeInfo sourceInfo(&sourceNode);
     if ((result = sourceInfo.InitCheck()) != B_OK) {
-        ERROR("could not initialize source node info for %s: %s\n", ref->name, strerror(result));
+        spdlog::error("could not initialize source node info for {}: {}", ref->name, strerror(result));
         return NULL;
     }
     char sourceType[B_MIME_TYPE_LENGTH];
     if ((result = sourceInfo.GetType(sourceType)) != B_OK) {
-        ERROR("could not get MIME type for source node %s: %s\n", ref->name, strerror(result));
+        spdlog::error("could not get MIME type for source node {}: {}", ref->name, strerror(result));
         return NULL;
     }
 
