@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 scp -q -P $PORT "$SCRIPT" $USER@$HOST:/tmp/sen-test.sh
 ssh -f -p $PORT $USER@$HOST "chmod +x /tmp/sen-test.sh; DONE=/tmp/sen-test.done OUT=/tmp/sen-test.out /tmp/sen-test.sh >/dev/null 2>&1 </dev/null &" </dev/null
 i=0
-while [ $i -lt 60 ]; do
+while [ $i -lt $(( ${SEN_VM_WAIT:-180} / 3 )) ]; do
 	sleep 3; i=$((i+1))
 	ssh -o ServerAliveInterval=5 -p $PORT $USER@$HOST 'test -f /tmp/sen-test.done' </dev/null && break
 done
