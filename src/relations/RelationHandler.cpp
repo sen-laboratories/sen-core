@@ -559,14 +559,14 @@ status_t RelationHandler::ReadRelationNames(const entry_ref* ref, BStringList* r
 
     while (node.GetNextAttrName(attrName) == B_OK) {
         relationAttr = attrName;
-        // is it a SEN relation?
+        // is it a SEN relation? The properties of a relation have the same prefix (SEN:REL:Label, SEN:REL:ID,... on the file that
+        // stands for a relation in a view): the relations are the types of the relation supertype in the MIME database
         if (relationAttr.StartsWith(sen::attr::kRelationPrefix)) {
-            // add full SEN relation name (=supertype + attribute name) without the SEN:REL prefix
-            relations->Add(BString(sen::mime::kRelationPrefix)
-                           .Append(
-                                relationAttr.Remove(0, sen::attr::kRelationPrefixLength)
-                           )
-                           .String());
+            // the full SEN relation name (= supertype + attribute name) without the SEN:REL prefix
+            BString relationType(sen::mime::kRelationPrefix);
+            relationType.Append(relationAttr.String() + sen::attr::kRelationPrefixLength);
+            if (BMimeType(relationType.String()).IsInstalled())
+                relations->Add(relationType);
         }
     }
 

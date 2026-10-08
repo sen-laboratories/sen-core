@@ -325,9 +325,16 @@ status_t RelationHandler::GetTargetIdParameter(const BMessage* message, BString*
     return GetMessageParameter(message, sen::key::kTargetId, targetId);
 }
 
+/** a relation that is read-only (the property SEN:REL:readonly) can be changed only with the override of the sender */
+static bool
+IsReadOnly(const BMessage& properties)
+{
+    return properties.GetBool(sen::attr::kRelationReadOnly, false);
+}
+
 status_t RelationHandler::RemoveRelationTx(const entry_ref& source, const char* relationType, const char* targetId,
                                            const char* relationId, bool allSets, sen::AttrSnapshot* tx,
-                                           BString* removedRelationId)
+                                           BString* removedRelationId, bool allowReadOnly)
 {
     BMessage forward;
     status_t status = ReadRelationMessage(source, relationType, &forward);
@@ -341,12 +348,21 @@ status_t RelationHandler::RemoveRelationTx(const entry_ref& source, const char* 
             return status;
 
         BMessage removed;
-        if (sen::relation::GetSet(forward, targetId, index, &removed) == B_OK)
+        if (sen::relation::GetSet(forward, targetId, index, &removed) == B_OK) {
+            if (IsReadOnly(removed) && !allowReadOnly)
+                return B_NOT_ALLOWED;
             removedRelationId->SetTo(removed.GetString(sen::key::kRelationId, ""));
+        }
         status = sen::relation::RemoveSet(&forward, targetId, index);
     } else {
-        if (sen::relation::CountSets(forward, targetId) == 0)
+        int32 sets = sen::relation::CountSets(forward, targetId);
+        if (sets == 0)
             return B_NAME_NOT_FOUND;
+        for (int32 set = 0; set < sets && !allowReadOnly; set++) {
+            BMessage each;
+            if (sen::relation::GetSet(forward, targetId, set, &each) == B_OK && IsReadOnly(each))
+                return B_NOT_ALLOWED;
+        }
         status = forward.RemoveName(targetId);
     }
     if (status != B_OK)
@@ -409,7 +425,8 @@ status_t RelationHandler::RemoveRelation(const BMessage* message, BMessage* repl
 
     sen::AttrSnapshot tx;
     BString removedId;
-    status = RemoveRelationTx(source, relationType.String(), targetId.String(), relationId.String(), allSets, &tx, &removedId);
+    status = RemoveRelationTx(source, relationType.String(), targetId.String(), relationId.String(), allSets, &tx, &removedId,
+        message->GetBool(sen::key::kOverride, false));
 
     if (status != B_OK) {
         tx.Restore();
@@ -417,6 +434,8 @@ status_t RelationHandler::RemoveRelation(const BMessage* message, BMessage* repl
             sen::reply::SetStatus(reply, sen::status::kErrAmbiguousRelation);
         else if (status == B_NAME_NOT_FOUND)
             sen::reply::SetStatus(reply, sen::status::kErrRelationNotFound);
+        else if (status == B_NOT_ALLOWED)
+            sen::reply::SetStatus(reply, sen::status::kErrForbidden);
         BString detail("failed to remove relation '");
         detail << relationType << "' from " << source.name << " to " << targetId << ": " << strerror(status);
         sen::reply::SetDetail(reply, detail.String());
@@ -464,7 +483,12 @@ status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* 
 
         for (const std::string& targetId : targets) {
             BString removedId;
-            status = RemoveRelationTx(source, type.String(), targetId.c_str(), "", true, &tx, &removedId);
+            status = RemoveRelationTx(source, type.String(), targetId.c_str(), "", true, &tx, &removedId,
+                message->GetBool(sen::key::kOverride, false));
+            if (status == B_NOT_ALLOWED) {
+                status = B_OK;      // read-only relations stay
+                continue;
+            }
             if (status != B_OK)
                 break;
             removed++;
@@ -529,6 +553,8 @@ status_t RelationHandler::UpdateRelation(const BMessage* message, BMessage* repl
         status = sen::relation::GetSet(forward, targetId.String(), index, &current);
     if (status == B_OK)
         relationId.SetTo(current.GetString(sen::key::kRelationId, ""));
+    if (status == B_OK && IsReadOnly(current) && !message->GetBool(sen::key::kOverride, false))
+        status = B_NOT_ALLOWED;
 
     if (status == B_OK && hasProperties) {
         status = sen::relation::ReplaceSet(&forward, targetId.String(), index, newProperties);
@@ -598,7 +624,8 @@ status_t RelationHandler::UpdateRelation(const BMessage* message, BMessage* repl
                 if (status == B_OK)
                     status = AddRelationTx(source, moveTo, newType, moved, newConfig, &tx, &addedId, &created);
                 if (status == B_OK)
-                    status = RemoveRelationTx(source, relationType, targetId.String(), relationId.String(), false, &tx, &removedId);
+                    status = RemoveRelationTx(source, relationType, targetId.String(), relationId.String(), false, &tx, &removedId,
+                        true);      // the check was done above
                 if (status == B_OK && ! addedId.IsEmpty())
                     reply->AddString(sen::key::kRelationId, addedId);
             }
@@ -611,6 +638,8 @@ status_t RelationHandler::UpdateRelation(const BMessage* message, BMessage* repl
             sen::reply::SetStatus(reply, sen::status::kErrAmbiguousRelation);
         else if (status == B_NAME_NOT_FOUND)
             sen::reply::SetStatus(reply, sen::status::kErrRelationNotFound);
+        else if (status == B_NOT_ALLOWED)
+            sen::reply::SetStatus(reply, sen::status::kErrForbidden);
         sen::reply::SetDetail(reply, (BString("failed to update relation '") << relationType << "' of " << source.name
             << ": " << strerror(status)).String());
         return status;

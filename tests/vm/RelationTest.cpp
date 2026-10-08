@@ -383,6 +383,39 @@ TEST(TargetsAreNamedByTheirTitleNotByTheNameOfTheFile)
 	CHECK_STR(names.GetString(IdOf(f.refs[2]).c_str(), ""), "Short Description");
 }
 
+TEST(ReadOnlyRelationsCannotBeChangedOrRemovedWithoutTheOverride)
+{
+	Fixture f("readonly", 2);
+	BMessage props;
+	props.AddBool(sen::attr::kRelationReadOnly, true);
+	CHECK_EQ(SenStatus(Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1], &props)), sen::status::kCreated);
+	std::string b = IdOf(f.refs[1]);
+
+	// not removed, not changed, not removed with all the others
+	BMessage reply = Send(sen::cmd::kRelationRemove, &f.refs[0], kReference, &f.refs[1]);
+	CHECK_EQ(SenStatus(reply), sen::status::kErrForbidden);
+	BMessage other;
+	other.AddString(sen::attr::kRelationLabel, "changed");
+	reply = Send(sen::cmd::kRelationUpdate, &f.refs[0], kReference, &f.refs[1], &other);
+	CHECK_EQ(SenStatus(reply), sen::status::kErrForbidden);
+	Send(sen::cmd::kRelationsRemoveAll, &f.refs[0], NULL);
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 1);
+	BMessage kept;
+	CHECK(Stored(f.refs[0], kReference).FindMessage(b.c_str(), &kept) == B_OK);
+	CHECK(kept.GetBool(sen::attr::kRelationReadOnly, false));
+
+	// the installer of the ontologies can
+	BMessage remove(sen::cmd::kRelationRemove);
+	remove.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	remove.AddString(sen::key::kRelationType, kReference);
+	remove.AddRef(sen::key::kTargetRef, &f.refs[1]);
+	remove.AddBool(sen::key::kOverride, true);
+	BMessage removed;
+	BMessenger(sen::kServerSignature).SendMessage(&remove, &removed, 10000000, 10000000);
+	CHECK_EQ(SenStatus(removed), sen::status::kOk);
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 0);
+}
+
 int
 main()
 {

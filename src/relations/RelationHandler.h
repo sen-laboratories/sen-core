@@ -107,7 +107,8 @@ private:
                                   const BMessage& properties, const BMessage& relationConfig, sen::AttrSnapshot* tx,
                                   BString* relationId, bool* created);
         status_t    RemoveRelationTx(const entry_ref& source, const char* relationType, const char* targetId,
-                                     const char* relationId, bool allSets, sen::AttrSnapshot* tx, BString* removedRelationId);
+                                     const char* relationId, bool allSets, sen::AttrSnapshot* tx, BString* removedRelationId,
+                                     bool allowReadOnly = false);
         status_t    GetTargetIdParameter(const BMessage* message, BString* targetId);
         bool        ShouldWriteInverse(const BMessage& relationConfig, const BString& sourceType, const BString& targetType);
         BMessage    InverseProperties(const BMessage& relationConfig, const BMessage& properties);
