@@ -5,13 +5,12 @@
 # Live test in a Haiku VM: sen_server runs as a service, relations are made on real files through it, and the SENryu Tracker
 # (built by sento/tools/tracker-vm-build.sh) runs next to it: it must start, open a window and not crash. Takes a screenshot to
 # $OUT_DIR. The system Tracker is stopped for the test and started again at the end (the VM's desktop needs it).
-# Needs: built sen_server, core ontology installed, a Tracker build in /Develop/haiku-senryu, a PDF in $TEST_DIR.
+# Needs: built sen_server, core ontology installed, a built Akita (AKITA, default /Develop/SEN/akita/bin).
 # Started by run.sh live.sh (results are collected from $OUT).
 
 TEST_DIR=${TEST_DIR:-/Develop/test}
 SERVER=${SERVER:-/Develop/SEN/sen-core/bin/sen_server}
-BUILD=${BUILD:-/Develop/haiku-senryu/generated/objects/haiku/x86_64/release}
-RUN=/Develop/akita-run
+AKITA=${AKITA:-/Develop/SEN/akita/bin}		# the built Tracker: Akita and lib/libtracker.so, see the akita repository
 LIVE=$TEST_DIR/_live
 OUT=${OUT:-/tmp/sen-live.out}
 DONE=${DONE:-/tmp/sen-live.done}
@@ -36,7 +35,7 @@ check "server answers" "hey $SIG SCst | grep -q operational"
 
 echo "== relations on real files"
 rm -rf $LIVE; mkdir -p $LIVE; cd $LIVE
-cp $TEST_DIR/bm1.pdf paper.pdf
+printf '%%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 5 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n5 0 obj << /Type /Outlines /First 6 0 R /Last 6 0 R /Count 1 >> endobj\n6 0 obj << /Title (Intro) /Parent 5 0 R /Dest [3 0 R /Fit] >> endobj\ntrailer << /Root 1 0 R /Size 7 >>\n%%%%EOF\n' > paper.pdf
 printf '# Notes\n\nabout the paper\n' > notes.md
 printf 'a text\n' > extra.txt
 hey $SIG SRad with refs=$LIVE/notes.md and SEN:relationType=relation/x-vnd.sen-labs.relation.reference and SEN:targetRef=$LIVE/paper.pdf > $OUT_DIR/add1.txt 2>&1
@@ -49,14 +48,12 @@ check "all relations of the source are returned" "grep -q 'relation/x-vnd.sen-la
 hey $SIG SRsa with refs=$LIVE/paper.pdf > $OUT_DIR/self.txt 2>&1
 check "contained relations of the PDF come from the extractor plugin" "grep -q 'relation.docref' $OUT_DIR/self.txt"
 
-echo "== the SENryu Tracker next to the server"
-mkdir -p $RUN/lib
-cp $BUILD/kits/tracker/libtracker.so $RUN/lib/ && cp $BUILD/apps/tracker/Tracker $RUN/Akita
-check "the Tracker build is there" "[ -x $RUN/Akita ]"
+echo "== Akita next to the server"
+check "the Tracker build is there" "[ -x $AKITA/Akita ]"
 launch_roster stop x-vnd.be-trak > /dev/null 2>&1
 sleep 2
 export LIBRARY_PATH=%A/lib:/boot/home/config/non-packaged/lib:/boot/home/config/lib:/boot/system/non-packaged/lib:/boot/system/lib
-( cd $RUN && ./Akita $LIVE > $OUT_DIR/tracker.log 2>&1 & )
+( cd $AKITA && ./Akita $LIVE > $OUT_DIR/tracker.log 2>&1 & )
 sleep 8
 check "the Tracker is running" "ps | grep -q '[A]kita'"
 screenshot -s -f png $OUT_DIR/window.png

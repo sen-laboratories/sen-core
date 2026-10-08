@@ -20,6 +20,7 @@
 
 #include "RelationHandler.h"
 #include "QueryUtil.h"
+#include "../server/Reply.h"
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
 #include <spdlog/spdlog.h>
@@ -322,6 +323,11 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
         return result;
     }
 
+    if (spdlog::should_log(spdlog::level::debug)) {
+        spdlog::debug("reply of plugin {}:", pluginSig);
+        pluginReply.PrintToStream();
+    }
+
     // remove plugin result code
     pluginReply.RemoveName(sensei::key::kResult);
 
@@ -350,6 +356,17 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     result = pluginReply.FindMessage(sensei::key::kItem, &rootNode);
     if (result != B_OK) {
         result = pluginReply.FindMessage(sen::key::kRelations, &rootNode);
+    }
+
+    if (result == B_NAME_NOT_FOUND) {
+        // the plugin found nothing (a document without bookmarks, a source file without includes): that is an empty
+        // result, not an error
+        spdlog::info("plugin {} found no relations in {}.", pluginSig, sourceRef->name);
+        reply->what = sensei::cmd::kResult;
+        reply->AddRef("refs", sourceRef);
+        sen::reply::SetStatus(reply, sen::status::kNoContent);
+        sen::reply::SetDetail(reply, "no relations found");
+        return B_OK;
     }
 
     if (result == B_OK)
