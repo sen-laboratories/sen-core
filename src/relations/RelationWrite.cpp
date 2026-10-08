@@ -165,7 +165,8 @@ BMessage RelationHandler::InverseProperties(const BMessage& relationConfig, cons
 
 status_t RelationHandler::AddRelationTx(const entry_ref& source, const entry_ref& target, const char* relationType,
                                         const BMessage& properties, const BMessage& relationConfig,
-                                        sen::AttrSnapshot* tx, BString* relationId, bool* created)
+                                        sen::AttrSnapshot* tx, BString* relationId, bool* created,
+                                        const BMessage* inverseProperties)
 {
     *created = false;
 
@@ -211,7 +212,21 @@ status_t RelationHandler::AddRelationTx(const entry_ref& source, const entry_ref
             return status;
 
         BString inverseId;
-        status = sen::relation::AddSet(&inverse, sourceId, InverseProperties(relationConfig, properties), &inverseId);
+        // the opposite direction gets what the relation says about it (its own label...), over what follows from the relation
+        BMessage inverseSet = InverseProperties(relationConfig, properties);
+        if (inverseProperties != NULL) {
+            char* name;
+            type_code type;
+            for (int32 i = 0; inverseProperties->GetInfo(B_ANY_TYPE, i, &name, &type) == B_OK; i++) {
+                const void* data;
+                ssize_t size;
+                if (inverseProperties->FindData(name, type, &data, &size) == B_OK) {
+                    inverseSet.RemoveName(name);
+                    inverseSet.AddData(name, type, data, size);
+                }
+            }
+        }
+        status = sen::relation::AddSet(&inverse, sourceId, inverseSet, &inverseId);
         if (status != B_OK && status != B_NAME_IN_USE)
             return status;
 
@@ -279,7 +294,10 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
     sen::AttrSnapshot tx;
     BString relationId;
     bool created = false;
-    status = AddRelationTx(source, target, relationType, properties, relationConfig, &tx, &relationId, &created);
+    BMessage inverseProperties;
+    bool hasInverseProperties = message->FindMessage(sen::key::kInverseProperties, &inverseProperties) == B_OK;
+    status = AddRelationTx(source, target, relationType, properties, relationConfig, &tx, &relationId, &created,
+        hasInverseProperties ? &inverseProperties : NULL);
 
     if (status != B_OK) {
         tx.Restore();

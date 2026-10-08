@@ -105,7 +105,7 @@ private:
                                      sen::AttrSnapshot* tx);
         status_t    AddRelationTx(const entry_ref& source, const entry_ref& target, const char* relationType,
                                   const BMessage& properties, const BMessage& relationConfig, sen::AttrSnapshot* tx,
-                                  BString* relationId, bool* created);
+                                  BString* relationId, bool* created, const BMessage* inverseProperties = NULL);
         status_t    RemoveRelationTx(const entry_ref& source, const char* relationType, const char* targetId,
                                      const char* relationId, bool allSets, sen::AttrSnapshot* tx, BString* removedRelationId,
                                      bool allowReadOnly = false);

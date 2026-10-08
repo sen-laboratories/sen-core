@@ -432,6 +432,30 @@ TEST(ThePropertiesOfARelationFileAreNotRelations)
 	CHECK(!BMimeType("relation/id").IsInstalled());
 }
 
+TEST(TheOppositeDirectionCanGetItsOwnLabelWhenAdded)
+{
+	Fixture f("inverse", 2);
+	BMessage props, inverse;
+	props.AddString(sen::attr::kRelationLabel, "provides");
+	inverse.AddString(sen::attr::kRelationLabel, "provided by");
+
+	BMessage add(sen::cmd::kRelationAdd);
+	add.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	add.AddString(sen::key::kRelationType, kReference);
+	add.AddRef(sen::key::kTargetRef, &f.refs[1]);
+	add.AddMessage(sen::key::kRelationProperties, &props);
+	add.AddMessage(sen::key::kInverseProperties, &inverse);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&add, &reply, 10000000, 10000000);
+	CHECK_EQ(SenStatus(reply), sen::status::kCreated);
+
+	BMessage forward, opposite;
+	CHECK(Stored(f.refs[0], kReference).FindMessage(IdOf(f.refs[1]).c_str(), &forward) == B_OK);
+	CHECK(Stored(f.refs[1], kReference).FindMessage(IdOf(f.refs[0]).c_str(), &opposite) == B_OK);
+	CHECK_STR(forward.GetString(sen::attr::kRelationLabel, ""), "provides");
+	CHECK_STR(opposite.GetString(sen::attr::kRelationLabel, ""), "provided by");
+}
+
 int
 main()
 {
