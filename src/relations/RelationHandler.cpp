@@ -561,7 +561,10 @@ status_t RelationHandler::ReadRelationNames(const entry_ref* ref, BStringList* r
         relationAttr = attrName;
         // is it a SEN relation? The properties of a relation have the same prefix (SEN:REL:Label, SEN:REL:ID,... on the file that
         // stands for a relation in a view): the relations are the types of the relation supertype in the MIME database
-        if (relationAttr.StartsWith(sen::attr::kRelationPrefix)) {
+        // (and a relation is a message, which a property is not: a type that was installed by mistake does not make a property one)
+        attr_info attrInfo;
+        if (relationAttr.StartsWith(sen::attr::kRelationPrefix) && node.GetAttrInfo(attrName, &attrInfo) == B_OK
+                && attrInfo.type == B_MESSAGE_TYPE) {
             // the full SEN relation name (= supertype + attribute name) without the SEN:REL prefix
             BString relationType(sen::mime::kRelationPrefix);
             relationType.Append(relationAttr.String() + sen::attr::kRelationPrefixLength);

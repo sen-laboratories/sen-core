@@ -416,6 +416,22 @@ TEST(ReadOnlyRelationsCannotBeChangedOrRemovedWithoutTheOverride)
 	CHECK_EQ(Sets(f.refs[0], kReference, b), 0);
 }
 
+TEST(ThePropertiesOfARelationFileAreNotRelations)
+{
+	// the file of a relation in a view has the properties of the relation as attributes, with the prefix of the relations
+	Fixture f("properties", 1);
+	BNode node(&f.refs[0]);
+	node.WriteAttrString("SEN:REL:Label", new BString("provides"));
+	node.WriteAttrString("SEN:REL:ID", new BString("12345"));
+	node.WriteAttrString("SEN:REL:TO", new BString("_self"));
+
+	BMessage reply = Send(sen::cmd::kRelationsGetAll, &f.refs[0], NULL);
+	CHECK(!reply.HasString(sen::key::kRelations));
+	// asking for them does not make them relation types
+	CHECK(!BMimeType("relation/label").IsInstalled());
+	CHECK(!BMimeType("relation/id").IsInstalled());
+}
+
 int
 main()
 {
