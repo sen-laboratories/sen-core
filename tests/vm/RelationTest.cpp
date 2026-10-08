@@ -358,6 +358,31 @@ TEST(OnlyRelationsThatFitTheTypeOfTheFileAreOffered)
 		CHECK(OffersRelation(f.refs[0], kTransitionTo));
 }
 
+TEST(TargetsAreNamedByTheirTitleNotByTheNameOfTheFile)
+{
+	Fixture f("names", 3);
+	// the second file has a title, the third is a type of the MIME database with a short description (here: any file with one)
+	BNode titled(&f.refs[1]);
+	titled.WriteAttrString("dc:title", new BString("A Title"));
+	BNode described(&f.refs[2]);
+	described.WriteAttrString("META:S:DESC", new BString("Short Description"));
+
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[2]);
+
+	BMessage ask(sen::cmd::kRelationsGet);
+	ask.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	ask.AddString(sen::key::kRelationType, kReference);
+	ask.AddBool(sen::key::kIdToRefMap, true);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+
+	BMessage names;
+	CHECK(reply.FindMessage(sen::key::kIdToNameMap, &names) == B_OK);
+	CHECK_STR(names.GetString(IdOf(f.refs[1]).c_str(), ""), "A Title");
+	CHECK_STR(names.GetString(IdOf(f.refs[2]).c_str(), ""), "Short Description");
+}
+
 int
 main()
 {

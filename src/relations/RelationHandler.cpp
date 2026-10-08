@@ -418,9 +418,19 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     if (GetOrCreateId(&sourceRef, sourceId, false) == B_OK)
         reply->AddString(sen::key::kSourceId, sourceId);
 
-    // hand back filled in id_to_ref map if it was passed in
+    // hand back filled in id_to_ref map if it was passed in, with the names to show for the targets
     if (returnIdToRefMap) {
         reply->AddMessage(sen::key::kIdToRefMap, &idToRefMap);
+
+        BMessage idToNameMap;
+        char* targetId;
+        type_code targetType;
+        entry_ref targetRef;
+        for (int32 i = 0; idToRefMap.GetInfo(B_REF_TYPE, i, &targetId, &targetType) == B_OK; i++) {
+            if (idToRefMap.FindRef(targetId, &targetRef) == B_OK)
+                idToNameMap.AddString(targetId, DisplayNameOf(targetRef));
+        }
+        reply->AddMessage(sen::key::kIdToNameMap, &idToNameMap);
     }
 
     reply->AddInt32("count", numberOfRelations);
@@ -581,6 +591,23 @@ status_t RelationHandler::ResolveRelationPropertyTargetIds(const BMessage* relat
     }
 
     return result;
+}
+
+/**
+ * The name to show for a file in a menu or a folder of relations: its title (dc:title) where it has one; for the type of a
+ * MIME database (a file there), the short description of the type, not the name of the type; else the name of the file.
+ */
+BString RelationHandler::DisplayNameOf(const entry_ref& ref)
+{
+    BNode node(&ref);
+    BString name;
+    if (node.InitCheck() == B_OK) {
+        for (const char* attribute : {"dc:title", "META:S:DESC"}) {
+            if (node.ReadAttrString(attribute, &name) == B_OK && !name.IsEmpty())
+                return name;
+        }
+    }
+    return BString(ref.name);
 }
 
 status_t RelationHandler::ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs)

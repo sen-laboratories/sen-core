@@ -93,6 +93,8 @@ private:
                                                 BMessage* idToRefMap = NULL, BStringList* targetIds = NULL);
         status_t    ReadRelationNames(const entry_ref* ref, BStringList* relations);
         status_t    ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs);
+        /** the name to show for a target: its title, the short description of a MIME type, else its file name */
+        static BString DisplayNameOf(const entry_ref& ref);
         status_t    ResolveRelationPropertyTargetIds(const BMessage* relationProperties, BStringList* ids);
 
         // write/delete (RelationWrite.cpp); every operation is all-or-nothing, see sen::AttrSnapshot
