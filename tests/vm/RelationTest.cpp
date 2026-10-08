@@ -9,6 +9,9 @@
  * and a Haiku to run on. Every test works in its own folder below $TEST_DIR/_senrel and removes it.
  */
 
+#include <MimeType.h>
+#include <string.h>
+
 #include "TestHarness.h"
 #include "TestSupport.h"
 
@@ -315,6 +318,44 @@ TEST(MessagesWithoutTheRequiredParametersAreAnswered)
 	CHECK(SenStatus(reply) >= 400);
 	// the server is still there
 	CHECK(BMessenger(sen::kServerSignature).IsValid());
+}
+
+// ---- the relations that a new relation can be of
+
+static bool
+OffersRelation(const entry_ref& ref, const char* type)
+{
+	BMessage reply = Send(sen::cmd::kRelationsGetCompatible, &ref, NULL);
+	const char* offered;
+	for (int32 index = 0; reply.FindString(sen::key::kRelations, index, &offered) == B_OK; index++) {
+		if (strcmp(offered, type) == 0)
+			return true;
+	}
+	return false;
+}
+
+TEST(OnlyRelationsThatFitTheTypeOfTheFileAreOffered)
+{
+	Fixture f("compatible", 1);
+	const char* kDocumentReference = "relation/x-vnd.sen-labs.relation.docref";
+	const char* kTransitionTo = "relation/x-vnd.sen-labs.relation.music.transition.to";
+
+	BNode node(&f.refs[0]);
+	BNodeInfo info(&node);
+	CHECK(info.SetType("text/plain") == B_OK);
+
+	// a generic reference is possible from any file
+	CHECK(OffersRelation(f.refs[0], kReference));
+	// what is resolved at run time (a plugin finds it in the document) is not created by hand
+	CHECK(!OffersRelation(f.refs[0], kDocumentReference));
+	// a relation for songs is not offered at a text
+	CHECK(!OffersRelation(f.refs[0], kTransitionTo));
+
+	// but at an audio file, if the music ontology is installed
+	CHECK(info.SetType("audio/x-wav") == B_OK);
+	CHECK(OffersRelation(f.refs[0], kReference));
+	if (BMimeType(kTransitionTo).IsInstalled())
+		CHECK(OffersRelation(f.refs[0], kTransitionTo));
 }
 
 int

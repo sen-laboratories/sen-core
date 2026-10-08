@@ -189,6 +189,35 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
     return status;
 }
 
+/**
+ * Whether a relation can be created at a file of this type. A relation that is resolved at run time (dynamic) is never created
+ * by hand. A relation can name the types of files that it can start at (SEN:sourceTypes, without: any file) and the types that
+ * it cannot start at (SEN:excludeSourceTypes, which wins). A type is a MIME type or the start of one, e.g. a supertype
+ * ("audio"), like the filters for the templates of a new file (see TemplateUtils in Tracker).
+ */
+static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* sourceType)
+{
+    if (relationConfig.GetBool(sen::conf::kDynamic, false))
+        return false;
+
+    auto matches = [&](const char* field, int32* count) {
+        bool found = false;
+        const char* pattern;
+        *count = 0;
+        for (int32 index = 0; relationConfig.FindString(field, index, &pattern) == B_OK; index++) {
+            (*count)++;
+            found = found || BString(sourceType).IStartsWith(pattern);
+        }
+        return found;
+    };
+
+    int32 includes, excludes;
+    bool included = matches(sen::conf::kSourceTypes, &includes);
+    bool excluded = matches(sen::conf::kExcludeSourceTypes, &excludes);
+
+    return (includes == 0 || included) && !excluded;
+}
+
 status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
@@ -198,7 +227,8 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         return status;
     }
 
-    BNodeInfo nodeInfo(new BNode(&sourceRef));
+    BNode sourceNode(&sourceRef);
+    BNodeInfo nodeInfo(&sourceNode);
     status = nodeInfo.InitCheck();
     if (status != B_OK) {
         spdlog::error("could not resolve entryRef '{}': {}", sourceRef.name, strerror(status));
@@ -206,7 +236,14 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
     }
 
     char mimeType[B_MIME_TYPE_LENGTH];
-    nodeInfo.GetType(mimeType);
+    if (nodeInfo.GetType(mimeType) != B_OK || mimeType[0] == '\0') {
+        // a file without a type: what the MIME database makes of its name and content
+        BMimeType guessed;
+        if (BMimeType::GuessMimeType(&sourceRef, &guessed) == B_OK)
+            strlcpy(mimeType, guessed.Type(), sizeof(mimeType));
+        else
+            strlcpy(mimeType, "application/octet-stream", sizeof(mimeType));
+    }
     spdlog::info("searching for relations compatible with {}...", mimeType);
 
     BMessage relationTypes;
@@ -216,32 +253,41 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         return status;
     }
 
-    spdlog::info("found relations:");
-    relationTypes.PrintToStream();
+    BStringList installed;
+    relationTypes.FindStrings("types", &installed);  // as per MimeType API spec
 
-    BStringList types;
-    relationTypes.FindStrings("types", &types);  // as per MimeType API spec
-
-    // optionally get relation configs
-    bool withConfigs = message->GetBool(sen::key::kWithConfigs, true);
-
-    if (withConfigs) {
-        BMessage relationConfigs;
-        status = GetRelationConfigs(&types, &relationConfigs);
-        if (status == B_OK) {
-            reply->AddMessage(sen::key::kRelationConfigMap, &relationConfigs);
-        } else {
-            spdlog::error("could not get relation configs for compatible relations: {}", strerror(status));
-        }
+    // the configs tell which relations fit this file (and are handed on if wanted)
+    BMessage allConfigs;
+    status_t configStatus = GetRelationConfigs(&installed, &allConfigs);
+    if (configStatus != B_OK) {
+        spdlog::error("could not get relation configs for compatible relations: {}", strerror(configStatus));
     }
 
-    // todo: filter out relations that exclude this type
+    BStringList types;
+    BMessage relationConfigs;
+    for (int32 index = 0; index < installed.CountStrings(); index++) {
+        const BString& type = installed.StringAt(index);
+        BMessage config;
+        // a relation without a config (not registered yet) has no restrictions
+        if (allConfigs.FindMessage(type.String(), &config) == B_OK && !IsCompatibleWithSource(config, mimeType)) {
+            spdlog::debug("relation {} is not compatible with {}.", type.String(), mimeType);
+            continue;
+        }
+        types.Add(type);
+        if (!config.IsEmpty())
+            relationConfigs.AddMessage(type.String(), &config);
+    }
+
+    // optionally get relation configs
+    if (message->GetBool(sen::key::kWithConfigs, true) && configStatus == B_OK)
+        reply->AddMessage(sen::key::kRelationConfigMap, &relationConfigs);
+
     reply->what = sen::cmd::kReplyRelations;
     reply->AddStrings(sen::key::kRelations, types);
     reply->AddString(sen::key::kDetail, BString("got ")
-                    << types.CountStrings() << " relation(s) from " << sourceRef.name);
+                    << types.CountStrings() << " relation(s) compatible with " << mimeType << " from " << sourceRef.name);
 
-    return status;
+    return B_OK;
 }
 
 status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, bool withConfigs, BMessage* reply)
