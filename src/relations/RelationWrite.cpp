@@ -483,6 +483,7 @@ status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* 
 
     sen::AttrSnapshot tx;
     int32 removed = 0;
+    bool staleOnly = message->GetBool(sen::key::kStaleOnly, false);
 
     for (int32 t = 0; t < types.CountStrings() && status == B_OK; t++) {
         const BString& type = types.StringAt(t);
@@ -500,9 +501,24 @@ status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* 
             targets.push_back(name);
 
         for (const std::string& targetId : targets) {
+            // only what is stale, if asked: what is read-only (those of the ontologies) or points to a file that is gone, not the relations
+            // that users made to files that are there
+            if (staleOnly) {
+                int32 sets = sen::relation::CountSets(relations, targetId.c_str());
+                bool allReadOnly = sets > 0;
+                for (int32 set = 0; set < sets && allReadOnly; set++) {
+                    BMessage each;
+                    allReadOnly = sen::relation::GetSet(relations, targetId.c_str(), set, &each) == B_OK && IsReadOnly(each);
+                }
+                entry_ref targetRef;
+                bool gone = QueryForUniqueSenId(targetId.c_str(), &targetRef) != B_OK;
+                if (!allReadOnly && !gone)
+                    continue;
+            }
+
             BString removedId;
             status = RemoveRelationTx(source, type.String(), targetId.c_str(), "", true, &tx, &removedId,
-                message->GetBool(sen::key::kOverride, false));
+                staleOnly || message->GetBool(sen::key::kOverride, false));
             if (status == B_NOT_ALLOWED) {
                 status = B_OK;      // read-only relations stay
                 continue;
