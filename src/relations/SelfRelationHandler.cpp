@@ -3,6 +3,7 @@
  * SPDX-FileCopyrightText: 2024-2026 SEN Labs e.U.
  */
 
+#include "../server/Dump.h"
 #include <cassert>
 
 #include <AppFileInfo.h>
@@ -46,7 +47,7 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     }
 
     spdlog::info("got types/plugins config for source type {}:", sourceType);
-    pluginConfig.PrintToStream();
+    sen::DumpMessage(pluginConfig);
 
     reply->what = sensei::cmd::kResult;
     reply->AddMessage(sensei::key::kPluginConfig, new BMessage(pluginConfig));
@@ -156,7 +157,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     }
 
     spdlog::info("* got plugin config:");
-    pluginConfig.PrintToStream();
+    sen::DumpMessage(pluginConfig);
     // TODO: merge optional relation config provided in plugin config into MIME relation config
 
     // client may send the desired plugin signature already, saving us the hassle
@@ -293,7 +294,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     refsMsg.AddBool(sen::conf::kSelf, true);
 
     spdlog::info("Sending refs to plugin {}:", pluginSig);
-    refsMsg.PrintToStream();
+    sen::DumpMessage(refsMsg);
 
     BMessenger pluginMessenger(pluginSig, pluginTeam);
     BMessage   pluginReply;
@@ -311,7 +312,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     // check result from communication
     if (result != B_OK) {
         spdlog::error("failed to communicate with plugin {}: {}", pluginSig, strerror(result));
-        pluginReply.PrintToStream();
+        sen::DumpMessage(pluginReply);
         return result;
     }
 
@@ -319,14 +320,12 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     result = pluginReply.GetInt32("result", B_OK);
     if (result != B_OK) {
         spdlog::error("error in plugin execution: {}", strerror(result));
-        pluginReply.PrintToStream();
+        sen::DumpMessage(pluginReply);
         return result;
     }
 
-    if (spdlog::should_log(spdlog::level::debug)) {
-        spdlog::debug("reply of plugin {}:", pluginSig);
-        pluginReply.PrintToStream();
-    }
+    spdlog::debug("reply of plugin {}:", pluginSig);
+    sen::DumpMessage(pluginReply);
 
     // remove plugin result code
     pluginReply.RemoveName(sensei::key::kResult);
@@ -374,7 +373,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
 
     if (result != B_OK) {
         spdlog::error("could not transform plugin result: {}\nResult so far:", strerror(result));
-        pluginReplyTransformed.PrintToStream();
+        sen::DumpMessage(pluginReplyTransformed);
         return result;
     }
 
@@ -583,7 +582,7 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
 
     spdlog::info("found {} suitable plugins.", pluginCount);
     spdlog::info("plugin output map is:");
-    pluginConfig->PrintToStream();
+    sen::DumpMessage(pluginConfig);
 
     return B_OK;
 }

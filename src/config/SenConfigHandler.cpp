@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2020-2026 SEN Labs e.U.
  */
+#include "../server/Dump.h"
 #include "SenConfigHandler.h"
 #include <sen/Sen.h>
 
@@ -82,7 +83,7 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
         }
     }
     spdlog::info("successfully retrieved settings:");
-    settingsMessage->PrintToStream();
+    sen::DumpMessage(settingsMessage);
 
     return status;
 }
@@ -192,7 +193,7 @@ void SenConfigHandler::MessageReceived(BMessage* message)
 	status_t status = B_OK;
 
     spdlog::info("in SEN ConfigHandler::MessageReceived");
-    message->PrintToStream();
+    sen::DumpMessage(message);
 
     // for now, we always need these same parameters for context
     // if optional context is empty, use global default context
@@ -218,7 +219,7 @@ void SenConfigHandler::MessageReceived(BMessage* message)
     sen::reply::Finish(reply, status);
 
     spdlog::info("SEN ConfigHandler sending reply:");
-    reply->PrintToStream();
+    sen::DumpMessage(reply);
 
 	message->SendReply(reply);
 }

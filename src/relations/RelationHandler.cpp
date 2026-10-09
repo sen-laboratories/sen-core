@@ -3,6 +3,7 @@
  * SPDX-FileCopyrightText: 2020-2026 SEN Labs e.U.
  */
 
+#include "../server/Dump.h"
 #include <AppFileInfo.h>
 #include <cassert>
 #include <fs_attr.h>
@@ -39,7 +40,7 @@ void RelationHandler::MessageReceived(BMessage* message)
     status_t result = B_OK;
 
     spdlog::info("RelationHandler got message:");
-    message->PrintToStream();
+    sen::DumpMessage(message);
 
     // optionally get relation configs
     bool withConfigs = message->GetBool(sen::key::kWithConfigs);
@@ -132,7 +133,7 @@ void RelationHandler::MessageReceived(BMessage* message)
     }
 
     sen::reply::Finish(reply, result);
-    reply->PrintToStream();
+    sen::DumpMessage(reply);
 
     message->SendReply(reply);
 }
@@ -437,7 +438,7 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     reply->AddString(sen::key::kDetail, BString("retrieved ") << numberOfRelations
                  << " relations from " << sourceRef.name);
 
-    reply->PrintToStream();
+    sen::DumpMessage(reply);
 
     return B_OK;
 }
@@ -584,7 +585,7 @@ status_t RelationHandler::ResolveRelationPropertyTargetIds(const BMessage* relat
     status_t    result = B_OK;
 
     spdlog::info("extracting targetIds from relation properties:");
-    relationProperties->PrintToStream();
+    sen::DumpMessage(relationProperties);
 
     for (int i = 0; i < relationProperties->CountNames(B_MESSAGE_TYPE); i++){
         result = relationProperties->GetInfo(B_MESSAGE_TYPE, i, &idKey, &typeCode, &propCount);
@@ -715,7 +716,7 @@ status_t RelationHandler::GetRelationConfigs(const BStringList* relations, BMess
         status = GetRelationConfig(relation.String(), &relationConf);
 
         spdlog::info("got relation config for type {}:", relation.String());
-        relationConf.PrintToStream();
+        sen::DumpMessage(relationConf);
 
         if (status == B_OK) {
             status = relationConfigs->AddMessage(relation.String(), &relationConf);
@@ -726,7 +727,7 @@ status_t RelationHandler::GetRelationConfigs(const BStringList* relations, BMess
     }
 
     spdlog::info("collected relation configs in msg:");
-    relationConfigs->PrintToStream();
+    sen::DumpMessage(relationConfigs);
 
     return status;
 }
@@ -856,7 +857,7 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
 
     relationInfo.AddString(sen::key::kRelationName, shortName);
     spdlog::info("local relationInfo:");
-    relationInfo.PrintToStream();
+    sen::DumpMessage(relationInfo);
 
     relationConfig->Append(relationInfo);
 
