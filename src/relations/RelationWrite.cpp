@@ -192,7 +192,7 @@ status_t RelationHandler::AddRelationTx(const entry_ref& source, const entry_ref
     // different places in the referenced text), see RelationSets.h
     status = sen::relation::AddSet(&forward, targetId, properties, relationId);
     if (status == B_NAME_IN_USE) {
-        spdlog::info("relation {} to {} with the same properties exists already.", relationType, targetId);
+        spdlog::debug("relation {} to {} with the same properties exists already.", relationType, targetId);
         return B_OK;
     }
     if (status != B_OK)

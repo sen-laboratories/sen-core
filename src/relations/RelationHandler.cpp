@@ -39,7 +39,7 @@ void RelationHandler::MessageReceived(BMessage* message)
     BMessage* reply = new BMessage(sen::cmd::kReplyRelations);
     status_t result = B_OK;
 
-    spdlog::info("RelationHandler got message:");
+    spdlog::debug("RelationHandler got message:");
     sen::DumpMessage(message);
 
     // optionally get relation configs
@@ -75,10 +75,10 @@ void RelationHandler::MessageReceived(BMessage* message)
 
             if (result == B_OK || result == B_NAME_NOT_FOUND) {     // e.g. for templates, search compatible relations
                 if (relationType == sen::mime::kAssociationRelation) {      //      in that case, relationType is empty
-                    spdlog::info("resolving compatible targets...");
+                    spdlog::debug("resolving compatible targets...");
                     result = GetCompatibleTargetTypes(relationType, withConfigs, reply);
                 } else {
-                    spdlog::info("resolving compatible relations...");
+                    spdlog::debug("resolving compatible relations...");
                     relationType = "<any>";
                     result = GetCompatibleRelations(message, reply);
                 }
@@ -121,13 +121,13 @@ void RelationHandler::MessageReceived(BMessage* message)
         }
         default:
         {
-            spdlog::info("RelationHandler: unkown message received: {}", message->what);
+            spdlog::warn("RelationHandler: unkown message received: {}", message->what);
             reply->AddString(sen::key::kDetail, "cannot handle this message.");
         }
     }
 
     if (result == B_OK) {
-        spdlog::info("RelationHandler sending successful reply with message:");
+        spdlog::debug("RelationHandler sending successful reply with message:");
     } else {
         spdlog::error("RelationHandler encountered an error while processing the request: {}", strerror(result));
     }
@@ -160,7 +160,7 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
         // add all properties of all relations found above and add to result per type for lookup
         for (int i = 0; i < relationNames.CountStrings(); i++) {
             BString relation = relationNames.StringAt(i);
-            spdlog::info("adding properties of relation {}...", relation.String());
+            spdlog::debug("adding properties of relation {}...", relation.String());
 
             BMessage relations;
             status = ReadRelationsOfType(&sourceRef, relation.String(), &relations);
@@ -245,7 +245,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         else
             strlcpy(mimeType, "application/octet-stream", sizeof(mimeType));
     }
-    spdlog::info("searching for relations compatible with {}...", mimeType);
+    spdlog::debug("searching for relations compatible with {}...", mimeType);
 
     BMessage relationTypes;
     status = BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &relationTypes);
@@ -293,13 +293,13 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
 
 status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, bool withConfigs, BMessage* reply)
 {
-    spdlog::info("searching for types compatible with relation {}...", relationType.String());
+    spdlog::debug("searching for types compatible with relation {}...", relationType.String());
     BMessage targetTypes;
     status_t status;
 
     // associations are meta relations and handled slightly differently, here we always take the meta/ types only
     if ((relationType == sen::mime::kAssociationRelation) || (relationType.StartsWith(sen::mime::kClassificationPrefix)) ) {
-        spdlog::info("resolving compatible association types...");
+        spdlog::debug("resolving compatible association types...");
 
         status = BMimeType::GetInstalledTypes(sen::mime::kClassificationSupertype, &targetTypes);
 
@@ -308,7 +308,7 @@ status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, 
                 strerror(status));
         }
     } else {
-        spdlog::info("using available template types allowed by relation.");
+        spdlog::debug("using available template types allowed by relation.");
         // todo: filter out targets excluded by relation type
     }
 
@@ -465,7 +465,7 @@ status_t RelationHandler::ReadRelationsOfType(
     // read relation config as message from respective relation attribute
     BString attrName;
     GetAttributeNameForRelation(relationType, &attrName);
-    spdlog::info("checking file '{}' for relation {} in atttribute {}", sourceRef->name, relationType, attrName.String());
+    spdlog::debug("checking file '{}' for relation {} in atttribute {}", sourceRef->name, relationType, attrName.String());
 
     attr_info attrInfo;
     if ((status = node.GetAttrInfo(attrName.String(), &attrInfo)) != B_OK) {
@@ -474,7 +474,7 @@ status_t RelationHandler::ReadRelationsOfType(
             spdlog::error("failed to get attribute info for ref {}: {}", sourceRef->name, strerror(status));
             return status;
         }
-        spdlog::info("no existing relation of type {} found.", relationType);
+        spdlog::debug("no existing relation of type {} found.", relationType);
         return B_OK;
     }
 
@@ -488,7 +488,7 @@ status_t RelationHandler::ReadRelationsOfType(
             attrInfo.size);
 
     if (result == 0) {          // result is bytes read
-        spdlog::info("no relations of type {} found for path {}.", relationType, sourceRef->name);
+        spdlog::debug("no relations of type {} found for path {}.", relationType, sourceRef->name);
         return B_OK;
     } else if (result < 0) {    // result is an error code
         spdlog::error("failed to read relation {} of file {}: {}", relationType, sourceRef->name, strerror(result));
@@ -504,7 +504,7 @@ status_t RelationHandler::ReadRelationsOfType(
 
         if (result == B_OK) {
             const char* ids = targetIds->Join(",").String();
-            spdlog::info("got ids: {}", ids);
+            spdlog::debug("got ids: {}", ids);
         } else {
             spdlog::error("failed to resolve relation target IDs for relation {} of file {}: {}",
                 relationType, sourceRef->name, strerror(result));
@@ -527,7 +527,7 @@ status_t RelationHandler::ReadRelationsOfType(
         }
 
         if (status == B_OK) {
-            spdlog::info("got {} unique relation targets for type {} and file {}, resolving entries...",
+            spdlog::debug("got {} unique relation targets for type {} and file {}, resolving entries...",
                 idToRefMap->CountNames(B_REF_TYPE), relationType, sourceRef->name);
         } else {
             spdlog::error("failed to resolve relation target refs for relation {} of file {}.", relationType, sourceRef->name);
@@ -584,7 +584,7 @@ status_t RelationHandler::ResolveRelationPropertyTargetIds(const BMessage* relat
     int32       propCount;
     status_t    result = B_OK;
 
-    spdlog::info("extracting targetIds from relation properties:");
+    spdlog::debug("extracting targetIds from relation properties:");
     sen::DumpMessage(relationProperties);
 
     for (int i = 0; i < relationProperties->CountNames(B_MESSAGE_TYPE); i++){
@@ -616,7 +616,7 @@ BString RelationHandler::DisplayNameOf(const entry_ref& ref)
 
 status_t RelationHandler::ResolveRelationTargets(BStringList* ids, BMessage *idsToRefs)
 {
-    spdlog::info("resolving ids from list with {} targets...", ids->CountStrings());
+    spdlog::debug("resolving ids from list with {} targets...", ids->CountStrings());
 
     entry_ref ref;
     status_t status;
@@ -626,7 +626,7 @@ status_t RelationHandler::ResolveRelationTargets(BStringList* ids, BMessage *ids
             idsToRefs->AddRef(senId, new entry_ref(ref.device, ref.directory, ref.name));
         } else {
             if (status == B_ENTRY_NOT_FOUND) {
-                spdlog::info("ignoring stale target reference with ID {}.", senId.String());
+                spdlog::debug("ignoring stale target reference with ID {}.", senId.String());
                 continue;
             } else {
                 return B_ERROR;
@@ -715,7 +715,7 @@ status_t RelationHandler::GetRelationConfigs(const BStringList* relations, BMess
 
         status = GetRelationConfig(relation.String(), &relationConf);
 
-        spdlog::info("got relation config for type {}:", relation.String());
+        spdlog::debug("got relation config for type {}:", relation.String());
         sen::DumpMessage(relationConf);
 
         if (status == B_OK) {
@@ -726,7 +726,7 @@ status_t RelationHandler::GetRelationConfigs(const BStringList* relations, BMess
         }
     }
 
-    spdlog::info("collected relation configs in msg:");
+    spdlog::debug("collected relation configs in msg:");
     sen::DumpMessage(relationConfigs);
 
     return status;
@@ -783,11 +783,11 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
                 // fails and the self-relation click silently aborts.
                 status_t navStatus = AssignPreferredNavigator(&relationType);
                 if (navStatus != B_OK) {
-                    spdlog::info("no installed navigator plugin declares support for relation type {}: {}",
+                    spdlog::debug("no installed navigator plugin declares support for relation type {}: {}",
                         mimeType, strerror(navStatus));
                 }
             }
-            spdlog::info("no MIME type file found at '{}' ({}), using defaults for type {}.",
+            spdlog::debug("no MIME type file found at '{}' ({}), using defaults for type {}.",
                 path.Path(), strerror(mimeNodeStatus), mimeType);
 
             relationInfo.AddBool(sen::conf::kBidirectional, true);
@@ -803,7 +803,7 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
             if (result != B_OK) {
                 // this attribute is optional for relation subtypes, just add defaults
                 if (result == B_ENTRY_NOT_FOUND) {
-                    spdlog::info("no relation config found for type {}, using defaults.", mimeType);
+                    spdlog::debug("no relation config found for type {}, using defaults.", mimeType);
 
                     // quick hack to add defaults here, see above
                     relationInfo.AddBool(sen::conf::kBidirectional, true);
@@ -856,7 +856,7 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
     }
 
     relationInfo.AddString(sen::key::kRelationName, shortName);
-    spdlog::info("local relationInfo:");
+    spdlog::debug("local relationInfo:");
     sen::DumpMessage(relationInfo);
 
     relationConfig->Append(relationInfo);
@@ -982,7 +982,7 @@ status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cre
         return result;
     } else {
         strncpy(id, idStr.String(), sen::id::kLength);
-        spdlog::info("got existing ID {} for path {}", id, ref->name);
+        spdlog::debug("got existing ID {} for path {}", id, ref->name);
     }
     return B_OK;
 }
@@ -1005,7 +1005,7 @@ status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* r
     }
 
     if (refs.empty()) {
-        spdlog::info("no matching file found for ID {}", sourceId);
+        spdlog::debug("no matching file found for ID {}", sourceId);
         return B_ENTRY_NOT_FOUND;
     }
 
@@ -1016,7 +1016,7 @@ status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* r
     }
 
     *refFound = refs.front();
-    spdlog::info("found entry {}", refFound->name);
+    spdlog::debug("found entry {}", refFound->name);
 
     return B_OK;
 }
@@ -1026,7 +1026,7 @@ status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* r
 //       e.g. for inverse relations with Classification entities!
 status_t RelationHandler::QueryForTargetsById(const char* sourceId, BMessage* idToRef)
 {
-    spdlog::info("query for inverse relation targets with sourceId {}", sourceId);
+    spdlog::debug("query for inverse relation targets with sourceId {}", sourceId);
 
     // query for files with a SEN:TO attr containing our sourceId
     BString predicate("(");

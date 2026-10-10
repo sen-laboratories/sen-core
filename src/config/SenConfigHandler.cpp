@@ -82,7 +82,7 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
             return status;
         }
     }
-    spdlog::info("successfully retrieved settings:");
+    spdlog::debug("successfully retrieved settings:");
     sen::DumpMessage(settingsMessage);
 
     return status;
@@ -192,7 +192,7 @@ void SenConfigHandler::MessageReceived(BMessage* message)
     BMessage* reply = new BMessage();
 	status_t status = B_OK;
 
-    spdlog::info("in SEN ConfigHandler::MessageReceived");
+    spdlog::debug("in SEN ConfigHandler::MessageReceived");
     sen::DumpMessage(message);
 
     // for now, we always need these same parameters for context
@@ -213,12 +213,12 @@ void SenConfigHandler::MessageReceived(BMessage* message)
             status = FindClassification(context, &name, &type, reply);
             break;
         default:
-            spdlog::info("SenConfigHandler: unknown config message received.");
+            spdlog::warn("SenConfigHandler: unknown config message received.");
     }
 
     sen::reply::Finish(reply, status);
 
-    spdlog::info("SEN ConfigHandler sending reply:");
+    spdlog::debug("SEN ConfigHandler sending reply:");
     sen::DumpMessage(reply);
 
 	message->SendReply(reply);
@@ -316,7 +316,7 @@ status_t SenConfigHandler::FindClassification(
     entry_ref classtRef;
     status_t status = GetClassificationDir(context, type->String(), &classtRef, false);
 
-    spdlog::info("searching for classification with name {} and type {}...",
+    spdlog::debug("searching for classification with name {} and type {}...",
         name->IsEmpty() ? "*" : name->String(),
         type->IsEmpty() ? "*" : type->String());
 
@@ -355,7 +355,7 @@ status_t SenConfigHandler::FindClassification(
                     includeRef = false;
 
                 if (includeRef) {
-                    spdlog::info("found matching classification entity {}, addding to list.", classEntry.Name());
+                    spdlog::debug("found matching classification entity {}, addding to list.", classEntry.Name());
                     status = classEntry.GetRef(&classRef);
                     if (status == B_OK) {
                         // add refs and types separately under common names so they can be easier consumed
@@ -395,7 +395,7 @@ status_t SenConfigHandler::GetContextDir(const char* context, entry_ref* ref)
     }
     status = contextPath.InitCheck();
     if (status == B_OK) {
-        spdlog::info("found context dir {} for context {}.", contextPath.Path(), context);
+        spdlog::debug("found context dir {} for context {}.", contextPath.Path(), context);
         status = BEntry(contextPath.Path()).GetRef(ref);
     } else {
         spdlog::error("failed to get dir for context {}: {}", context, strerror(status));
@@ -435,13 +435,13 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
 
                     status = classPath.InitCheck();
                     if (status == B_OK) {
-                        spdlog::info("found classifications dir '{}' for context '{}' and type '{}'.",
+                        spdlog::debug("found classifications dir '{}' for context '{}' and type '{}'.",
                             classPath.Path(), context, type);
 
                         BEntry classEntry(classPath.Path());
 
                         if (create && ! classEntry.Exists()) {
-                            spdlog::info("creating new classification directory '{}'.", classPath.Path());
+                            spdlog::debug("creating new classification directory '{}'.", classPath.Path());
 
                             BDirectory classDir(classPathBase.Path());
                             status = classDir.CreateDirectory(classPath.Leaf(), NULL);

@@ -107,7 +107,7 @@ void SenServer::ReadyToRun()
     status_t status = senConfigHandler->Init();
     if (status != B_OK) {
         // critical, abort
-        spdlog::info("critical error, aborting.");
+        spdlog::critical("critical error, aborting.");
         Quit();
     }
 
@@ -169,7 +169,7 @@ void SenServer::MessageReceived(BMessage* message)
             result = B_OK;
             reply->what = sen::cmd::kCoreTest;
 
-            spdlog::info("TSID test...");
+            spdlog::debug("TSID test...");
             BPath path;
             if (find_directory(B_SYSTEM_TEMP_DIRECTORY, &path) != B_OK)
             {
@@ -191,7 +191,7 @@ void SenServer::MessageReceived(BMessage* message)
             for (int32 i = 0; i < numFiles; i++) {
                 BString tsidString = relationHandler->GenerateId();
                 const char* tsid = tsidString.String();
-                spdlog::info("TSID: {}", tsid);
+                spdlog::debug("TSID: {}", tsid);
                 result = file.SetTo(&outputDir, tsid, B_CREATE_FILE);
                 if (result == B_OK) {
                     result = file.Flush();
@@ -352,7 +352,7 @@ void SenServer::MessageReceived(BMessage* message)
 		default:
 		{
             result = B_UNSUPPORTED;
-            spdlog::info("SEN Server: unknown message '{}' received." B_UTF8_ELLIPSIS, message->what);
+            spdlog::warn("SEN Server: unknown message '{}' received." B_UTF8_ELLIPSIS, message->what);
 		}
 	}
 

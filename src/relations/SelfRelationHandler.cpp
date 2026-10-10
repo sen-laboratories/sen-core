@@ -38,7 +38,7 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     const char* sourceType = sourceTypeString.String();
 
     // query for all compatible extractors and return their generated collected output type
-    spdlog::info("query for extractors to handle file type {}", sourceType);
+    spdlog::debug("query for extractors to handle file type {}", sourceType);
     BMessage pluginConfig;
 
     status = GetPluginsForTypeAndFeature(sourceType, sensei::feature::kExtract, &pluginConfig);
@@ -46,7 +46,7 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
         return status;
     }
 
-    spdlog::info("got types/plugins config for source type {}:", sourceType);
+    spdlog::debug("got types/plugins config for source type {}:", sourceType);
     sen::DumpMessage(pluginConfig);
 
     reply->what = sensei::cmd::kResult;
@@ -122,7 +122,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     status = GetRelationConfig(relationType, &relationConfig);
     if (status != B_OK) {
-        spdlog::info("failed to get relation config for type {}: {}", relationType, strerror(status));
+        spdlog::warn("failed to get relation config for type {}: {}", relationType, strerror(status));
         return status;
     }
 
@@ -140,23 +140,23 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
     result = message->FindMessage(sensei::key::kPluginConfig, &pluginConfig);
     if (result != B_OK) {
         if (result == B_NAME_NOT_FOUND) {
-            spdlog::info("fresh query for suitable plugins for relation type {}...", relationType);
+            spdlog::debug("fresh query for suitable plugins for relation type {}...", relationType);
 
             result = GetPluginsForTypeAndFeature(sourceMimeType, sensei::feature::kExtract, &pluginConfig);
             if (result != B_OK) {
                 return result;  // already handled, just pass on
             }
-            spdlog::info("got fresh plugin config:");
+            spdlog::debug("got fresh plugin config:");
          } else {
             spdlog::error("couldn't look up plugins from message: {}", strerror(result));
             return result;
          }
     } else {
-        spdlog::info("got existing plugin config for relation type {}:", relationType);
+        spdlog::debug("got existing plugin config for relation type {}:", relationType);
         clientHasConfig = true;
     }
 
-    spdlog::info("* got plugin config:");
+    spdlog::debug("* got plugin config:");
     sen::DumpMessage(pluginConfig);
     // TODO: merge optional relation config provided in plugin config into MIME relation config
 
@@ -165,7 +165,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
 	if (GetMessageParameter(message, sensei::key::kPlugin, &pluginTypeParam, NULL, true)  == B_OK) {
         const char* pluginSig = pluginTypeParam.String();
-        spdlog::info("got plugin signature {}, jumping to launch plugin.", pluginSig);
+        spdlog::debug("got plugin signature {}, jumping to launch plugin.", pluginSig);
 		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
 	}
 
@@ -267,7 +267,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     const BMessage* pluginConfig,
     BMessage* reply)
 {
-    spdlog::info("got plugin app signature: {}", pluginSig);
+    spdlog::debug("got plugin app signature: {}", pluginSig);
 
     // execute plugin and return result
     // plugins are B_MULTIPLE_LAUNCH and quit right after replying, so talk to exactly
@@ -293,7 +293,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     refsMsg.AddRef("refs", sourceRef);
     refsMsg.AddBool(sen::conf::kSelf, true);
 
-    spdlog::info("Sending refs to plugin {}:", pluginSig);
+    spdlog::debug("Sending refs to plugin {}:", pluginSig);
     sen::DumpMessage(refsMsg);
 
     BMessenger pluginMessenger(pluginSig, pluginTeam);
@@ -360,7 +360,7 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     if (result == B_NAME_NOT_FOUND) {
         // the plugin found nothing (a document without bookmarks, a source file without includes): that is an empty
         // result, not an error
-        spdlog::info("plugin {} found no relations in {}.", pluginSig, sourceRef->name);
+        spdlog::debug("plugin {} found no relations in {}.", pluginSig, sourceRef->name);
         reply->what = sensei::cmd::kResult;
         reply->AddRef("refs", sourceRef);
         sen::reply::SetStatus(reply, sen::status::kNoContent);
@@ -397,7 +397,7 @@ status_t RelationHandler::TransformPluginResult(
 
     // skip processing empty messages at any level
     if (itemMsg->IsEmpty()) {
-        spdlog::info("  - skipping empty sub message.");
+        spdlog::debug("  - skipping empty sub message.");
         return B_OK;
     }
 
@@ -417,7 +417,7 @@ status_t RelationHandler::TransformPluginResult(
         return status;
     }
 
-    spdlog::info("processing itemMsg with {} data members and cardinality of {}.", fieldCount, itemCount);
+    spdlog::debug("processing itemMsg with {} data members and cardinality of {}.", fieldCount, itemCount);
 
     for (int32 item = 0; item < itemCount; item++) {
         // prepare for new item properties
@@ -444,7 +444,7 @@ status_t RelationHandler::TransformPluginResult(
                 return B_BAD_VALUE;
             }
 
-            spdlog::info("processing item {:02} / {:02}, field {}\t({:02} / {:02}).",
+            spdlog::debug("processing item {:02} / {:02}, field {}\t({:02} / {:02}).",
                 item + 1, itemCount, fieldName, field + 1, fieldCount);
 
             // map property name to common attribute name as per attribute map
@@ -460,7 +460,7 @@ status_t RelationHandler::TransformPluginResult(
 
                 // only process B_MESSAGE_TYPE entries here
                 if (status == B_OK) {
-                    spdlog::info("  > processing sub item...");
+                    spdlog::debug("  > processing sub item...");
 
                     // and recurse to enrich sub item
                     status = TransformPluginResult(&childMsg, typeMapping, attrMapping, &childResult);
@@ -494,7 +494,7 @@ status_t RelationHandler::TransformPluginResult(
         }  // field loop
 
         if (status == B_OK) {
-            spdlog::info("* got {} nested and {} flat properties", nestedProperties, flatProperties);
+            spdlog::debug("* got {} nested and {} flat properties", nestedProperties, flatProperties);
 
             // possibly enrich IF item contains an ID
             const char* itemId = propertiesMsg.GetString(sensei::key::kItemId);
@@ -525,7 +525,7 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
     const char* feature,
     BMessage* pluginConfig)
 {
-    spdlog::info("  > looking for {} plugins", feature);
+    spdlog::debug("  > looking for {} plugins", feature);
 
     std::vector<entry_ref> plugins;
     status_t result = sen::FindPlugins(feature, &plugins);
@@ -538,7 +538,7 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
     for (const entry_ref& pluginRef : plugins) {
         BEntry entry(&pluginRef);
         BPath path(&pluginRef);
-        spdlog::info("found plugin with path {}", path.Path());
+        spdlog::debug("found plugin with path {}", path.Path());
 
         // get MIME-Type == application_signature of plugin to use as key later
         BFile pluginFile(&entry, B_READ_ONLY);
@@ -552,14 +552,14 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
             spdlog::error("failed to get app signature of plugin file {}: {}", entry.Name(), strerror(result));
             return result;
         }
-        spdlog::info("got plugin app signature: {}", pluginAppSig);
+        spdlog::debug("got plugin app signature: {}", pluginAppSig);
 
         // filter for supported input type
         if (pluginInfo.IsSupportedType(mimeType)) {
             // get supported output types and add to lookup map accordingly
             // todo: there may be more plugins per type, supporting different aspects and
             // returning different output type - later we need to detect and handle overlaps!
-            spdlog::info("Adding extractor plugin {} for handling type {}", pluginAppSig, mimeType);
+            spdlog::debug("Adding extractor plugin {} for handling type {}", pluginAppSig, mimeType);
 
             entry_ref ref(pluginRef);
             result = GetPluginConfig(pluginAppSig, &ref, mimeType, pluginConfig);
@@ -571,17 +571,17 @@ status_t RelationHandler::GetPluginsForTypeAndFeature(
 
             pluginCount++;
         } else {
-            spdlog::info("extractor plugin {} does not support type {}", pluginAppSig, mimeType);
+            spdlog::debug("extractor plugin {} does not support type {}", pluginAppSig, mimeType);
         }
     }
 
     if (pluginCount == 0) {
-        spdlog::info("no matching extractor found for type {}", mimeType);
+        spdlog::debug("no matching extractor found for type {}", mimeType);
         return B_OK;
     }
 
-    spdlog::info("found {} suitable plugins.", pluginCount);
-    spdlog::info("plugin output map is:");
+    spdlog::debug("found {} suitable plugins.", pluginCount);
+    spdlog::debug("plugin output map is:");
     sen::DumpMessage(pluginConfig);
 
     return B_OK;
@@ -687,7 +687,7 @@ status_t RelationHandler::GetInodeForRef(const entry_ref* srcRef, BString* inode
 		}
 	}
 	if (result != B_OK) {
-		spdlog::info("WARNING: could not get inode for srcRef {}: {}", srcRef->name, strerror(result) );
+		spdlog::warn("could not get inode for srcRef {}: {}", srcRef->name, strerror(result) );
 		// fall back
 		*inode << srcRef->device << "_" << srcRef->directory << "_" << srcRef->name;
         result = B_OK;
@@ -717,7 +717,7 @@ BString RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
     // the content, the way Tracker does
     BMimeType guessed;
     if (BMimeType::GuessMimeType(ref, &guessed) == B_OK && guessed.InitCheck() == B_OK) {
-        spdlog::info("{} has no MIME type, guessed {}", ref->name, guessed.Type());
+        spdlog::debug("{} has no MIME type, guessed {}", ref->name, guessed.Type());
         return BString(guessed.Type());
     }
 
