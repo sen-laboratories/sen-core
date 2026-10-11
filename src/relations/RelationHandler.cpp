@@ -219,33 +219,43 @@ static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* s
     return (includes == 0 || included) && !excluded;
 }
 
+/**
+ * The relations that can be created between files. With one or more source files (SEN:sourceRef, repeated) these are the relations
+ * that all of them can start at. With target files, too (SEN:targetRef, repeated: the files that something is dropped onto), the
+ * relations that can be created between each source and each target: a relation that is bidirectional (the default) is also
+ * stored at the targets, so they have to fit as well; an association is offered only between a classification (a label) and a
+ * file, any other relation only between two files or two classifications.
+ */
 status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
     status_t  status;
 
+    // (the first source: with the error reply if there is none)
     if ((status = GetMessageParameter(message, sen::key::kSourceRef, NULL, &sourceRef)) != B_OK) {
         return status;
     }
 
-    BNode sourceNode(&sourceRef);
-    BNodeInfo nodeInfo(&sourceNode);
-    status = nodeInfo.InitCheck();
-    if (status != B_OK) {
-        spdlog::error("could not resolve entryRef '{}': {}", sourceRef.name, strerror(status));
-        return status;
-    }
-
-    char mimeType[B_MIME_TYPE_LENGTH];
-    if (nodeInfo.GetType(mimeType) != B_OK || mimeType[0] == '\0') {
+    std::vector<BString> sourceTypes, targetTypes;
+    entry_ref ref;
+    for (int32 index = 0; message->FindRef(sen::key::kSourceRef, index, &ref) == B_OK; index++) {
+        BNode node(&ref);
+        status = node.InitCheck();
+        if (status != B_OK) {
+            spdlog::error("could not resolve entryRef '{}': {}", ref.name, strerror(status));
+            return status;
+        }
         // a file without a type: what the MIME database makes of its name and content
-        BMimeType guessed;
-        if (BMimeType::GuessMimeType(&sourceRef, &guessed) == B_OK)
-            strlcpy(mimeType, guessed.Type(), sizeof(mimeType));
-        else
-            strlcpy(mimeType, "application/octet-stream", sizeof(mimeType));
+        BString type = GetMimeTypeForRef(&ref);
+        sourceTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
     }
-    spdlog::debug("searching for relations compatible with {}...", mimeType);
+    for (int32 index = 0; message->FindRef(sen::key::kTargetRef, index, &ref) == B_OK; index++) {
+        BString type = GetMimeTypeForRef(&ref);
+        targetTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
+    }
+    bool betweenFiles = !targetTypes.empty();
+    spdlog::debug("searching for relations compatible with {} source(s) and {} target(s), first source {}...",
+        sourceTypes.size(), targetTypes.size(), sourceTypes[0].String());
 
     BMessage relationTypes;
     status = BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &relationTypes);
@@ -264,14 +274,39 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         spdlog::error("could not get relation configs for compatible relations: {}", strerror(configStatus));
     }
 
+    auto isClassification = [](const BString& type) { return type.StartsWith(sen::mime::kClassificationPrefix); };
+
     BStringList types;
     BMessage relationConfigs;
     for (int32 index = 0; index < installed.CountStrings(); index++) {
         const BString& type = installed.StringAt(index);
         BMessage config;
+        bool hasConfig = allConfigs.FindMessage(type.String(), &config) == B_OK;
+        bool compatible = true;
+
         // a relation without a config (not registered yet) has no restrictions
-        if (allConfigs.FindMessage(type.String(), &config) == B_OK && !IsCompatibleWithSource(config, mimeType)) {
-            spdlog::debug("relation {} is not compatible with {}.", type.String(), mimeType);
+        if (hasConfig) {
+            for (size_t s = 0; compatible && s < sourceTypes.size(); s++)
+                compatible = IsCompatibleWithSource(config, sourceTypes[s].String());
+            // the opposite direction is stored at the target
+            if (compatible && betweenFiles && config.GetBool(sen::conf::kBidirectional, true)) {
+                for (size_t t = 0; compatible && t < targetTypes.size(); t++)
+                    compatible = IsCompatibleWithSource(config, targetTypes[t].String());
+            }
+        }
+
+        if (compatible && betweenFiles) {
+            bool association = type == sen::mime::kAssociationRelation;
+            for (size_t s = 0; compatible && s < sourceTypes.size(); s++) {
+                for (size_t t = 0; compatible && t < targetTypes.size(); t++) {
+                    bool sourceLabel = isClassification(sourceTypes[s]), targetLabel = isClassification(targetTypes[t]);
+                    compatible = association ? sourceLabel != targetLabel : sourceLabel == targetLabel;
+                }
+            }
+        }
+
+        if (!compatible) {
+            spdlog::debug("relation {} is not compatible with {}.", type.String(), sourceTypes[0].String());
             continue;
         }
         types.Add(type);
@@ -286,7 +321,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
     reply->what = sen::cmd::kReplyRelations;
     reply->AddStrings(sen::key::kRelations, types);
     reply->AddString(sen::key::kDetail, BString("got ")
-                    << types.CountStrings() << " relation(s) compatible with " << mimeType << " from " << sourceRef.name);
+                    << types.CountStrings() << " relation(s) compatible with " << sourceTypes[0] << " from " << sourceRef.name);
 
     return B_OK;
 }

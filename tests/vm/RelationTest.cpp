@@ -358,6 +358,57 @@ TEST(OnlyRelationsThatFitTheTypeOfTheFileAreOffered)
 		CHECK(OffersRelation(f.refs[0], kTransitionTo));
 }
 
+/** The relations that can be created from the files to the other files (what an Option+drag of files onto others offers). */
+static bool
+OffersRelationBetween(const std::vector<entry_ref>& sources, const std::vector<entry_ref>& targets, const char* type)
+{
+	BMessage ask(sen::cmd::kRelationsGetCompatible);
+	for (const entry_ref& ref : sources)
+		ask.AddRef(sen::key::kSourceRef, &ref);
+	for (const entry_ref& ref : targets)
+		ask.AddRef(sen::key::kTargetRef, &ref);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+	const char* offered;
+	for (int32 index = 0; reply.FindString(sen::key::kRelations, index, &offered) == B_OK; index++) {
+		if (strcmp(offered, type) == 0)
+			return true;
+	}
+	return false;
+}
+
+TEST(RelationsBetweenGroupsOfFilesAreOnlyThoseThatFitAllOfThem)
+{
+	Fixture f("between", 4);
+	entry_ref label = f.Create("label", kLabelType);
+	const char* kTransitionTo = "relation/x-vnd.sen-labs.relation.music.transition.to";
+
+	BNode text(&f.refs[0]), other(&f.refs[1]), audio(&f.refs[2]), audio2(&f.refs[3]);
+	BNodeInfo(&text).SetType("text/plain");
+	BNodeInfo(&other).SetType("text/plain");
+	BNodeInfo(&audio).SetType("audio/x-wav");
+	BNodeInfo(&audio2).SetType("audio/x-wav");
+
+	// a generic reference between two files; an association needs a label on one side
+	CHECK(OffersRelationBetween({f.refs[0]}, {f.refs[1]}, kReference));
+	CHECK(!OffersRelationBetween({f.refs[0]}, {f.refs[1]}, kAssociation));
+	CHECK(OffersRelationBetween({f.refs[0]}, {label}, kAssociation));
+	CHECK(OffersRelationBetween({label}, {f.refs[0]}, kAssociation));
+	// a file and a label are not related by a reference, two labels are
+	CHECK(!OffersRelationBetween({f.refs[0]}, {label}, kReference));
+
+	// a group: every file has to fit, and the targets as well, as the opposite direction is stored there
+	CHECK(OffersRelationBetween({f.refs[0], f.refs[1]}, {f.refs[2]}, kReference));
+	if (BMimeType(kTransitionTo).IsInstalled()) {
+		CHECK(OffersRelationBetween({f.refs[2]}, {f.refs[3]}, kTransitionTo));
+		CHECK(!OffersRelationBetween({f.refs[2]}, {f.refs[0]}, kTransitionTo));	// the target is a text
+		CHECK(!OffersRelationBetween({f.refs[0]}, {f.refs[2]}, kTransitionTo));	// the source is a text
+	}
+
+	// without targets nothing changes: what fits the file alone
+	CHECK(OffersRelation(f.refs[0], kReference));
+}
+
 TEST(TargetsAreNamedByTheirTitleNotByTheNameOfTheFile)
 {
 	Fixture f("names", 3);
