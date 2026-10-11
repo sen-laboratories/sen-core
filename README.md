@@ -9,6 +9,18 @@
   for Haiku, acting as the foundation of the semantic layer and integrating with the file system.
 </p>
 
+## Install
+
+The package is in the SEN Labs repository, [Kiri](https://kiri.sen-labs.org):
+
+```
+> pkgman add-repo https://kiri.sen-labs.org/x86_64
+> pkgman install sen_core
+```
+
+The server starts with the next session (start it now with `sen start`); its item appears in the Deskbar. It needs the core ontology (sen-oni) to know the
+relations; the other SEN packages are in the same repository as they are published.
+
 ## Build
 
 Needs the SEN API headers ([sento](https://github.com/sen-laboratories/sento), `./install.sh`), the generated ontology headers
@@ -55,6 +67,9 @@ server for the options that print information and exit, which need no running se
 > ./build.sh      # the release build (optimised, no debugging code); ./build.sh debug for a debug build
 > ./package.sh    # sen_core-<version>-<arch>.hpkg
 ```
+
+To publish it, copy the package to `x86_64/packages/` of [Kiri](https://github.com/sen-laboratories/kiri) (one version per package: the old one is removed) and push;
+the workflow of that repository makes the index.
 
 The version comes from the application resource (`src/resources/sen_server.rdef`): a development build is a pre-release (`1.0.0~dev`). The package has the server
 and the command `sen` in `bin`, a job for the launch daemon that starts the server with the session (`data/user_launch`), the script that repairs
