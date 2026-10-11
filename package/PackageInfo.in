@@ -6,7 +6,7 @@ description		"SEN (Semantic Extensions Native) adds relations between files to H
 SEN server keeps them in the attributes of the files, answers queries for them
 and puts an item with a menu into the Deskbar (contexts, classifications, an
 overview of what SEN knows, and a check for inconsistencies). The command sen
-shows the same on the command line. Needs the core ontology, the plugins of
+shows the same on the command line. Brings the core ontology with it; needs the plugins of
 SENSEI to read relations from documents, and Akita (the file manager with SEN
 integration) to work with relations on the desktop."
 packager		"Gregor B. Rosenauer <semantic.extensions@gmail.com>"
@@ -30,4 +30,6 @@ requires		{
 	haiku
 	lib:libspdlog
 	lib:libfmt
+	cmd:sen_oni
+	sen_ontology_core
 }

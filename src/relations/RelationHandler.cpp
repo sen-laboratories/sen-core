@@ -1046,7 +1046,11 @@ status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cre
             return B_ERROR;
         }
     } else if (result != B_OK) {
-        spdlog::error("failed to read ID from path {}: {}", ref->name, strerror(result));
+        // (pipes and other nodes without attributes are no objects of SEN: not an error)
+        if (result == B_NOT_SUPPORTED)
+            spdlog::debug("no ID for {}: {}", ref->name, strerror(result));
+        else
+            spdlog::error("failed to read ID from path {}: {}", ref->name, strerror(result));
         return result;
     } else {
         strncpy(id, idStr.String(), sen::id::kLength);

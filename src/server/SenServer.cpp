@@ -13,6 +13,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <fs_index.h>
 
@@ -40,6 +41,51 @@
 
 /** sent by the timer that waits for the Deskbar */
 static const uint32 kRetryDeskbar = 'SDbr';
+/** sent when the ontologies should be brought up to date (by the timer), and by the thread that did it */
+static const uint32 kUpdateOntologies = 'SOnu';
+static const uint32 kOntologiesUpdated = 'SOnd';
+
+/**
+ * A package is activated some time after its file arrived (and the server is not told when): the update is repeated for a while.
+ * It does nothing when the ontologies are up to date.
+ */
+static const bigtime_t kPackageUpdateInterval = 4000000;
+static const int32 kPackageUpdateCount = 8;
+
+/** finds the ontology installer of the ontology packages */
+static bool FindOntologyInstaller(BPath* path)
+{
+	static const directory_which places[] = {
+		B_SYSTEM_BIN_DIRECTORY, B_USER_BIN_DIRECTORY, B_SYSTEM_NONPACKAGED_BIN_DIRECTORY, B_USER_NONPACKAGED_BIN_DIRECTORY
+	};
+	for (directory_which place : places) {
+		if (find_directory(place, path) == B_OK && path->Append("sen_oni") == B_OK && BEntry(path->Path()).Exists())
+			return true;
+	}
+	return false;
+}
+
+/** runs the installer, in a thread of its own (it talks to this server to relate the ontologies to their types) */
+static int32 RunOntologyUpdate(void*)
+{
+	int32 result = -1;
+	BPath installer;
+	if (FindOntologyInstaller(&installer)) {
+		// the output goes to a log that helps when ontologies do not show up
+		BPath log;
+		BString command;
+		command << "'" << installer.Path() << "' --update";
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &log) == B_OK && log.Append("sen/ontologies-update.log") == B_OK)
+			command << " > '" << log.Path() << "' 2>&1";
+		result = system(command.String());
+	} else {
+		spdlog::debug("no ontology installer (sen_oni) found, ontologies are not updated");
+	}
+	BMessage done(kOntologiesUpdated);
+	done.AddInt32("result", result);
+	be_app_messenger.SendMessage(&done);
+	return 0;
+}
 
 int main(int argc, char* argv[])
 {
@@ -73,6 +119,9 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
     fUi = new sen::ui::SenUi(senConfigHandler, relationHandler);
     fDeskbarRetry = NULL;
     fDeskbarTries = 0;
+    fOntologyTimer = NULL;
+    fOntologyUpdating = false;
+    fOntologyPending = false;
 
 	// watch all mounted volumes for new entries to ensure that copies get their own SEN:ID, and be told about volumes that
 	// are mounted later
@@ -82,6 +131,24 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
 		WatchVolume(volume.Device());
 
 	watch_node(NULL, B_WATCH_MOUNT, this);
+
+	// (the folders of the packages are on the boot volume, which is watched above)
+	const directory_which packageFolders[] = { B_SYSTEM_PACKAGES_DIRECTORY, B_USER_PACKAGES_DIRECTORY };
+	for (directory_which folder : packageFolders) {
+		BPath packagesPath;
+		node_ref packagesRef;
+		if (find_directory(folder, &packagesPath) == B_OK && BDirectory(packagesPath.Path()).GetNodeRef(&packagesRef) == B_OK)
+			fPackagesDirs.push_back(packagesRef);
+	}
+}
+
+bool SenServer::IsPackagesDir(dev_t device, ino_t directory) const
+{
+	for (const node_ref& ref : fPackagesDirs) {
+		if (ref.device == device && ref.node == directory)
+			return true;
+	}
+	return false;
 }
 
 void SenServer::WatchVolume(dev_t device)
@@ -113,6 +180,7 @@ void SenServer::EnsureIndices(dev_t device)
 SenServer::~SenServer()
 {
     delete fDeskbarRetry;
+    delete fOntologyTimer;
     delete fUi;
     spdlog::info("Goodbye:)");
     stop_watching(this);
@@ -131,6 +199,9 @@ void SenServer::ReadyToRun()
     relationHandler->AssignMissingNavigators();
 
     InstallDeskbarItem();
+
+    // ontologies that came with packages while the server was not running
+    ScheduleOntologyUpdate(2000000, 1);
 
     BApplication::ReadyToRun();
 }
@@ -160,6 +231,27 @@ void SenServer::InstallDeskbarItem()
         spdlog::warn("could not add the SEN item to the Deskbar: {}", strerror(status));
 }
 
+void SenServer::ScheduleOntologyUpdate(bigtime_t delay, int32 count)
+{
+    delete fOntologyTimer;
+    fOntologyTimer = new BMessageRunner(this, new BMessage(kUpdateOntologies), delay, count);
+}
+
+void SenServer::StartOntologyUpdate()
+{
+    if (fOntologyUpdating) {
+        fOntologyPending = true;
+        return;
+    }
+    thread_id thread = spawn_thread(RunOntologyUpdate, "ontology update", B_NORMAL_PRIORITY, NULL);
+    if (thread < 0 || resume_thread(thread) != B_OK) {
+        spdlog::warn("could not start the ontology update");
+        return;
+    }
+    fOntologyUpdating = true;
+    fOntologyPending = false;
+}
+
 void SenServer::RemoveDeskbarItem()
 {
     BDeskbar deskbar;
@@ -179,6 +271,22 @@ void SenServer::MessageReceived(BMessage* message)
 	if (message->what == kRetryDeskbar) {
 		fDeskbarTries++;
 		InstallDeskbarItem();
+		return;
+	}
+
+	if (message->what == kUpdateOntologies) {
+		StartOntologyUpdate();
+		return;
+	}
+	if (message->what == kOntologiesUpdated) {
+		fOntologyUpdating = false;
+		int32 result = message->GetInt32("result", -1);
+		if (result == 0)
+			spdlog::debug("ontology update done");
+		else
+			spdlog::warn("the ontology update ended with {} (see sen/ontologies-update.log in the settings)", result);
+		if (fOntologyPending)
+			StartOntologyUpdate();
 		return;
 	}
 
@@ -333,6 +441,24 @@ void SenServer::MessageReceived(BMessage* message)
                         }
                         break;
                     }
+                    case B_ENTRY_REMOVED: {
+                        // a package that left can have brought an ontology
+                        BString name = message->GetString("name", "");
+                        if (IsPackagesDir(message->GetInt32("device", -1), message->GetInt64("directory", -1))
+                                && name.EndsWith(".hpkg"))
+                            ScheduleOntologyUpdate(kPackageUpdateInterval, kPackageUpdateCount);
+                        break;
+                    }
+                    case B_ENTRY_MOVED: {
+                        // packages are moved into place when they have been downloaded or are changed
+                        BString name = message->GetString("name", "");
+                        dev_t device = message->GetInt32("device", -1);
+                        if ((IsPackagesDir(device, message->GetInt64("to directory", -1))
+                                    || IsPackagesDir(device, message->GetInt64("from directory", -1)))
+                                && name.EndsWith(".hpkg"))
+                            ScheduleOntologyUpdate(kPackageUpdateInterval, kPackageUpdateCount);
+                        break;
+                    }
                     case B_ENTRY_CREATED: {
                         entry_ref ref;
                         BString name;
@@ -341,6 +467,13 @@ void SenServer::MessageReceived(BMessage* message)
                         message->FindInt32("device", &ref.device);
                         message->FindInt64("directory", &ref.directory);
                         ref.set_name(name);
+
+                        // a package that arrived can bring an ontology (it is active a moment later)
+                        if (IsPackagesDir(ref.device, ref.directory)) {
+                            if (name.EndsWith(".hpkg"))
+                                ScheduleOntologyUpdate(kPackageUpdateInterval, kPackageUpdateCount);
+                            break;
+                        }
 
                         BNode node(&ref);
                         BPath path(&ref);

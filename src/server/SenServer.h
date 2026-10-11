@@ -11,6 +11,9 @@
 #include <Application.h>
 #include <MessageRunner.h>
 #include <File.h>
+#include <Node.h>
+
+#include <vector>
 
 class SenServer : public BApplication {
 
@@ -38,10 +41,25 @@ private:
     void                InstallDeskbarItem();
     void                RemoveDeskbarItem();
 
+    /**
+     * @brief Have the installer sen_oni make the ontologies in the MIME database match the ontology packages: soon (a package
+     * is activated some time after its file arrived: the update is repeated @a count times). Runs one update at a time, in its own thread.
+     */
+    void                ScheduleOntologyUpdate(bigtime_t delay, int32 count);
+    void                StartOntologyUpdate();
+    bool                IsPackagesDir(dev_t device, ino_t directory) const;
+
     RelationHandler*    relationHandler;
     SenConfigHandler*   senConfigHandler;
     sen::ui::SenUi*     fUi;
     /** @brief While the Deskbar is not there yet (at the start of a session): tries again now and then, to add the item of SEN. */
     BMessageRunner*     fDeskbarRetry;
     int32               fDeskbarTries;
+
+    /** @brief The folders of the packages (system and user): new and removed packages can bring or take ontologies. */
+    std::vector<node_ref> fPackagesDirs;
+    BMessageRunner*     fOntologyTimer;
+    bool                fOntologyUpdating;
+    /** @brief Packages changed while an update was running: another one follows. */
+    bool                fOntologyPending;
 };

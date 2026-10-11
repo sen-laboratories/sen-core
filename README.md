@@ -18,8 +18,10 @@ The package is in the SEN Labs repository, [Kiri](https://kiri.sen-labs.org):
 > pkgman install sen_core
 ```
 
-The server starts with the next session (start it now with `sen start`); its item appears in the Deskbar. It needs the core ontology (sen-oni) to know the
-relations; the other SEN packages are in the same repository as they are published.
+The server starts with the next session (start it now with `sen start`); its item appears in the Deskbar. The package brings the core ontology
+(`sen_ontology_core`, from [sen-oni](https://github.com/sen-laboratories/sen-oni)) with it. The other ontologies are packages, too
+(`pkgman install sen_ontology_books`, ...): the server has the installer `sen_oni` put the ontologies of the packages into the MIME database when it
+starts and whenever a package is added or removed (log: `~/config/settings/sen/ontologies-update.log`).
 
 ## Build
 
