@@ -258,8 +258,11 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 
 	std::vector<std::string> types;
 	const char* type;
-	for (int32 index = 0; installed.FindString("types", index, &type) == B_OK; index++)
-		types.push_back(type);
+	for (int32 index = 0; installed.FindString("types", index, &type) == B_OK; index++) {
+		// (contexts are special, they have a menu of their own)
+		if (strcmp(type, sen::mime::kContext) != 0)
+			types.push_back(type);
+	}
 	std::sort(types.begin(), types.end());
 
 	for (const std::string& classification : types) {

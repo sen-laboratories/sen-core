@@ -12,8 +12,11 @@ resource app_version {
 	 variety = B_APPV_DEVELOPMENT,
 	 internal = 0,
 	 short_info = "SEN Server",
-	 long_info = "Semantic ExteNsions server process providing an infrastructure for semantic relations and queries."
+	 long_info = "Semantic Extensions Native server process providing an infrastructure for semantic relations and queries."
 };
+
+/* the picture of the About window (the logo of sen-core), a PNG that the translators of the system turn into a bitmap */
+resource(100, "about-logo") #'bits' import "about-logo.png";
 
 resource vector_icon array {
 	$"6E636966090500040171020006033C2D75376202B899743D58B748EB184A38E7"

@@ -132,8 +132,11 @@ void SenServer::ReadyToRun()
 void SenServer::InstallDeskbarItem()
 {
     BDeskbar deskbar;
-    if (!deskbar.IsRunning() || deskbar.HasItem(sen::deskbar::kItemName))
+    if (!deskbar.IsRunning())
         return;
+    // an item that is there is the one of a server that did not quit properly, or of an older version of the program: it is replaced
+    if (deskbar.HasItem(sen::deskbar::kItemName))
+        deskbar.RemoveItem(sen::deskbar::kItemName);
 
     // the item is loaded from this program (it has instantiate_deskbar_item), the Deskbar asks for the file
     app_info info;
