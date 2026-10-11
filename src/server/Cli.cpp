@@ -207,9 +207,9 @@ InstalledTypes(const char* supertype)
 }
 
 /**
- * The number of files of every type and of files with relations of every kind, from all the files with a SEN:ID of the volumes. Where
- * a volume has an index for the type of files (BEOS:TYPE) the files of a type are queried, which finds all of them, else only the
- * ones with a SEN:ID are counted (and the volume is named in @p notes). A relation is counted for every file that has it, at its source
+ * The number of files of every type and of files with relations of every kind. The files of a type are queried (the type, BEOS:TYPE, is
+ * indexed by the file system itself), which finds all of them; where that is not possible only the files with a SEN:ID are counted (and
+ * the volume is named in @p notes). A relation is counted for every file that has it, at its source
  * (SEN:REL:<name of the type>) and at its target, for the opposite direction.
  */
 struct Counts {
@@ -222,7 +222,6 @@ void
 CountFiles(const std::vector<VolumeInfo>& volumes, const std::vector<TypeInfo>& typesToCount, Counts* counts)
 {
 	for (const VolumeInfo& volume : volumes) {
-		bool typeIndex = volume.hasIndexOf("BEOS:TYPE");
 		std::map<std::string, int32> scanned;
 
 		if (volume.hasIndexOf(sen::attr::kId)) {
@@ -243,13 +242,20 @@ CountFiles(const std::vector<VolumeInfo>& volumes, const std::vector<TypeInfo>& 
 			});
 		}
 
-		if (typeIndex) {
-			for (const TypeInfo& info : typesToCount) {
-				BString predicate("BEOS:TYPE==\"");
-				predicate << info.type.c_str() << "\"";
-				counts->typeFiles[info.type] += CountEntries(volume, predicate.String());
+		// the type of files is indexed by the file system itself (BEOS:TYPE does not show up in the list of indices)
+		bool queried = !typesToCount.empty();
+		for (const TypeInfo& info : typesToCount) {
+			BString predicate("BEOS:TYPE==\"");
+			predicate << info.type.c_str() << "\"";
+			int32 files = 0;
+			if (!QueryVolume(volume, predicate.String(), [&files](const entry_ref&) { files++; })) {
+				queried = false;
+				break;
 			}
-		} else {
+			counts->typeFiles[info.type] += files;
+		}
+		if (!queried && !typesToCount.empty()) {
+			// (a file system that cannot query the type: only the files with a SEN:ID are counted)
 			for (const auto& entry : scanned)
 				counts->typeFiles[entry.first] += entry.second;
 			counts->notes.push_back(volume.name);
@@ -402,7 +408,7 @@ Types()
 
 	printf("\nMeta types and entities: the files of the type; relations: the files that have such a relation.\n");
 	for (const BString& name : counts.notes)
-		printf("Volume %s has no index for BEOS:TYPE: only its files with a SEN:ID are counted.\n", name.String());
+		printf("Volume %s cannot query the type of files: only its files with a SEN:ID are counted.\n", name.String());
 	return 0;
 }
 
