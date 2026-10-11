@@ -21,6 +21,7 @@ SRCS := src/relations/RelationHandler.cpp \
     	src/relations/SelfRelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \
 	src/server/Cli.cpp \
+	src/stats/SenStats.cpp \
 	src/server/SenServer.cpp
 
 RDEFS = src/resources/sen_server.rdef
