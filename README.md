@@ -28,6 +28,21 @@ The log level is set with the environment variable `SEN_LOG_LEVEL` (`trace`, `de
 core ontology installed (`sen-oni`: `./scripts/oni.sh ontologies/core`), which also creates the BFS indices on all mounted volumes; the server checks
 them on every volume at start and when a volume is mounted. `create-sen-indices.sh` repairs the indices of a system.
 
+### The `sen` command
+
+`./create-sen-wrapper.sh` makes the command `sen` (in `~/config/non-packaged/bin`; the package does it as a post-install step): a wrapper around the
+server for the options that print information and exit, which need no running server.
+
+```
+> sen start           # the server, detached (sen alone starts it in the terminal), and sen stop to quit it
+> sen version         # SEN Server 1.0.0 development (2026-10-11, build 0)
+> sen info            # the number of SEN objects, types and relations
+> sen types           # the types and relations as a tree, with the number of files
+> sen check           # duplicate SEN:IDs, types that are not installed, missing indices
+```
+
+(`sen_server --version`, `--info`, `--types`, `--check` do the same.)
+
 ## Usage
 
 Use the SENryu Tracker ([senryu](https://github.com/sen-laboratories/senryu), the Tracker with the SEN menus) to navigate related files with the context menu

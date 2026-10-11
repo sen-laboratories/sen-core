@@ -6,10 +6,10 @@ resource app_signature "application/x-vnd.sen-labs.sen-server";
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 
 resource app_version {
-	 major = 0,
-	 middle = 2,
+	 major = 1,
+	 middle = 0,
 	 minor = 0,
-	 variety = B_APPV_ALPHA,
+	 variety = B_APPV_DEVELOPMENT,
 	 internal = 0,
 	 short_info = "SEN Server",
 	 long_info = "Semantic ExteNsions server process providing an infrastructure for semantic relations and queries."
