@@ -9,11 +9,16 @@
 
 #include <math.h>
 
+#include <Application.h>
 #include <Bitmap.h>
 #include <Button.h>
 #include <Cursor.h>
+#include <Entry.h>
 #include <Font.h>
+#include <FindDirectory.h>
 #include <LayoutBuilder.h>
+#include <Path.h>
+#include <Roster.h>
 #include <StringView.h>
 #include <TranslationUtils.h>
 #include <Url.h>
@@ -27,7 +32,36 @@ static const uint32 kSupport = 'ABsp';
 static const float kLogoSize = 144;
 
 static const char* const kWebsite = "https://sen-labs.org";
-static const char* const kSponsors = "https://github.com/sponsors/sen-laboratories";
+// the page for donations: a page of the documentation (the button of Liberapay is a script, which needs a page), else the page of Liberapay
+static const char* const kDonatePage = "https://liberapay.com/sen-labs/donate";
+
+
+/** The support page of the documentation: next to the program in the folder that it is built in (docs/), or where the package puts it. */
+static bool
+FindSupportPage(BPath* page)
+{
+	BPath candidate;
+
+	app_info info;
+	if (be_app != NULL && be_app->GetAppInfo(&info) == B_OK) {
+		BPath program(&info.ref);
+		if (program.GetParent(&candidate) == B_OK && candidate.GetParent(&candidate) == B_OK
+				&& candidate.Append("docs/support.html") == B_OK && BEntry(candidate.Path()).Exists()) {
+			*page = candidate;
+			return true;
+		}
+	}
+
+	static const char* const kPackaged[] = {"packages/sen-core/support.html", "sen-core/support.html"};
+	for (const char* relative : kPackaged) {
+		if (find_directory(B_SYSTEM_DOCUMENTATION_DIRECTORY, &candidate) == B_OK && candidate.Append(relative) == B_OK
+				&& BEntry(candidate.Path()).Exists()) {
+			*page = candidate;
+			return true;
+		}
+	}
+	return false;
+}
 
 
 /** Open a page with the preferred web browser. */
@@ -186,8 +220,15 @@ AboutWindow::MessageReceived(BMessage* message)
 			Activate();
 			break;
 		case kSupport:
-			OpenPage(kSponsors);
+		{
+			BPath page;
+			if (FindSupportPage(&page)) {
+				BUrl address(page);
+				address.OpenWithPreferredApplication();
+			} else
+				OpenPage(kDonatePage);
 			break;
+		}
 		default:
 			BWindow::MessageReceived(message);
 	}

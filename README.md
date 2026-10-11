@@ -49,6 +49,11 @@ server for the options that print information and exit, which need no running se
 
 (`sen_server --version`, `--info`, `--types`, `--check` do the same.)
 
+## Support
+
+SEN is free and open source. If it is useful to you, you can [support the project](docs/support.html) with a donation through Liberapay (no account with
+a code hosting service needed); the same page opens from the About window of the Deskbar menu.
+
 ## Usage
 
 Use the SENryu Tracker ([senryu](https://github.com/sen-laboratories/senryu), the Tracker with the SEN menus) to navigate related files with the context menu
