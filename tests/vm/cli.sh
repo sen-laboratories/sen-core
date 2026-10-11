@@ -26,14 +26,14 @@ $output"; return; }
 
 {
 check "VersionHasNameVersionDateAndBuild" "$SERVER --version" 0 '^.+ [0-9]+\.[0-9]+\.[0-9]+.* \([0-9]{4}-[0-9]{2}-[0-9]{2}, build [0-9]+\)$'
-check "InfoCountsObjectsTypesAndRelations" "$SERVER --info" 0 '^SEN objects \(files with a SEN:ID\): [0-9]+'
-check "InfoNamesTheTypes" "$SERVER --info" 0 '^Types installed: [0-9]+ entity, [0-9]+ meta'
-check "InfoNamesTheRelations" "$SERVER --info" 0 '^Relations installed: [0-9]+'
-check "TypesShowsATreePerSupertype" "$SERVER --types" 0 '^relation/  \([0-9]+ types?, [0-9]+ files?\)'
-check "TypesListsTheBranchesWithTheNumberOfFiles" "$SERVER --types" 0 '^(\|--|`--) .*  [0-9]+ files?$'
+check "InfoCountsObjectsTypesAndRelations" "$SERVER --info" 0 '^Objects +[0-9]+'
+check "InfoNamesTheTypes" "$SERVER --info" 0 '^Types +[0-9]+ entity .+ [0-9]+ meta'
+check "InfoNamesTheRelations" "$SERVER --info" 0 '^Relations +[0-9]+'
+check "TypesShowsATreePerSupertype" "$SERVER --types" 0 '^relation  [0-9]+ types? .+ [0-9]+ files?'
+check "TypesListsTheBranchesWithTheNumberOfFiles" "$SERVER --types" 0 '^(├|└)── .*  [0-9]+$'
 # (0 or 1, depending on what the VM holds: what is tested is that it says what it checked)
 CHECK_CODE=$($SERVER --check >/dev/null 2>&1; echo $?)
-check "CheckSaysWhatItChecked" "$SERVER --check" "$CHECK_CODE" '^Checked [0-9]+ files? with a SEN:ID'
+check "CheckSaysWhatItChecked" "$SERVER --check" "$CHECK_CODE" '^Checked [0-9]+ SEN objects? on [0-9]+ volumes?'
 check "HelpListsTheOptions" "$SERVER --help" 0 '  --check '
 check "AnUnknownOptionIsAnError" "$SERVER --nonsense" 2 "unknown option '--nonsense'"
 echo "$FAILED failure(s)"

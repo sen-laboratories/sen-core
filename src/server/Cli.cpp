@@ -275,7 +275,17 @@ CountInstalledTypes(const char* supertype)
 	return count;
 }
 
-/** The types of a supertype as a tree: a type whose name starts with the name of another type and a dot (the movie medium of a movie) is its child. */
+/** The number of characters (not bytes) of a text: the width of it in a terminal, for the columns. */
+int32
+Width(const BString& text)
+{
+	return text.CountChars();
+}
+
+/**
+ * The types of a supertype as a tree: a type whose name starts with the name of another type and a dot (the movie medium of a movie) is its
+ * child. Three columns: the name of the type (as people read it), the type, and the number of files, right aligned.
+ */
 void
 PrintTypeTree(const char* supertype, std::vector<TypeInfo>& types)
 {
@@ -303,27 +313,60 @@ PrintTypeTree(const char* supertype, std::vector<TypeInfo>& types)
 	int32 total = 0;
 	for (const TypeInfo& type : types)
 		total += type.files;
-	printf("%s/  (%s, %s)\n", supertype, Plural((int32)types.size(), "type", "types").String(),
+	printf("%s  %s \xc2\xb7 %s\n", supertype, Plural((int32)types.size(), "type", "types").String(),
 		Plural(total, "file", "files").String());
 
-	// depth first, with the lines of the ancestors that continue
-	struct Printer {
+	// the rows with the lines of the tree in front, then the columns can be aligned
+	struct Row {
+		BString		tree;	// the lines of the ancestors and this branch
+		BString		name;
+		BString		type;
+		int32		files;
+	};
+	std::vector<Row> rows;
+	struct Collector {
 		const std::vector<TypeInfo>& types;
-		void Print(size_t index, const std::string& prefix, bool last) const
+		std::vector<Row>* rows;
+		void Collect(size_t index, const BString& prefix, bool last) const
 		{
 			const TypeInfo& type = types[index];
-			// (the part after the supertype is the name of the type)
-			std::string subtype = type.type.substr(type.type.find('/') + 1);
-			printf("%s%s%s", prefix.c_str(), last ? "`-- " : "|-- ", subtype.c_str());
-			if (!type.name.IsEmpty())
-				printf("  \"%s\"", type.name.String());
-			printf("  %d %s\n", (int)type.files, type.files == 1 ? "file" : "files");
+			Row row;
+			row.tree = prefix;
+			row.tree << (last ? "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 " : "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 ");
+			// the name that people read, else the subtype
+			row.name = type.name;
+			if (row.name.IsEmpty())
+				row.name = type.type.substr(type.type.find('/') + 1).c_str();
+			row.type = type.type.substr(type.type.find('/') + 1).c_str();
+			row.files = type.files;
+			rows->push_back(row);
+
+			BString childPrefix(prefix);
+			childPrefix << (last ? "    " : "\xe2\x94\x82   ");
 			for (size_t child = 0; child < type.children.size(); child++)
-				Print(type.children[child], prefix + (last ? "    " : "|   "), child + 1 == type.children.size());
+				Collect(type.children[child], childPrefix, child + 1 == type.children.size());
 		}
-	} printer{types};
+	} collector{types, &rows};
 	for (size_t root = 0; root < roots.size(); root++)
-		printer.Print(roots[root], "", root + 1 == roots.size());
+		collector.Collect(roots[root], BString(), root + 1 == roots.size());
+
+	int32 nameWidth = 0, typeWidth = 0, countWidth = 1;
+	for (const Row& row : rows) {
+		nameWidth = std::max(nameWidth, Width(row.tree) + Width(row.name));
+		typeWidth = std::max(typeWidth, Width(row.type));
+		BString count;
+		count << row.files;
+		countWidth = std::max(countWidth, Width(count));
+	}
+	for (const Row& row : rows) {
+		printf("%s%s", row.tree.String(), row.name.String());
+		for (int32 pad = Width(row.tree) + Width(row.name); pad < nameWidth + 2; pad++)
+			putchar(' ');
+		printf("%s", row.type.String());
+		for (int32 pad = Width(row.type); pad < typeWidth + 2; pad++)
+			putchar(' ');
+		printf("%*d\n", (int)countWidth, (int)row.files);
+	}
 }
 
 
@@ -340,33 +383,38 @@ int
 Info()
 {
 	printf("%s\n", VersionLine().String());
-	printf("Server: %s\n", be_roster->IsRunning(sen::kServerSignature) ? "running" : "not running");
+	printf("Server     %s\n", be_roster->IsRunning(sen::kServerSignature) ? "running" : "not running");
 
 	std::vector<VolumeInfo> volumes = QueryableVolumes();
 	int32 objects = 0;
-	std::vector<std::pair<BString, int32> > perVolume;
-	std::vector<BString> unindexed;
+	BString perVolume;
+	BString notCounted;
 	for (const VolumeInfo& volume : volumes) {
 		if (!volume.hasIndexOf(sen::attr::kId)) {
-			unindexed.push_back(volume.name);
+			if (!notCounted.IsEmpty())
+				notCounted << ", ";
+			notCounted << volume.name;
 			continue;
 		}
 		int32 count = CountEntries(volume, (BString(sen::attr::kId) << "==*").String());
 		objects += count;
-		perVolume.push_back(std::make_pair(volume.name, count));
+		if (count > 0) {
+			if (!perVolume.IsEmpty())
+				perVolume << ", ";
+			perVolume << volume.name << " " << count;
+		}
 	}
 
-	printf("SEN objects (files with a SEN:ID): %d\n", (int)objects);
-	for (const auto& entry : perVolume) {
-		if (entry.second > 0)
-			printf("  %s: %d\n", entry.first.String(), (int)entry.second);
-	}
-	for (const BString& name : unindexed)
-		printf("  %s: not counted, no index for SEN:ID (see create-sen-indices.sh)\n", name.String());
+	printf("Objects    %d", (int)objects);
+	if (!perVolume.IsEmpty())
+		printf("  (%s)", perVolume.String());
+	printf("\n");
+	if (!notCounted.IsEmpty())
+		printf("           not counted, no index for %s (see create-sen-indices.sh): %s\n", sen::attr::kId, notCounted.String());
 
-	printf("Types installed: %d entity, %d meta\n", (int)CountInstalledTypes(sen::mime::kEntitySupertype),
+	printf("Types      %d entity \xc2\xb7 %d meta\n", (int)CountInstalledTypes(sen::mime::kEntitySupertype),
 		(int)CountInstalledTypes(sen::mime::kMetaSupertype));
-	printf("Relations installed: %d\n", (int)CountInstalledTypes(sen::mime::kRelationSupertype));
+	printf("Relations  %d\n", (int)CountInstalledTypes(sen::mime::kRelationSupertype));
 	return 0;
 }
 
@@ -401,12 +449,13 @@ Types()
 		if (group > 0)
 			printf("\n");
 		if (all[group].empty())
-			printf("%s/  (no types installed)\n", supertypes[group]);
+			printf("%s  no types installed\n", supertypes[group]);
 		else
 			PrintTypeTree(supertypes[group], all[group]);
 	}
 
-	printf("\nMeta types and entities: the files of the type; relations: the files that have such a relation.\n");
+	if (!counts.notes.empty())
+		printf("\n");
 	for (const BString& name : counts.notes)
 		printf("Volume %s cannot query the type of files: only its files with a SEN:ID are counted.\n", name.String());
 	return 0;
@@ -459,7 +508,7 @@ Check()
 		}
 	}
 
-	printf("Checked %s with a SEN:ID on %s.\n", Plural(objects, "file", "files").String(),
+	printf("Checked %s on %s.\n", Plural(objects, "SEN object", "SEN objects").String(),
 		Plural((int32)volumes.size(), "volume", "volumes").String());
 
 	// duplicates: the ID must be unique (copies that were not detected)
