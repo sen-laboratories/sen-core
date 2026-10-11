@@ -907,32 +907,65 @@ status_t RelationHandler::AssignPreferredNavigator(BMimeType* relationType)
         return result;
     }
 
-    for (const entry_ref& pluginRef : plugins) {
-        BFile pluginFile(&pluginRef, B_READ_ONLY);
-        BAppFileInfo appInfo(&pluginFile);
-        if (appInfo.InitCheck() != B_OK) {
-            continue;
-        }
+    // a navigator that declares the type itself, else one that declares the supertype ("relation"): the default for the relations that
+    // have no navigator of their own. (The roster does not look at the supertype for a file, so it is assigned to the type.)
+    BString supertype;
+    {
+        BMimeType super;
+        if (relationType->GetSupertype(&super) == B_OK)
+            supertype.SetTo(super.Type());
+    }
 
-        BMessage supportedTypes;
-        if (appInfo.GetSupportedTypes(&supportedTypes) != B_OK) {
+    for (int pass = 0; pass < 2; pass++) {
+        const char* wanted = pass == 0 ? relationType->Type() : supertype.String();
+        if (wanted[0] == '\0')
             continue;
-        }
 
-        BString type;
-        for (int i = 0; supportedTypes.FindString("types", i, &type) == B_OK; i++) {
-            if (type == relationType->Type()) {
-                char signature[B_MIME_TYPE_LENGTH];
-                if (appInfo.GetSignature(signature) == B_OK) {
-                    spdlog::info("assigning {} as preferred app for relation type {} (navigator {})",
-                        signature, relationType->Type(), pluginRef.name);
-                    return relationType->SetPreferredApp(signature);
+        for (const entry_ref& pluginRef : plugins) {
+            BFile pluginFile(&pluginRef, B_READ_ONLY);
+            BAppFileInfo appInfo(&pluginFile);
+            if (appInfo.InitCheck() != B_OK) {
+                continue;
+            }
+
+            BMessage supportedTypes;
+            if (appInfo.GetSupportedTypes(&supportedTypes) != B_OK) {
+                continue;
+            }
+
+            BString type;
+            for (int i = 0; supportedTypes.FindString("types", i, &type) == B_OK; i++) {
+                if (type == wanted) {
+                    char signature[B_MIME_TYPE_LENGTH];
+                    if (appInfo.GetSignature(signature) == B_OK) {
+                        spdlog::info("assigning {} as preferred app for relation type {} (navigator {})",
+                            signature, relationType->Type(), pluginRef.name);
+                        return relationType->SetPreferredApp(signature);
+                    }
                 }
             }
         }
     }
 
     return B_NAME_NOT_FOUND;
+}
+
+void RelationHandler::AssignMissingNavigators()
+{
+    BMessage installed;
+    if (BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &installed) != B_OK)
+        return;
+
+    const char* type;
+    for (int32 index = 0; installed.FindString("types", index, &type) == B_OK; index++) {
+        BMimeType relationType(type);
+        char signature[B_MIME_TYPE_LENGTH];
+        if (relationType.InitCheck() != B_OK || relationType.GetPreferredApp(signature) == B_OK)
+            continue;
+        status_t result = AssignPreferredNavigator(&relationType);
+        if (result != B_OK)
+            spdlog::debug("no navigator for relation type {}: {}", type, strerror(result));
+    }
 }
 
 status_t RelationHandler::GetSubtype(const BString* mimeTypeStr, BString* subType) {

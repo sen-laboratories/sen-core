@@ -23,6 +23,9 @@ namespace sen { class AttrSnapshot; }
 class RelationHandler : public BHandler {
 
 public:
+        /** @brief Give every installed relation type that has no preferred app the navigator that declares it, or else the one for all
+         *  relations (the supertype), see AssignPreferredNavigator. Done when the server starts. */
+        void        AssignMissingNavigators();
         RelationHandler();
 
         status_t    AddRelation             (const BMessage* message, BMessage* reply);

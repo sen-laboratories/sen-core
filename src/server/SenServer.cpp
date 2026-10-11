@@ -117,6 +117,9 @@ void SenServer::ReadyToRun()
         Quit();
     }
 
+    // the relations that were installed before there was a navigator for them (or a navigator for all relations)
+    relationHandler->AssignMissingNavigators();
+
     BApplication::ReadyToRun();
 }
 
