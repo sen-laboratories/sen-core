@@ -21,6 +21,15 @@ SRCS := src/relations/RelationHandler.cpp \
     	src/relations/SelfRelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \
 	src/server/Cli.cpp \
+	src/deskbar/DeskbarView.cpp \
+	src/ui/AboutWindow.cpp \
+	src/ui/CheckWindow.cpp \
+	src/ui/InfoWindow.cpp \
+	src/ui/Knot.cpp \
+	src/ui/QueryFiles.cpp \
+	src/ui/SenUi.cpp \
+	src/ui/SettingsWindow.cpp \
+	src/ui/StatItem.cpp \
 	src/stats/SenStats.cpp \
 	src/server/SenServer.cpp
 

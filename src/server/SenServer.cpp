@@ -6,6 +6,7 @@
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
 #include "Cli.h"
+#include "../deskbar/DeskbarView.h"
 #include "SenServer.h"
 #include "Reply.h"
 #include "../relations/RelationHandler.h"
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include <AppFileInfo.h>
+#include <Deskbar.h>
 #include <Directory.h>
 #include <Entry.h>
 #include <FindDirectory.h>
@@ -65,6 +67,7 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
 	// setup feature-specific handlers for initializing SEN modules and later redirecting messages appropriately
     relationHandler  = new RelationHandler();
     senConfigHandler = new SenConfigHandler();
+    fUi = new sen::ui::SenUi(senConfigHandler, relationHandler);
 
 	// watch all mounted volumes for new entries to ensure that copies get their own SEN:ID, and be told about volumes that
 	// are mounted later
@@ -104,6 +107,7 @@ void SenServer::EnsureIndices(dev_t device)
 
 SenServer::~SenServer()
 {
+    delete fUi;
     spdlog::info("Goodbye:)");
     stop_watching(this);
 }
@@ -120,11 +124,46 @@ void SenServer::ReadyToRun()
     // the relations that were installed before there was a navigator for them (or a navigator for all relations)
     relationHandler->AssignMissingNavigators();
 
+    InstallDeskbarItem();
+
     BApplication::ReadyToRun();
+}
+
+void SenServer::InstallDeskbarItem()
+{
+    BDeskbar deskbar;
+    if (!deskbar.IsRunning() || deskbar.HasItem(sen::deskbar::kItemName))
+        return;
+
+    // the item is loaded from this program (it has instantiate_deskbar_item), the Deskbar asks for the file
+    app_info info;
+    status_t status = GetAppInfo(&info);
+    if (status == B_OK)
+        status = deskbar.AddItem(&info.ref);
+    if (status != B_OK)
+        spdlog::warn("could not add the SEN item to the Deskbar: {}", strerror(status));
+}
+
+void SenServer::RemoveDeskbarItem()
+{
+    BDeskbar deskbar;
+    if (deskbar.IsRunning() && deskbar.HasItem(sen::deskbar::kItemName))
+        deskbar.RemoveItem(sen::deskbar::kItemName);
+}
+
+bool SenServer::QuitRequested()
+{
+    RemoveDeskbarItem();
+    fUi->CloseWindows();
+    return BApplication::QuitRequested();
 }
 
 void SenServer::MessageReceived(BMessage* message)
 {
+	// the menu in the Deskbar: windows, queries, quitting (no reply)
+	if (fUi->Handle(message))
+		return;
+
 	BMessage* reply = new BMessage();
 	status_t result;
 

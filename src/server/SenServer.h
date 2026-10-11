@@ -6,6 +6,7 @@
 
 #include "../config/SenConfigHandler.h"
 #include "../relations/RelationHandler.h"
+#include "../ui/SenUi.h"
 
 #include <Application.h>
 #include <File.h>
@@ -17,6 +18,7 @@ virtual		~SenServer();
 
 virtual	void ReadyToRun();
 virtual	void MessageReceived(BMessage* message);
+virtual	bool QuitRequested();
 
 private:
     /**
@@ -31,6 +33,11 @@ private:
     /** @brief Create the BFS indices that SEN queries need on a volume; existing ones are left alone. */
     void                EnsureIndices(dev_t device);
 
+    /** @brief Put the item of SEN in the Deskbar (the knot with the menu), like the mail server; and take it out again when the server quits. */
+    void                InstallDeskbarItem();
+    void                RemoveDeskbarItem();
+
     RelationHandler*    relationHandler;
     SenConfigHandler*   senConfigHandler;
+    sen::ui::SenUi*     fUi;
 };

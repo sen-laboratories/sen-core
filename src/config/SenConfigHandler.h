@@ -5,6 +5,7 @@
 #pragma once
 
 #include <Application.h>
+#include <Locker.h>
 
 class SenConfigHandler : public BHandler {
 
@@ -12,6 +13,11 @@ public:
                 SenConfigHandler();
     status_t    Init();
     status_t    GetConfig(BMessage* settingsMsg);
+    /**
+     * @brief Change settings and save them: every field of @p changes replaces the field of the same name (or is added).
+     * Can be called from any thread (the windows of the Deskbar menu do).
+     */
+    status_t    UpdateSettings(const BMessage* changes);
 
 virtual         ~SenConfigHandler();
 
@@ -109,4 +115,5 @@ private:
 
     BDirectory* fSettingsDir;
     BMessage*   fSettingsMsg;
+    BLocker     fSettingsLock;
 };

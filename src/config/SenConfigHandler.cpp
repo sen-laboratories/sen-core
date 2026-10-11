@@ -7,6 +7,7 @@
 #include <sen/Sen.h>
 
 #include <AppFileInfo.h>
+#include <Autolock.h>
 #include <Directory.h>
 #include <File.h>
 #include <FindDirectory.h>
@@ -58,7 +59,7 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
 
     // read or create and init settings file
     BEntry settingsDirEntry(path.Path());
-    BEntry settingsFileEntry(fSettingsDir, "sen.settings");
+    BEntry settingsFileEntry(fSettingsDir, sen::config::kSettingsFile);
 
     if (! settingsDirEntry.Exists() || ! settingsFileEntry.Exists()) {
         status = InitDefaultSettings(&path, settingsMessage);
@@ -173,7 +174,7 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* se
 
 status_t SenConfigHandler::SaveSettings(const BMessage* message)
 {
-    BFile settingsFile(fSettingsDir, "sen.settings", B_CREATE_FILE | B_ERASE_FILE | B_READ_WRITE);
+    BFile settingsFile(fSettingsDir, sen::config::kSettingsFile, B_CREATE_FILE | B_ERASE_FILE | B_READ_WRITE);
 
     status_t status = message->Flatten(&settingsFile);
     if (status == B_OK) {
@@ -226,10 +227,37 @@ void SenConfigHandler::MessageReceived(BMessage* message)
 
 status_t SenConfigHandler::GetConfig(BMessage* settingsMsg)
 {
+    BAutolock lock(fSettingsLock);
     if (settingsMsg == NULL || fSettingsMsg->IsEmpty())
         return B_NOT_INITIALIZED;
 
     return settingsMsg->Append(*fSettingsMsg);
+}
+
+status_t SenConfigHandler::UpdateSettings(const BMessage* changes)
+{
+    BAutolock lock(fSettingsLock);
+
+    char* name;
+    type_code type;
+    int32 count;
+    for (int32 field = 0; changes->GetInfo(B_ANY_TYPE, field, &name, &type, &count) == B_OK; field++) {
+        bool fixedSize = true;
+        changes->GetInfo(name, &type, &fixedSize);
+        fSettingsMsg->RemoveName(name);
+        for (int32 item = 0; item < count; item++) {
+            const void* data;
+            ssize_t size;
+            status_t status = changes->FindData(name, type, item, &data, &size);
+            if (status == B_OK)
+                status = fSettingsMsg->AddData(name, type, data, size, fixedSize);
+            if (status != B_OK) {
+                spdlog::error("could not change setting {}: {}", name, strerror(status));
+                return status;
+            }
+        }
+    }
+    return SaveSettings(fSettingsMsg);
 }
 
 status_t SenConfigHandler::FindContextByName(const char* name, BMessage *reply)

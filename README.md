@@ -28,6 +28,12 @@ The log level is set with the environment variable `SEN_LOG_LEVEL` (`trace`, `de
 core ontology installed (`sen-oni`: `./scripts/oni.sh ontologies/core`), which also creates the BFS indices on all mounted volumes; the server checks
 them on every volume at start and when a volume is mounted. `create-sen-indices.sh` repairs the indices of a system.
 
+### The Deskbar item
+
+The server adds an item with the SEN knot to the Deskbar, like the mail server does (`src/deskbar`): a click opens the query with all SEN objects, the
+menu gives access to contexts, classifications, and the Info, Check and Settings windows (`src/ui`). The windows are shown by the server (the item
+only sends messages), the statistics are shared with the command line (`src/stats`).
+
 ### The `sen` command
 
 `./create-sen-wrapper.sh` makes the command `sen` (in `~/config/non-packaged/bin`; the package does it as a post-install step): a wrapper around the
