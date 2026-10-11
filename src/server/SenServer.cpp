@@ -5,6 +5,7 @@
 
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
+#include "Cli.h"
 #include "SenServer.h"
 #include "Reply.h"
 #include "../relations/RelationHandler.h"
@@ -37,6 +38,11 @@
 
 int main(int argc, char* argv[])
 {
+	// the options that print information and exit (--version, --info, --types, --check): without starting the server
+	int exitCode = RunCommandLine(argc, argv);
+	if (exitCode >= 0)
+		return exitCode;
+
 	spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
 	if (const char* level = getenv("SEN_LOG_LEVEL"))
 		spdlog::set_level(spdlog::level::from_str(level));
