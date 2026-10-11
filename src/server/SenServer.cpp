@@ -38,6 +38,9 @@
 #include <spdlog/spdlog.h>
 
 
+/** sent by the timer that waits for the Deskbar */
+static const uint32 kRetryDeskbar = 'SDbr';
+
 int main(int argc, char* argv[])
 {
 	// the options that print information and exit (--version, --info, --types, --check): without starting the server
@@ -68,6 +71,8 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
     relationHandler  = new RelationHandler();
     senConfigHandler = new SenConfigHandler();
     fUi = new sen::ui::SenUi(senConfigHandler, relationHandler);
+    fDeskbarRetry = NULL;
+    fDeskbarTries = 0;
 
 	// watch all mounted volumes for new entries to ensure that copies get their own SEN:ID, and be told about volumes that
 	// are mounted later
@@ -107,6 +112,7 @@ void SenServer::EnsureIndices(dev_t device)
 
 SenServer::~SenServer()
 {
+    delete fDeskbarRetry;
     delete fUi;
     spdlog::info("Goodbye:)");
     stop_watching(this);
@@ -132,8 +138,15 @@ void SenServer::ReadyToRun()
 void SenServer::InstallDeskbarItem()
 {
     BDeskbar deskbar;
-    if (!deskbar.IsRunning())
+    if (!deskbar.IsRunning()) {
+        // the server can be started before the Deskbar (the launch daemon starts both): try again for a while
+        if (fDeskbarRetry == NULL && fDeskbarTries == 0)
+            fDeskbarRetry = new BMessageRunner(this, new BMessage(kRetryDeskbar), 3000000, 20);
         return;
+    }
+    delete fDeskbarRetry;
+    fDeskbarRetry = NULL;
+    fDeskbarTries = 0;
     // an item that is there is the one of a server that did not quit properly, or of an older version of the program: it is replaced
     if (deskbar.HasItem(sen::deskbar::kItemName))
         deskbar.RemoveItem(sen::deskbar::kItemName);
@@ -163,6 +176,12 @@ bool SenServer::QuitRequested()
 
 void SenServer::MessageReceived(BMessage* message)
 {
+	if (message->what == kRetryDeskbar) {
+		fDeskbarTries++;
+		InstallDeskbarItem();
+		return;
+	}
+
 	// the menu in the Deskbar: windows, queries, quitting (no reply)
 	if (fUi->Handle(message))
 		return;

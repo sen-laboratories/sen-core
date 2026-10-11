@@ -52,7 +52,7 @@ FindSupportPage(BPath* page)
 		}
 	}
 
-	static const char* const kPackaged[] = {"packages/sen-core/support.html", "sen-core/support.html"};
+	static const char* const kPackaged[] = {"packages/sen_core/support.html", "sen_core/support.html"};
 	for (const char* relative : kPackaged) {
 		if (find_directory(B_SYSTEM_DOCUMENTATION_DIRECTORY, &candidate) == B_OK && candidate.Append(relative) == B_OK
 				&& BEntry(candidate.Path()).Exists()) {

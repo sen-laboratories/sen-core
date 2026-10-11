@@ -38,3 +38,5 @@ objects.*
 
 # for now
 examples/*
+*.hpkg
+package-build/

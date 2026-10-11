@@ -16,10 +16,12 @@
 #
 # Used by hand and as the post-install step of the package. Safe to re-run: the wrapper is made new.
 #
-# Usage: create-sen-wrapper.sh [<sen_server> [<folder for the command>]]
+# Usage: create-sen-wrapper.sh [<sen_server> [<folder for the command> [<path of the server when installed>]]]
 #   <sen_server>   the server to start; default: bin/sen_server next to this script, else the one in the PATH
 #   <folder>       where the command goes, which has to be in the PATH; default: the folder for programs that were not installed
 #                  as a package (~/config/non-packaged/bin). The package puts it in its own bin folder.
+#   <installed>    the path that the command starts, if it is not the one of <sen_server>: the package is made (and the command with it)
+#                  before the server is installed, e.g. /boot/system/bin/sen_server.
 
 set -e
 
@@ -39,6 +41,7 @@ if [ -z "$SERVER" ] || [ ! -x "$SERVER" ]; then
 fi
 # the wrapper names the server by its full path, wherever the wrapper is called from
 SERVER="$(cd "$(dirname "$SERVER")" && pwd)/$(basename "$SERVER")"
+[ -n "$3" ] && SERVER="$3"
 
 FOLDER="$2"
 if [ -z "$FOLDER" ]; then

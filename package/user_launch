@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 SEN Labs e.U.
+#
+# Starts the SEN server with the session (in the user launch folder of the launch daemon, like the mail server it is a legacy application that
+# registers itself). To start it by hand instead, remove this file from the package or use "sen start".
+
+service x-vnd.sen-labs.sen-server {
+	launch /boot/system/bin/sen_server
+	legacy
+	no_safemode
+	on initial_volumes_mounted
+}

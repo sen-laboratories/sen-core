@@ -4,14 +4,7 @@
 NAME = sen_server
 ARCH = $(shell getarch)
 
-V_MAJOR = 0
-V_MIDDLE = 4
-V_MINOR = 2
-V_VARIETY = B_APPV_DEVELOPMENT
-V_BUILD = 0
-
 TARGET_DIR := ./bin
-PACKAGE = $(TARGET_DIR)/$(NAME)_$(VERSION)-$(ARCH).hpkg
 TYPE = APP
 APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 
@@ -102,26 +95,9 @@ ifeq ($(DEBUGGER),TRUE)
 	DEFINES += DEBUGGING TRACING
 endif
 
-PACKAGE_DIR = $(OBJ_DIR)/package
-ARCH_PACKAGE_INFO = $(OBJ_DIR)/PackageInfo_$(ARCH)
-
-$(ARCH_PACKAGE_INFO): Makefile
-	cat ./PackageInfo | sed 's/$$VERSION/$(VERSION)/' | sed 's/$$ARCH/$(ARCH)/' > $(ARCH_PACKAGE_INFO)
-
-$(PACKAGE): $(TARGET_DIR)/$(NAME) $(ARCH_PACKAGE_INFO)
-	mkdir -p $(PACKAGE_DIR)/apps
-	mkdir -p $(PACKAGE_DIR)/data/deskbar/menu/Applications
-	cp $(TARGET_DIR)/$(NAME) $(PACKAGE_DIR)/apps/
-	-ln -s ../../../../apps/$(NAME) $(PACKAGE_DIR)/data/deskbar/menu/Applications/$(NAME)
-	package create -C $(PACKAGE_DIR)/ -i $(OBJ_DIR)/PackageInfo_$(ARCH) $(PACKAGE)
-	mimeset $(PACKAGE)
-
-package: $(PACKAGE)
-
 distclean:
 	-rm $(TARGET_DIR)/$(NAME)
 
-install:: package
-	pkgman install $(PACKAGE)
+# (the package is made by package.sh)
 
 #$(VERSION_RDEF): Makefile

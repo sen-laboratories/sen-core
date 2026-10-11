@@ -9,6 +9,7 @@
 #include "../ui/SenUi.h"
 
 #include <Application.h>
+#include <MessageRunner.h>
 #include <File.h>
 
 class SenServer : public BApplication {
@@ -40,4 +41,7 @@ private:
     RelationHandler*    relationHandler;
     SenConfigHandler*   senConfigHandler;
     sen::ui::SenUi*     fUi;
+    /** @brief While the Deskbar is not there yet (at the start of a session): tries again now and then, to add the item of SEN. */
+    BMessageRunner*     fDeskbarRetry;
+    int32               fDeskbarTries;
 };

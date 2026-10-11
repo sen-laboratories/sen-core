@@ -49,6 +49,17 @@ server for the options that print information and exit, which need no running se
 
 (`sen_server --version`, `--info`, `--types`, `--check` do the same.)
 
+## Package
+
+```
+> ./build.sh      # the release build (optimised, no debugging code); ./build.sh debug for a debug build
+> ./package.sh    # sen_core-<version>-<arch>.hpkg
+```
+
+The version comes from the application resource (`src/resources/sen_server.rdef`): a development build is a pre-release (`1.0.0~dev`). The package has the server
+and the command `sen` in `bin`, a job for the launch daemon that starts the server with the session (`data/user_launch`), the script that repairs
+the indices (`data/sen-core/create-sen-indices.sh`) and the documentation. It needs `spdlog` and `libfmt` from HaikuPorts.
+
 ## Support
 
 SEN is free and open source. If it is useful to you, you can [support the project](docs/support.html) with a donation through Liberapay (no account with
