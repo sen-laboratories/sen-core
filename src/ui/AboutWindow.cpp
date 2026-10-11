@@ -7,18 +7,102 @@
 
 #include "../stats/SenStats.h"
 
+#include <math.h>
+
 #include <Bitmap.h>
+#include <Button.h>
+#include <Cursor.h>
 #include <Font.h>
 #include <LayoutBuilder.h>
 #include <StringView.h>
 #include <TranslationUtils.h>
+#include <Url.h>
 #include <View.h>
 
 namespace sen {
 namespace ui {
 
 static const uint32 kActivate = 'ABac';
+static const uint32 kSupport = 'ABsp';
 static const float kLogoSize = 144;
+
+static const char* const kWebsite = "https://sen-labs.org";
+static const char* const kSponsors = "https://github.com/sponsors/sen-laboratories";
+
+
+/** Open a page with the preferred web browser. */
+static void
+OpenPage(const char* url)
+{
+	BUrl address(url, true);
+	address.OpenWithPreferredApplication();
+}
+
+
+/** A link: the text in the colour of links, underlined; a click opens the page in the web browser. */
+class LinkView : public BView {
+public:
+	LinkView(const char* name, const char* text, const char* url)
+		:
+		BView(name, B_WILL_DRAW | B_FULL_UPDATE_ON_RESIZE),
+		fText(text),
+		fUrl(url)
+	{
+		SetExplicitAlignment(BAlignment(B_ALIGN_LEFT, B_ALIGN_VERTICAL_UNSET));
+	}
+
+	virtual void AttachedToWindow()
+	{
+		AdoptParentColors();
+		if (ViewUIColor() == B_NO_COLOR)
+			SetLowColor(ViewColor());
+		else
+			SetLowUIColor(ViewUIColor());
+		SetHighUIColor(B_LINK_TEXT_COLOR);
+	}
+
+	virtual void GetPreferredSize(float* width, float* height)
+	{
+		font_height fontHeight;
+		GetFontHeight(&fontHeight);
+		if (width != NULL)
+			*width = StringWidth(fText.String());
+		if (height != NULL)
+			*height = ceilf(fontHeight.ascent + fontHeight.descent + fontHeight.leading) + 2;
+	}
+
+	virtual BSize MinSize() { float w, h; GetPreferredSize(&w, &h); return BSize(w, h); }
+	virtual BSize MaxSize() { float w, h; GetPreferredSize(&w, &h); return BSize(w, h); }
+	virtual BSize PreferredSize() { float w, h; GetPreferredSize(&w, &h); return BSize(w, h); }
+
+	virtual void Draw(BRect)
+	{
+		font_height fontHeight;
+		GetFontHeight(&fontHeight);
+		BPoint start(0, ceilf(fontHeight.ascent));
+		DrawString(fText.String(), start);
+		float width = StringWidth(fText.String());
+		StrokeLine(BPoint(0, start.y + 2), BPoint(width, start.y + 2));
+	}
+
+	virtual void MouseMoved(BPoint, uint32 transit, const BMessage*)
+	{
+		if (transit == B_ENTERED_VIEW) {
+			BCursor hand(B_CURSOR_ID_FOLLOW_LINK);
+			SetViewCursor(&hand);
+		} else if (transit == B_EXITED_VIEW)
+			SetViewCursor(B_CURSOR_SYSTEM_DEFAULT);
+	}
+
+	virtual void MouseDown(BPoint)
+	{
+		OpenPage(fUrl.String());
+	}
+
+private:
+	BString	fText;
+	BString	fUrl;
+};
 
 
 /** Draws a bitmap in a fixed size; it is not the logo that decides how large the window is. */
@@ -84,7 +168,11 @@ AboutWindow::AboutWindow()
 		.AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
 			.Add(new BStringView("copyright", "\xc2\xa9 2020-2026 SEN Labs e.U."))
 			.Add(new BStringView("license", "MIT License"))
-			.Add(new BStringView("web", "github.com/sen-laboratories"))
+			.Add(new LinkView("web", "sen-labs.org", kWebsite))
+		.End()
+		.AddGroup(B_HORIZONTAL)
+			.AddGlue()
+			.Add(new BButton("support", "Support this project", new BMessage(kSupport)))
 		.End()
 	.End();
 }
@@ -93,10 +181,16 @@ AboutWindow::AboutWindow()
 void
 AboutWindow::MessageReceived(BMessage* message)
 {
-	if (message->what == kActivate)
-		Activate();
-	else
-		BWindow::MessageReceived(message);
+	switch (message->what) {
+		case kActivate:
+			Activate();
+			break;
+		case kSupport:
+			OpenPage(kSponsors);
+			break;
+		default:
+			BWindow::MessageReceived(message);
+	}
 }
 
 }	// namespace ui
