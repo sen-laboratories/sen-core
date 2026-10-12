@@ -15,11 +15,11 @@ The package is in the SEN Labs repository, [Kiri](https://kiri.sen-labs.org):
 
 ```
 > pkgman add-repo https://kiri.sen-labs.org/x86_64
-> pkgman install sen_core
+> pkgman install sen_core sen_plugins
 ```
 
 The server starts with the next session (start it now with `sen start`); its item appears in the Deskbar. The package brings the core ontology
-(`sen_ontology_core`, from [sen-oni](https://github.com/sen-laboratories/sen-oni)) with it. The other ontologies are packages, too
+(`sen_ontology_core`, from [sen-oni](https://github.com/sen-laboratories/sen-oni)) with it. `sen_plugins` brings the plugins of SENSEI (extract relations from PDF, Markdown and source code files, open them). The other ontologies are packages, too
 (`pkgman install sen_ontology_books`, ...): the server has the installer `sen_oni` put the ontologies of the packages into the MIME database when it
 starts and whenever a package is added or removed (log: `~/config/settings/sen/ontologies-update.log`).
 
