@@ -85,6 +85,17 @@ check "includes in comments, strings, raw strings and #if 0 are not found" "! gr
 check "spaces after the # and #if 1 are understood" "grep -q 'vector' /tmp/sen-e2e.hard && grep -q 'enabled.h' /tmp/sen-e2e.hard"
 check "a BeAPI header is found in the folder of its kit" "grep -q 'includePath.*headers/os/app/Application.h' /tmp/sen-e2e.hard"
 check "the line of a directive after multi-line strings is right" "grep -q 'be:line.*: 10 ' /tmp/sen-e2e.hard"
+
+echo "== imports of a Python file"
+printf 'import os, sys as system\nfrom collections import (OrderedDict,\n    defaultdict)  # import in_comment\n"""import in_docstring"""\nfrom . import sibling\nfrom .pkg.mod import thing\nif True: import json\nx = "import in_string"; import re\n' > $C/pyfile.py
+printf 'VALUE = 1\n' > $C/sibling.py
+hey $SIG SRsg with refs=$C/pyfile.py and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.py 2>&1
+check "the imports are found" "grep -q '\"os\"' /tmp/sen-e2e.py && grep -q 'collections' /tmp/sen-e2e.py && grep -q 'json' /tmp/sen-e2e.py && grep -q '\"re\"' /tmp/sen-e2e.py && grep -q 'sibling' /tmp/sen-e2e.py"
+check "imports in comments, docstrings and strings are not found" "! grep -q 'in_comment\|in_docstring\|in_string' /tmp/sen-e2e.py"
+check "a relative import is found in the project, one that is missing is kept as written" "grep -q 'includePath.*_code/sibling.py' /tmp/sen-e2e.py && grep -q 'includePath.*\"\\.pkg\\.mod\"' /tmp/sen-e2e.py"
+check "a module of the standard library is found in the library folders of Python" "grep -q 'includePath.*python3.*collections/__init__.py' /tmp/sen-e2e.py"
+check "relative imports are not global, the others are" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.py) -eq 5 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.py) -eq 2 ]"
+check "the lines of the imports are given" "grep -q 'be:line.*: 5 ' /tmp/sen-e2e.py && grep -q 'be:line.*: 8 ' /tmp/sen-e2e.py"
 rm -rf $C $PDFS
 
 echo "== copies are new objects"
