@@ -107,13 +107,82 @@ check "imports in comments, strings and text blocks are not found" "! grep -q 'i
 check "a class of the project is found by its package, a library class is not" "[ \$(grep -c 'includePath.*com/acme/util/Helper.java' /tmp/sen-e2e.java) -eq 2 ] && ! grep -q 'includePath.*java/util/List.java' /tmp/sen-e2e.java"
 check "project classes are not global, libraries and packages are" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.java) -eq 2 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.java) -eq 2 ]"
 check "the lines of the imports are given" "grep -q 'be:line.*: 4 ' /tmp/sen-e2e.java && grep -q 'be:line.*: 7 ' /tmp/sen-e2e.java"
-# a C header by its name that holds Python: the semantic type decides
-printf 'import json\n#include <not_c.h>\n' > $C/weird.h
-# (a file with META:TYPE and without BEOS:TYPE is taken for an entry of the MIME database by Haiku: give it its type, as Tracker does)
-addattr -t mime BEOS:TYPE text/x-source-code $C/weird.h
-addattr -t mime META:TYPE text/x-python $C/weird.h
-hey $SIG SRsg with refs=$C/weird.h and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.weird 2>&1
-check "the semantic type (META:TYPE) has precedence over the extension" "grep -q 'json' /tmp/sen-e2e.weird && ! grep -q 'not_c.h' /tmp/sen-e2e.weird"
+echo "== the plugin identifies the language and sets the semantic type (META:TYPE)"
+check "a C++ file gets text/x-c++src" "[ \"\$(catattr -d META:TYPE $C/sample.cpp)\" = text/x-c++src ]"
+check "a Python file gets text/x-python" "[ \"\$(catattr -d META:TYPE $C/pyfile.py)\" = text/x-python ]"
+check "a Java file gets text/x-java-source" "[ \"\$(catattr -d META:TYPE $J/App.java)\" = text/x-java-source ]"
+check "the file has its Haiku type, too" "[ \"\$(catattr -d BEOS:TYPE $C/pyfile.py)\" = text/x-source-code ]"
+printf 'namespace x { class Y; }\n' > $C/cppish.h
+printf 'int f(void);\n' > $C/plain.h
+for f in cppish.h plain.h; do addattr -t mime BEOS:TYPE text/x-source-code $C/$f; done
+for f in cppish.h plain.h; do hey $SIG SRsg with refs=$C/$f and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.h 2>&1; done
+check "a .h file with classes is a C++ header" "[ \"\$(catattr -d META:TYPE $C/cppish.h)\" = text/x-c++hdr ]"
+check "a .h file without is a C header" "[ \"\$(catattr -d META:TYPE $C/plain.h)\" = text/x-chdr ]"
+# a script without extension: the shebang tells (the file is of the source code type of Haiku)
+printf '#!/usr/bin/env python3\nimport json\n' > $C/runme
+addattr -t mime BEOS:TYPE text/x-source-code $C/runme
+hey $SIG SRsg with refs=$C/runme and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.runme 2>&1
+check "a script is recognized by its shebang, and its imports are found" "[ \"\$(catattr -d META:TYPE $C/runme)\" = text/x-python ] && grep -q 'json' /tmp/sen-e2e.runme"
+
+echo "== imports of a Go file"
+G=$C/gt; mkdir -p $G/util
+printf 'module example.com/app\n\ngo 1.22\n' > $G/go.mod
+printf 'package util\n' > $G/util/util.go
+cat > $G/main.go <<'GO'
+// import "in_comment"
+package main
+
+import "fmt"
+import (
+	"example.com/app/util" // the project
+	f "os"
+	_ "net/http"
+)
+import . "math"
+
+var s = "import \"in_string\""
+var r = `import "in_raw"`
+
+func main() {}
+GO
+hey $SIG SRsg with refs=$G/main.go and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.go 2>&1
+check "the imports are found (single, aliased, grouped, dot, blank)" "grep -q '\"fmt\"' /tmp/sen-e2e.go && grep -q 'example.com/app/util' /tmp/sen-e2e.go && grep -q '\"os\"' /tmp/sen-e2e.go && grep -q 'net/http' /tmp/sen-e2e.go && grep -q '\"math\"' /tmp/sen-e2e.go"
+check "imports in comments, strings and raw strings are not found" "! grep -q 'in_comment\|in_string\|in_raw' /tmp/sen-e2e.go"
+check "a package of the module is resolved to its folder and is not global" "grep -q 'includePath.*gt/util\"' /tmp/sen-e2e.go && [ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.go) -eq 4 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.go) -eq 1 ]"
+check "the lines of the imports are given" "grep -q 'be:line.*: 4 ' /tmp/sen-e2e.go && grep -q 'be:line.*: 6 ' /tmp/sen-e2e.go && grep -q 'be:line.*: 10 ' /tmp/sen-e2e.go"
+check "a Go file gets text/x-go" "[ \"\$(catattr -d META:TYPE $G/main.go)\" = text/x-go ]"
+
+echo "== modules and uses of a Rust file"
+R=$C/rt; mkdir -p $R/src/net $R/src/other $R/src/inline
+printf '[package]\nname = "rt"\n' > $R/Cargo.toml
+printf 'pub fn helper() {}\n' > $R/src/util.rs
+printf 'pub mod client;\n' > $R/src/net/mod.rs
+printf 'pub struct Client;\n' > $R/src/net/client.rs
+printf '// x\n' > $R/src/other/x.rs
+printf '// deep\n' > $R/src/inline/deep.rs
+cat > $R/src/main.rs <<'RUST'
+// mod in_comment;
+/* /* nested */ mod in_nested; */
+use std::collections::{HashMap, HashSet};
+use crate::util::helper;
+use self::net::client::Client as C;
+mod util;
+mod net;
+#[path = "other/x.rs"]
+mod renamed;
+mod inline { mod deep; }
+let s = "mod in_string;";
+let r = r#"mod in_raw;"#; let c = 'a'; fn f<'a>(x: &'a str) {}
+extern crate libc;
+RUST
+echo > /dev/null
+hey $SIG SRsg with refs=$R/src/main.rs and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.rs 2>&1
+check "uses are expanded and modules found, also a nested one, a path attribute and extern crate" "grep -q 'std::collections::HashMap' /tmp/sen-e2e.rs && grep -q 'std::collections::HashSet' /tmp/sen-e2e.rs && grep -q 'crate::util::helper' /tmp/sen-e2e.rs && grep -q 'self::net::client::Client' /tmp/sen-e2e.rs && grep -q 'self::util' /tmp/sen-e2e.rs && grep -q 'other/x.rs' /tmp/sen-e2e.rs && grep -q 'self::inline::deep' /tmp/sen-e2e.rs && grep -q 'libc' /tmp/sen-e2e.rs"
+check "modules in comments, nested comments, strings and raw strings are not found" "! grep -q 'in_comment\|in_nested\|in_string\|in_raw' /tmp/sen-e2e.rs"
+check "module paths are resolved to files" "grep -q 'includePath.*src/util.rs' /tmp/sen-e2e.rs && grep -q 'includePath.*src/net/client.rs' /tmp/sen-e2e.rs && grep -q 'includePath.*src/net/mod.rs' /tmp/sen-e2e.rs && grep -q 'includePath.*src/other/x.rs' /tmp/sen-e2e.rs && grep -q 'includePath.*src/inline/deep.rs' /tmp/sen-e2e.rs"
+check "modules of the crate are not global, other crates are" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.rs) -eq 3 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.rs) -eq 6 ]"
+check "the lines are given" "grep -q 'be:line.*: 3 ' /tmp/sen-e2e.rs && grep -q 'be:line.*: 10 ' /tmp/sen-e2e.rs && grep -q 'be:line.*: 13 ' /tmp/sen-e2e.rs"
+check "a Rust file gets text/x-rust" "[ \"\$(catattr -d META:TYPE $R/src/main.rs)\" = text/x-rust ]"
 rm -rf $C $PDFS
 
 echo "== copies are new objects"
