@@ -19,6 +19,13 @@
 
 #include <Alert.h>
 #include <Application.h>
+#include <Directory.h>
+#include <FindDirectory.h>
+#include <Path.h>
+#include <Roster.h>
+#include <String.h>
+
+#include <stdlib.h>
 #include <Invoker.h>
 #include <Message.h>
 #include <MimeType.h>
@@ -30,12 +37,21 @@ namespace sen {
 namespace ui {
 
 static const uint32 kQuitAnswer = 'SUqa';
+/** the server was asked to stop and is still there: it quits (it is not a service of the launch daemon) */
+static const uint32 kQuitFallback = 'SUqf';
+
+
+SenUi::~SenUi()
+{
+	delete fQuitFallback;
+}
 
 
 SenUi::SenUi(SenConfigHandler* config, RelationHandler* relations)
 	:
 	fConfig(config),
-	fRelations(relations)
+	fRelations(relations),
+	fQuitFallback(NULL)
 {
 }
 
@@ -74,7 +90,19 @@ SenUi::Handle(BMessage* message)
 		case kQuitAnswer:
 			// the second button is "Quit"
 			if (message->GetInt32("which", 0) == 1)
-				be_app->PostMessage(B_QUIT_REQUESTED);
+				_Quit();
+			return true;
+		case sen::cmd::kUiRequestRestart:
+			_Restart();
+			return true;
+		case kQuitFallback:
+			be_app->PostMessage(B_QUIT_REQUESTED);
+			return true;
+		case sen::cmd::kUiOpenOntologies:
+			_OpenOntologies();
+			return true;
+		case sen::cmd::kUiOpenOntology:
+			_OpenOntology(message);
 			return true;
 	}
 	return false;
@@ -222,6 +250,85 @@ SenUi::_AskToQuit()
 	alert->SetShortcut(0, B_ESCAPE);
 	// (not blocking: the server answers requests of other programs meanwhile)
 	alert->Go(new BInvoker(new BMessage(kQuitAnswer), be_app));
+}
+
+
+
+/** the text in single quotes for a shell */
+static BString
+Quoted(const char* text)
+{
+	BString quoted(text);
+	quoted.ReplaceAll("'", "'\\''");
+	return BString("'") << quoted << "'";
+}
+
+
+/** The server is a service of the launch daemon, which starts it again when it quits: it has to be stopped as a service. The daemon asks the server to
+ *  quit, so this does not wait for it: the command runs on its own. A server that was started by hand is no service, it quits by itself after a moment. */
+void
+SenUi::_Quit()
+{
+	BString command("launch_roster stop ");
+	command << Quoted(sen::kServerService) << " >/dev/null 2>&1 &";
+	system(command.String());
+
+	delete fQuitFallback;
+	fQuitFallback = new BMessageRunner(be_app, new BMessage(kQuitFallback), 2000000, 1);
+}
+
+
+/** Restarts the server: it quits, and is started again. As a service of the launch daemon (the server of a package) it is started again by the
+ *  daemon, which does it when a service quits (stopping the service with launch_roster would not: it stays idle). One that was started by hand, from a
+ *  build, is not: a command of its own, which outlives this server, looks after a few seconds whether a server is there, and starts the program that
+ *  this is if not. */
+void
+SenUi::_Restart()
+{
+	app_info info;
+	BString program;
+	if (be_app->GetAppInfo(&info) == B_OK)
+		program = BPath(&info.ref).Path();
+
+	BString script("sleep 6; hey \"$1\" SCst >/dev/null 2>&1 && exit 0; \"$2\" >/dev/null 2>&1");
+	BString command("sh -c ");
+	command << Quoted(script.String()) << " sh " << Quoted(sen::kServerSignature) << " " << Quoted(program.String()) << " >/dev/null 2>&1 &";
+	system(command.String());
+
+	be_app->PostMessage(B_QUIT_REQUESTED);
+}
+
+
+// ---- ontologies
+
+void
+SenUi::_OpenOntologies()
+{
+	BPath path;
+	status_t result = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
+	if (result == B_OK)
+		result = path.Append("sen");
+	if (result == B_OK)
+		result = path.Append(sen::config::kOntologiesDir);
+	if (result == B_OK)
+		result = create_directory(path.Path(), 0755);
+
+	entry_ref folder;
+	if (result == B_OK)
+		result = get_ref_for_path(path.Path(), &folder);
+	if (result == B_OK)
+		result = OpenInTracker(folder);
+	_Report("open the ontologies", result);
+}
+
+
+void
+SenUi::_OpenOntology(const BMessage* message)
+{
+	entry_ref ontology;
+	if (message->FindRef("refs", &ontology) != B_OK)
+		return;
+	_Report("show the ontology", ShowInTracker(ontology));
 }
 
 }	// namespace ui

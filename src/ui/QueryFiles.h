@@ -21,5 +21,8 @@ status_t MakeQueryFile(const char* name, const char* predicate, entry_ref* ref);
 /** Ask Tracker to open the file (a query shows its results in a window). */
 status_t OpenInTracker(const entry_ref& ref);
 
+/** Ask Tracker to show the file in its folder, selected. */
+status_t ShowInTracker(const entry_ref& ref);
+
 }	// namespace ui
 }	// namespace sen

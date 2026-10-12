@@ -289,6 +289,11 @@ void SenServer::MessageReceived(BMessage* message)
 			StartOntologyUpdate();
 		return;
 	}
+	// the menu: now, not when a package changes (the update does nothing if the ontologies are up to date)
+	if (message->what == sen::cmd::kUiUpdateOntologies) {
+		ScheduleOntologyUpdate(200000, 1);
+		return;
+	}
 
 	// the menu in the Deskbar: windows, queries, quitting (no reply)
 	if (fUi->Handle(message))

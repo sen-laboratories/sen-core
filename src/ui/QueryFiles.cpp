@@ -77,5 +77,34 @@ OpenInTracker(const entry_ref& ref)
 	return tracker.SendMessage(&open);
 }
 
+
+status_t
+ShowInTracker(const entry_ref& ref)
+{
+	BMessenger tracker(kTrackerSignature);
+	if (!tracker.IsValid())
+		return B_NOT_INITIALIZED;
+
+	// the folder of the file, with the file selected (Tracker does this for the file in the data: nodeRefToSelect)
+	BEntry entry(&ref, true);
+	BEntry parent;
+	entry_ref parentRef;
+	node_ref node;
+	status_t result = entry.InitCheck();
+	if (result == B_OK)
+		result = entry.GetParent(&parent);
+	if (result == B_OK)
+		result = parent.GetRef(&parentRef);
+	if (result == B_OK)
+		result = entry.GetNodeRef(&node);
+	if (result != B_OK)
+		return result;
+
+	BMessage open(B_REFS_RECEIVED);
+	open.AddRef("refs", &parentRef);
+	open.AddData("nodeRefToSelect", B_RAW_TYPE, &node, sizeof(node_ref));
+	return tracker.SendMessage(&open);
+}
+
 }	// namespace ui
 }	// namespace sen
