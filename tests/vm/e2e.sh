@@ -96,6 +96,24 @@ check "a relative import is found in the project, one that is missing is kept as
 check "a module of the standard library is found in the library folders of Python" "grep -q 'includePath.*python3.*collections/__init__.py' /tmp/sen-e2e.py"
 check "relative imports are not global, the others are" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.py) -eq 5 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.py) -eq 2 ]"
 check "the lines of the imports are given" "grep -q 'be:line.*: 5 ' /tmp/sen-e2e.py && grep -q 'be:line.*: 8 ' /tmp/sen-e2e.py"
+
+echo "== imports of a Java file, language by the semantic type"
+J=$C/jt/com/acme; mkdir -p $J/util
+printf '/* import in.comment; */\npackage com.acme;\n\nimport java.util.List;\nimport com.acme.util.Helper;\nimport static com.acme.util.Helper.run;\nimport com.acme.model.*;\n// import in.line.comment;\n\npublic class App {\n    String s = "import in.string;";\n    String t = """\n        import in.textblock;\n        """;\n}\n' > $J/App.java
+printf 'package com.acme.util;\npublic class Helper {}\n' > $J/util/Helper.java
+hey $SIG SRsg with refs=$J/App.java and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.java 2>&1
+check "the imports are found, also the class of a static import and a whole package" "grep -q 'java.util.List' /tmp/sen-e2e.java && grep -q 'com.acme.util.Helper' /tmp/sen-e2e.java && grep -q 'com.acme.model' /tmp/sen-e2e.java"
+check "imports in comments, strings and text blocks are not found" "! grep -q 'in\\.comment\|in\\.line\|in\\.string\|in\\.textblock' /tmp/sen-e2e.java"
+check "a class of the project is found by its package, a library class is not" "[ \$(grep -c 'includePath.*com/acme/util/Helper.java' /tmp/sen-e2e.java) -eq 2 ] && ! grep -q 'includePath.*java/util/List.java' /tmp/sen-e2e.java"
+check "project classes are not global, libraries and packages are" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.java) -eq 2 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.java) -eq 2 ]"
+check "the lines of the imports are given" "grep -q 'be:line.*: 4 ' /tmp/sen-e2e.java && grep -q 'be:line.*: 7 ' /tmp/sen-e2e.java"
+# a C header by its name that holds Python: the semantic type decides
+printf 'import json\n#include <not_c.h>\n' > $C/weird.h
+# (a file with META:TYPE and without BEOS:TYPE is taken for an entry of the MIME database by Haiku: give it its type, as Tracker does)
+addattr -t mime BEOS:TYPE text/x-source-code $C/weird.h
+addattr -t mime META:TYPE text/x-python $C/weird.h
+hey $SIG SRsg with refs=$C/weird.h and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.weird 2>&1
+check "the semantic type (META:TYPE) has precedence over the extension" "grep -q 'json' /tmp/sen-e2e.weird && ! grep -q 'not_c.h' /tmp/sen-e2e.weird"
 rm -rf $C $PDFS
 
 echo "== copies are new objects"
