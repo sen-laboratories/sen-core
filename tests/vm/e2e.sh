@@ -154,7 +154,7 @@ check "a Go file gets text/x-go" "[ \"\$(catattr -d META:TYPE $G/main.go)\" = te
 
 echo "== the C++ extensions"
 CPPOK=1
-for pair in cc:src cxx:src c++:src cpp:src hh:hdr hpp:hdr hxx:hdr h++:hdr inl:hdr; do
+for pair in cc:src cxx:src c++:src cpp:src hh:hdr hpp:hdr hxx:hdr h++:hdr inl:hdr ipp:hdr tpp:hdr txx:hdr tcc:hdr icc:hdr; do
 	e=${pair%%:*}; kind=${pair##*:}
 	printf '#include <vector>\n' > "$C/variant.$e"
 	addattr -t mime BEOS:TYPE text/x-source-code "$C/variant.$e"
@@ -162,7 +162,7 @@ for pair in cc:src cxx:src c++:src cpp:src hh:hdr hpp:hdr hxx:hdr h++:hdr inl:hd
 	[ "$(catattr -d META:TYPE "$C/variant.$e")" = "text/x-c++$kind" ] || { CPPOK=0; echo "   .$e is $(catattr -d META:TYPE "$C/variant.$e")"; }
 	grep -q 'vector' /tmp/sen-e2e.variant || { CPPOK=0; echo "   .$e: no include found"; }
 done
-check "cc, cxx, c++, cpp are C++ sources and hh, hpp, hxx, h++, inl C++ headers, their includes are found" "[ $CPPOK = 1 ]"
+check "cc, cxx, c++, cpp are C++ sources and hh, hpp, hxx, h++, inl, ipp, tpp, txx, tcc, icc C++ headers, their includes are found" "[ $CPPOK = 1 ]"
 
 echo "== imports of a JavaScript file"
 W=$C/js; mkdir -p $W/lib/ns $W/node_modules/lodash
