@@ -67,7 +67,7 @@ hey $SIG SRsg with refs=$PDFS/plain.pdf and SEN:relationType=relation/x-vnd.sen-
 check "a PDF without bookmarks has no contained relations: an empty answer, not an error" "grep -q 'status.*204' /tmp/sen-e2e.plain && grep -q '\"result\".*0x00000000' /tmp/sen-e2e.plain && ! grep -q 'SEN:relations' /tmp/sen-e2e.plain"
 check "a request without refs does not crash the server" "hey $SIG SRsa; ps | grep -q '[s]en_server'"
 
-echo "== includes of a source file (libclang)"
+echo "== includes of a source file"
 C=$TEST_DIR/_code; rm -rf $C; mkdir -p $C
 printf '#include <stdio.h>\n#include "local.h"\n// #include <commented/out.h>\n#include <no/such/header.h>\n\nint main() { return 0; }\n' > $C/sample.cpp
 printf '#include <string.h>\n' > $C/local.h
@@ -78,6 +78,13 @@ check "a missing header is found, as written" "grep -q 'includePath.*\"no/such/h
 check "angle brackets and quotes are told apart" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.code) -eq 2 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.code) -eq 1 ]"
 check "the lines of the directives are given" "grep -q 'be:line.*(0x00000001)' /tmp/sen-e2e.code && grep -q 'be:line.*(0x00000004)' /tmp/sen-e2e.code"
 check "comments and the includes of headers are not reported" "! grep -q 'commented/out.h' /tmp/sen-e2e.code && ! grep -q 'string.h' /tmp/sen-e2e.code"
+# the harder cases: comments, switched off code, strings that look like directives, spacing, headers in the folders of the kits
+printf '/* #include <block_comment.h> */\n#if 0\n#include <disabled.h>\n#endif\n  #  include <vector>\nconst char* s = "#include <in_string.h>";\nconst char* r = R"x(\n#include <in_raw.h>\n)x";\n#include <Application.h> // trailing\n#if 1\n#include <enabled.h>\n#else\n#include <else_of_one.h>\n#endif\n#include "local.h"\n' > $C/hard.cpp
+hey $SIG SRsg with refs=$C/hard.cpp and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.hard 2>&1
+check "includes in comments, strings, raw strings and #if 0 are not found" "! grep -q 'block_comment.h\|disabled.h\|in_string.h\|in_raw.h\|else_of_one.h' /tmp/sen-e2e.hard"
+check "spaces after the # and #if 1 are understood" "grep -q 'vector' /tmp/sen-e2e.hard && grep -q 'enabled.h' /tmp/sen-e2e.hard"
+check "a BeAPI header is found in the folder of its kit" "grep -q 'includePath.*headers/os/app/Application.h' /tmp/sen-e2e.hard"
+check "the line of a directive after multi-line strings is right" "grep -q 'be:line.*: 10 ' /tmp/sen-e2e.hard"
 rm -rf $C $PDFS
 
 echo "== copies are new objects"
