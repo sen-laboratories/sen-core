@@ -65,19 +65,20 @@ main()
 	check("Ontologies is directly above Settings", ontologies >= 0 && settings == ontologies + 1);
 	check("Restart is directly above Quit", restart >= 0 && quit == restart + 1);
 	BMenuItem* item = menu->ItemAt(ontologies);
-	check("Ontologies has a menu with Show all and Update first", item != NULL && item->Submenu() != NULL && item->Submenu()->CountItems() >= 2
-		&& strncmp(item->Submenu()->ItemAt(0)->Label(), "Show all", 8) == 0 && strcmp(item->Submenu()->ItemAt(1)->Label(), "Update") == 0);
+	// the menus are items that can be chosen themselves (no "Show all" in them)
+	check("Ontologies can be chosen itself and has Update first", item != NULL && item->Message() != NULL && item->Submenu() != NULL
+		&& item->Submenu()->CountItems() >= 1 && strcmp(item->Submenu()->ItemAt(0)->Label(), "Update") == 0);
 	// the ontologies have a menu each, with their types, which show their attributes (the result depends on what is installed)
 	bool types = false, attributes = false;
 	if (item != NULL && item->Submenu() != NULL) {
-		for (int32 i = 2; i < item->Submenu()->CountItems(); i++) {
+		for (int32 i = 1; i < item->Submenu()->CountItems(); i++) {
 			BMenu* ontology = item->Submenu()->SubmenuAt(i);
 			if (ontology == NULL)
 				continue;
 			for (int32 j = 0; j < ontology->CountItems(); j++) {
 				types = types || ontology->ItemAt(j)->Label() != NULL;
 				BMenu* type = ontology->SubmenuAt(j);
-				attributes = attributes || (type != NULL && type->CountItems() > 2);
+				attributes = attributes || (type != NULL && type->CountItems() > 0 && ontology->ItemAt(j)->Message() != NULL);
 			}
 		}
 	}

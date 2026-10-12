@@ -23,6 +23,7 @@ namespace ui {
 
 static const uint32 kSetKey = 'SWky';
 static const uint32 kSetAkita = 'SWak';
+static const uint32 kSetFileTypes = 'SWft';
 static const uint32 kActivate = 'SWac';
 
 
@@ -41,7 +42,7 @@ static const KeyChoice kKeys[] = {
 
 SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	:
-	BWindow(BRect(160, 160, 600, 330), "SEN Settings", B_TITLED_WINDOW,
+	BWindow(BRect(160, 160, 600, 400), "SEN Settings", B_TITLED_WINDOW,
 		B_NOT_ZOOMABLE | B_NOT_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
 	fConfig(config)
 {
@@ -49,6 +50,7 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	config->GetConfig(&settings);
 	int32 current = settings.GetInt32(sen::key::kModifierKey, B_COMMAND_KEY);
 	bool useAkita = settings.GetBool(sen::key::kUseAkita, false);
+	bool useFileTypes = settings.GetBool(sen::key::kUseSenFileTypes, true);
 
 	BPopUpMenu* menu = new BPopUpMenu("key");
 	for (const KeyChoice& choice : kKeys) {
@@ -68,6 +70,10 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	fAkita->SetValue(useAkita ? B_CONTROL_ON : B_CONTROL_OFF);
 	BStringView* akitaHelp = new BStringView("akitahelp", "Takes effect when the system is started the next time.");
 
+	fFileTypes = new BCheckBox("filetypes", "Use the FileTypes of SEN instead of the one of Haiku", new BMessage(kSetFileTypes));
+	fFileTypes->SetValue(useFileTypes ? B_CONTROL_ON : B_CONTROL_OFF);
+	BStringView* fileTypesHelp = new BStringView("filetypeshelp", "Where SEN shows a type and its attributes (the Ontologies menu).");
+
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
 		.SetInsets(B_USE_WINDOW_INSETS)
 		.Add(fKeyField)
@@ -75,6 +81,9 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 		.AddStrut(B_USE_BIG_SPACING)
 		.Add(fAkita)
 		.Add(akitaHelp)
+		.AddStrut(B_USE_BIG_SPACING)
+		.Add(fFileTypes)
+		.Add(fileTypesHelp)
 	.End();
 }
 
@@ -94,6 +103,13 @@ SettingsWindow::MessageReceived(BMessage* message)
 		{
 			BMessage change;
 			change.AddBool(sen::key::kUseAkita, fAkita->Value() == B_CONTROL_ON);
+			fConfig->UpdateSettings(&change);
+			break;
+		}
+		case kSetFileTypes:
+		{
+			BMessage change;
+			change.AddBool(sen::key::kUseSenFileTypes, fFileTypes->Value() == B_CONTROL_ON);
 			fConfig->UpdateSettings(&change);
 			break;
 		}

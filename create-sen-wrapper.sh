@@ -86,14 +86,20 @@ team()
     ps | grep "[s]en_server" | awk '{print \$(NF-3)}' | head -1
 }
 
-# wait until the server is (up, or else) gone; seconds
+# whether the server is a service of the launch daemon that runs (which starts it again when it quits)
+service_running()
+{
+    launch_roster list 2>/dev/null | grep "\$SERVICE" | grep -q running
+}
+
+# wait until the server is (up, or else) gone; seconds (checked five times a second)
 wait_for()
 {
     i=0
-    while [ \$i -lt \$2 ]; do
+    while [ \$i -lt \$((\$2 * 5)) ]; do
         if [ "\$1" = up ] && running; then return 0; fi
         if [ "\$1" = gone ] && ! running; then return 0; fi
-        sleep 1
+        sleep 0.2
         i=\$((i + 1))
     done
     return 1
@@ -128,16 +134,26 @@ case "\$1" in
         ;;
     restart)
         shift
-        # quitting is enough for a service (the launch daemon starts it again at once); else it is started here
+        # Quitting is enough for a service that runs: the launch daemon starts it again at once. A service that was stopped is started, and a
+        # server that is no service (or none at all) is started here.
         old="\$(team)"
-        hey "\$SIGNATURE" quit >/dev/null 2>&1
-        i=0
-        while [ \$i -lt 10 ] && [ "\$(team)" = "\$old" ]; do
-            sleep 1
-            i=\$((i + 1))
-        done
-        if ! wait_for up 8; then
-            "\$(server)" "\$@" > /dev/null 2>&1 < /dev/null &
+        service=no
+        service_running && service=yes
+        if [ -n "\$old" ]; then
+            hey "\$SIGNATURE" quit >/dev/null 2>&1
+            i=0
+            while [ \$i -lt 50 ] && [ "\$(team)" = "\$old" ]; do
+                sleep 0.2
+                i=\$((i + 1))
+            done
+        fi
+        if [ "\$service" = yes ] && wait_for up 5; then
+            :
+        else
+            launch_roster start "\$SERVICE" >/dev/null 2>&1
+            if ! wait_for up 2; then
+                "\$(server)" "\$@" > /dev/null 2>&1 < /dev/null &
+            fi
         fi
         ;;
     *)

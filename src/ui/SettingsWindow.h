@@ -14,8 +14,8 @@ namespace sen {
 namespace ui {
 
 /**
- * The window of the Settings item of the Deskbar menu. For now two settings: the modifier key of the SEN mode of Tracker (dragging files with
- * it pressed relates them), and whether Akita is to be used instead of Tracker. They are saved when they are changed, in the settings of SEN.
+ * The window of the Settings item of the Deskbar menu. The modifier key of the SEN mode of Tracker (dragging files with
+ * it pressed relates them), whether Akita is to be used instead of Tracker, and whether the FileTypes of SEN is used instead of the one of Haiku. They are saved when they are changed, in the settings of SEN.
  */
 class SettingsWindow : public BWindow {
 public:
@@ -27,6 +27,7 @@ private:
 	SenConfigHandler*	fConfig;
 	BMenuField*			fKeyField;
 	BCheckBox*			fAkita;
+	BCheckBox*			fFileTypes;
 };
 
 }	// namespace ui

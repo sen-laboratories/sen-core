@@ -283,7 +283,7 @@ SenUi::_Quit()
 
 /** Restarts the server: it quits, and is started again. As a service of the launch daemon (the server of a package) it is started again by the
  *  daemon, which does it when a service quits (stopping the service with launch_roster would not: it stays idle). One that was started by hand, from a
- *  build, is not: a command of its own, which outlives this server, looks after a few seconds whether a server is there, and starts the program that
+ *  build, is not: a command of its own, which outlives this server, looks after two seconds whether a server is there, and starts the program that
  *  this is if not. */
 void
 SenUi::_Restart()
@@ -293,9 +293,12 @@ SenUi::_Restart()
 	if (be_app->GetAppInfo(&info) == B_OK)
 		program = BPath(&info.ref).Path();
 
-	BString script("sleep 6; hey \"$1\" SCst >/dev/null 2>&1 && exit 0; \"$2\" >/dev/null 2>&1");
+	// (a service is started again by the launch daemon at once: after two seconds it is there. One that was stopped is started, else the program.)
+	BString script("sleep 2; hey \"$1\" SCst >/dev/null 2>&1 && exit 0; launch_roster start \"$3\" >/dev/null 2>&1; sleep 1; "
+		"hey \"$1\" SCst >/dev/null 2>&1 && exit 0; \"$2\" >/dev/null 2>&1");
 	BString command("sh -c ");
-	command << Quoted(script.String()) << " sh " << Quoted(sen::kServerSignature) << " " << Quoted(program.String()) << " >/dev/null 2>&1 &";
+	command << Quoted(script.String()) << " sh " << Quoted(sen::kServerSignature) << " " << Quoted(program.String()) << " "
+		<< Quoted(sen::kServerService) << " >/dev/null 2>&1 &";
 	system(command.String());
 
 	be_app->PostMessage(B_QUIT_REQUESTED);
@@ -335,7 +338,7 @@ SenUi::_OpenOntology(const BMessage* message)
 }
 
 
-/** A type of an ontology (and one of its attributes) in FileTypes: the one of SEN if it is there (it is asked by a message), else the one of Haiku,
+/** A type of an ontology (and one of its attributes) in FileTypes: the one of SEN if it is there and wanted (a setting; it is asked by a message), else the one of Haiku,
  *  started for the type (it cannot be asked for an attribute). */
 void
 SenUi::_OpenType(const BMessage* message)
@@ -344,9 +347,14 @@ SenUi::_OpenType(const BMessage* message)
 	if (type[0] == '\0')
 		return;
 
+	bool useSen = true;
+	BMessage settings;
+	if (fConfig->GetConfig(&settings) == B_OK)
+		useSen = settings.GetBool(sen::key::kUseSenFileTypes, true);
+
 	status_t result;
 	entry_ref senFileTypes;
-	if (be_roster->FindApp(sen::kFileTypesSignature, &senFileTypes) == B_OK) {
+	if (useSen && be_roster->FindApp(sen::kFileTypesSignature, &senFileTypes) == B_OK) {
 		BMessenger messenger(sen::kFileTypesSignature);
 		if (!messenger.IsValid()) {
 			be_roster->Launch(sen::kFileTypesSignature);

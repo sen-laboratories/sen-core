@@ -32,4 +32,5 @@ requires		{
 	lib:libfmt
 	cmd:sen_oni
 	sen_ontology_core
+	sen_filetypes
 }

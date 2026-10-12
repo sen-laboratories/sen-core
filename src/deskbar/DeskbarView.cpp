@@ -225,9 +225,10 @@ public:
 	{
 	}
 
-	IconItem(BMenu* submenu, BBitmap* icon)
+	/** (a menu that can be chosen itself: the message is sent when the item is clicked, as in the menus of Tracker) */
+	IconItem(BMenu* submenu, BMessage* message, BBitmap* icon)
 		:
-		BMenuItem(submenu),
+		BMenuItem(submenu, message),
 		fIcon(icon)
 	{
 	}
@@ -341,7 +342,7 @@ DeskbarView::_AddContextMenu(BMenu* menu)
 		contexts->AddItem(item);
 	}
 	contexts->SetTargetForItems(this);
-	menu->AddItem(new IconItem(contexts, IconOfType(sen::mime::kContext)));
+	menu->AddItem(new IconItem(contexts, NULL, IconOfType(sen::mime::kContext)));
 }
 
 
@@ -381,8 +382,8 @@ TypeGroup(const std::string& type)
 
 
 /**
- * The menu of a type of an ontology: Show (the type in FileTypes), and its attributes (the attribute info of the type), each of which opens the
- * attribute in FileTypes. A type without attributes is an item.
+ * The menu of a type of an ontology: choosing it opens the type in FileTypes, its items are the attributes (the attribute info of the type), each
+ * of which opens the attribute in FileTypes. A type without attributes is an item.
  */
 static BMenuItem*
 TypeItem(const std::string& type, const std::string& name)
@@ -398,9 +399,6 @@ TypeItem(const std::string& type, const std::string& name)
 		return new IconItem(name.c_str(), show, IconOfType(type.c_str()));
 
 	BMenu* menu = new BMenu(name.c_str());
-	BString ellipsis(B_UTF8_ELLIPSIS);
-	menu->AddItem(new BMenuItem((BString("Show") << ellipsis).String(), show));
-	menu->AddSeparatorItem();
 	const char* publicName;
 	for (int32 index = 0; info.FindString("attr:name", index, &attributeName) == B_OK; index++) {
 		if (info.FindString("attr:public_name", index, &publicName) != B_OK || publicName[0] == '\0')
@@ -410,7 +408,7 @@ TypeItem(const std::string& type, const std::string& name)
 		open->AddString(sen::key::kAttributeName, attributeName);
 		menu->AddItem(new IconItem(publicName, open, IconOfType(sen::onto::core::mime::kMimeAttribute)));
 	}
-	return new IconItem(menu, IconOfType(type.c_str()));
+	return new IconItem(menu, show, IconOfType(type.c_str()));
 }
 
 
@@ -423,8 +421,6 @@ void
 DeskbarView::_AddOntologyMenu(BMenu* menu)
 {
 	BMenu* ontologies = new BMenu("Ontologies");
-	BString ellipsis(B_UTF8_ELLIPSIS);
-	ontologies->AddItem(new BMenuItem((BString("Show all") << ellipsis).String(), new BMessage(sen::cmd::kUiOpenOntologies)));
 	ontologies->AddItem(new BMenuItem("Update", new BMessage(sen::cmd::kUiUpdateOntologies)));
 
 	BPath path = SettingsPath();
@@ -446,7 +442,6 @@ DeskbarView::_AddOntologyMenu(BMenu* menu)
 		BMenu* ontology = new BMenu(ref.name);
 		BMessage* show = new BMessage(sen::cmd::kUiOpenOntology);
 		show->AddRef("refs", &ref);
-		ontology->AddItem(new BMenuItem((BString("Show") << ellipsis).String(), show));
 
 		// its types, with the names that people read (the short description of the type)
 		std::vector<std::pair<std::string, std::string>> named;
@@ -463,16 +458,17 @@ DeskbarView::_AddOntologyMenu(BMenu* menu)
 		int lastGroup = -1;
 		for (const auto& type : named) {
 			int group = TypeGroup(type.first);
-			if (group != lastGroup)
+			if (group != lastGroup && ontology->CountItems() > 0)
 				ontology->AddSeparatorItem();
 			lastGroup = group;
 			ontology->AddItem(TypeItem(type.first, type.second));
 		}
 		ontology->SetTargetForItems(this);
-		ontologies->AddItem(new IconItem(ontology, IconOfEntry(ref)));
+		ontologies->AddItem(new IconItem(ontology, show, IconOfEntry(ref)));
 	}
 	ontologies->SetTargetForItems(this);
-	menu->AddItem(ontologies);
+	// (choosing the menu itself opens the folder of the ontologies)
+	menu->AddItem(new BMenuItem(ontologies, new BMessage(sen::cmd::kUiOpenOntologies)));
 }
 
 
@@ -506,11 +502,9 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 			name << "s";
 
 		BMenu* submenu = new BMenu(name.String());
-		BString all("Show all");
-		all << B_UTF8_ELLIPSIS;
+		// (choosing the menu itself opens a query with all of them)
 		BMessage* showAll = new BMessage(sen::cmd::kUiOpenClassification);
 		showAll->AddString(sen::key::kType, classification.c_str());
-		submenu->AddItem(new BMenuItem(all.String(), showAll));
 
 		// the entities of the type, on all volumes
 		std::vector<entry_ref> entities;
@@ -530,8 +524,6 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 		}
 		std::sort(entities.begin(), entities.end(), [](const entry_ref& a, const entry_ref& b) { return strcasecmp(a.name, b.name) < 0; });
 
-		if (!entities.empty())
-			submenu->AddSeparatorItem();
 		int32 listed = 0;
 		for (const entry_ref& entity : entities) {
 			if (listed++ >= kMaxEntities)
@@ -542,7 +534,7 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 			submenu->AddItem(new BMenuItem(entity.name, classified));
 		}
 		submenu->SetTargetForItems(this);
-		menu->AddItem(submenu);
+		menu->AddItem(new BMenuItem(submenu, showAll));
 	}
 }
 
