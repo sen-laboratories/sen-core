@@ -15,7 +15,7 @@ The package is in the SEN Labs repository, [Kiri](https://kiri.sen-labs.org):
 
 ```
 > pkgman add-repo https://kiri.sen-labs.org/x86_64
-> pkgman install sen_core sen_plugins
+> pkgman install sen_core sen_plugins akita
 ```
 
 The server starts with the next session (start it now with `sen start`); its item appears in the Deskbar. The package brings the core ontology
