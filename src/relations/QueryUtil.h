@@ -5,6 +5,8 @@
 #pragma once
 
 #include <Entry.h>
+#include <Node.h>
+#include <fs_attr.h>
 #include <String.h>
 
 #include <sen/Sen.h>
@@ -74,8 +76,11 @@ QueryAllVolumes(const char* predicate, std::vector<entry_ref>* refs)
 /**
  * @brief Find the plugins that declare a feature, on all mounted volumes.
  *
- * The feature flags (`SEN:plugin:<feature>`, int32) are not indexed. A BFS query needs only one indexed attribute, so
- * the plugin type (`META:TYPE`, indexed) must come first in the predicate; the flag is then compared on those files.
+ * The signature of a plugin starts with sensei::kSignaturePrefix, and `BEOS:APP_SIG` is the one attribute that can be queried
+ * everywhere: it is indexed on BFS volumes and on packagefs, where the files of installed packages are (packagefs has no other
+ * indices than name, size, last modified and the signature, and cannot create any, so a query for `META:TYPE` would not find a
+ * packaged plugin). The candidates are then checked by reading their attributes: the plugin type (`META:TYPE`) and the feature
+ * flag (`SEN:plugin:<feature>`, a number that is not 0).
  *
  * @param feature one of sensei::feature
  * @param plugins receives the plugin files
@@ -85,9 +90,35 @@ inline status_t
 FindPlugins(const char* feature, std::vector<entry_ref>* plugins)
 {
     BString predicate;
-    predicate << sen::attr::kType << "==" << sen::mime::kPlugin << " && " << sensei::kFeatureAttrPrefix << ":" << feature << "==1";
+    predicate << "BEOS:APP_SIG==" << sensei::kSignaturePattern;
 
-    return QueryAllVolumes(predicate.String(), plugins);
+    std::vector<entry_ref> candidates;
+    status_t result = QueryAllVolumes(predicate.String(), &candidates);
+    if (result != B_OK)
+        return result;
+
+    BString featureAttr;
+    featureAttr << sensei::kFeatureAttrPrefix << ":" << feature;
+
+    for (const entry_ref& candidate : candidates) {
+        BNode node(&candidate);
+        if (node.InitCheck() != B_OK)
+            continue;
+
+        BString type;
+        if (node.ReadAttrString(sen::attr::kType, &type) != B_OK || type != sen::mime::kPlugin)
+            continue;
+
+        // the flag is a number of 16 or 32 bit
+        attr_info info;
+        int32 flag = 0;
+        if (node.GetAttrInfo(featureAttr.String(), &info) != B_OK || info.size < 1 || info.size > (off_t) sizeof(flag)
+                || node.ReadAttr(featureAttr.String(), info.type, 0, &flag, info.size) != info.size || flag == 0)
+            continue;
+
+        plugins->push_back(candidate);
+    }
+    return B_OK;
 }
 
 }   // namespace sen

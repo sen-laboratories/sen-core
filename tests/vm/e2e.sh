@@ -56,7 +56,7 @@ check "ID generation test passes (unique TSIDs)" "hey $SIG SCts with count=100 |
 
 echo "== plugins and relations of a PDF"
 hey $SIG SRsa with refs=$PDF > /tmp/sen-e2e.reply 2>&1
-check "plugin found on any volume, config for the PDF extractor returned" "grep -q 'application/x-vnd.sen-labs.PdfExtractor' /tmp/sen-e2e.reply"
+check "plugin found on any volume, config for the PDF extractor returned" "grep -q 'application/x-vnd.sen-plugin.sen-labs.pdf-extractor' /tmp/sen-e2e.reply"
 check "docref relation type returned" "grep -q 'relation/x-vnd.sen-labs.relation.docref' /tmp/sen-e2e.reply"
 check "relation is dynamic and contained (SEN:dynamic, SEN:self)" "grep -q 'SEN:dynamic.*TRUE' /tmp/sen-e2e.reply && grep -q 'SEN:self.*TRUE' /tmp/sen-e2e.reply"
 check "page is mapped to schema:pageStart" "grep -q 'schema:pageStart' /tmp/sen-e2e.reply"
