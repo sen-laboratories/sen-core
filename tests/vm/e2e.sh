@@ -152,6 +152,63 @@ check "a package of the module is resolved to its folder and is not global" "gre
 check "the lines of the imports are given" "grep -q 'be:line.*: 4 ' /tmp/sen-e2e.go && grep -q 'be:line.*: 6 ' /tmp/sen-e2e.go && grep -q 'be:line.*: 10 ' /tmp/sen-e2e.go"
 check "a Go file gets text/x-go" "[ \"\$(catattr -d META:TYPE $G/main.go)\" = text/x-go ]"
 
+echo "== the C++ extensions"
+CPPOK=1
+for pair in cc:src cxx:src c++:src cpp:src hh:hdr hpp:hdr hxx:hdr h++:hdr inl:hdr; do
+	e=${pair%%:*}; kind=${pair##*:}
+	printf '#include <vector>\n' > "$C/variant.$e"
+	addattr -t mime BEOS:TYPE text/x-source-code "$C/variant.$e"
+	hey $SIG SRsg with refs="$C/variant.$e" and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.variant 2>&1
+	[ "$(catattr -d META:TYPE "$C/variant.$e")" = "text/x-c++$kind" ] || { CPPOK=0; echo "   .$e is $(catattr -d META:TYPE "$C/variant.$e")"; }
+	grep -q 'vector' /tmp/sen-e2e.variant || { CPPOK=0; echo "   .$e: no include found"; }
+done
+check "cc, cxx, c++, cpp are C++ sources and hh, hpp, hxx, h++, inl C++ headers, their includes are found" "[ $CPPOK = 1 ]"
+
+echo "== imports of a JavaScript file"
+W=$C/js; mkdir -p $W/lib/ns $W/node_modules/lodash
+for f in lib/a.js lib/b.js lib/ns/index.js side-effect.js lib/re.js lib/x.js lib/m.js; do echo '// x' > $W/$f; done
+cat > $W/main.js <<'JS'
+// import "in_comment"
+import a from './lib/a.js';
+import {b,
+   c as d} from "./lib/b";
+import * as ns from './lib/ns';
+import './side-effect';
+export * from './lib/re';
+export { x } from './lib/x';
+const m = require('./lib/m');
+const t = `import "in_template" ${ "import 'in_nested'" }`;
+const r = /import 'in_regex'/;
+const e = "import 'in_string'";
+import('pkg-dyn').then(() => {});
+import pkg from 'external-pkg';
+const o = { import: 1 }; o.require('in_prop');
+JS
+addattr -t mime BEOS:TYPE text/x-source-code $W/main.js
+hey $SIG SRsg with refs=$W/main.js and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.js 2>&1
+check "import, export from, require and dynamic import are found" "grep -q 'lib/a.js' /tmp/sen-e2e.js && grep -q '\./lib/b' /tmp/sen-e2e.js && grep -q 'lib/ns' /tmp/sen-e2e.js && grep -q 'side-effect' /tmp/sen-e2e.js && grep -q 'lib/re' /tmp/sen-e2e.js && grep -q 'lib/x' /tmp/sen-e2e.js && grep -q 'lib/m' /tmp/sen-e2e.js && grep -q 'pkg-dyn' /tmp/sen-e2e.js && grep -q 'external-pkg' /tmp/sen-e2e.js"
+check "specifiers in comments, templates (also nested), regular expressions, strings and properties are not found" "! grep -q 'in_comment\|in_template\|in_nested\|in_regex\|in_string\|in_prop' /tmp/sen-e2e.js"
+check "files are found with their extension, as a folder with index.js" "grep -q 'includePath.*js/lib/a.js' /tmp/sen-e2e.js && grep -q 'includePath.*js/lib/b.js' /tmp/sen-e2e.js && grep -q 'includePath.*js/lib/ns/index.js' /tmp/sen-e2e.js && grep -q 'includePath.*js/side-effect.js' /tmp/sen-e2e.js"
+check "relative imports are not global, packages are" "[ \$(grep -c 'includeGlobal.*TRUE' /tmp/sen-e2e.js) -eq 2 ] && [ \$(grep -c 'includeGlobal.*FALSE' /tmp/sen-e2e.js) -eq 7 ]"
+check "the lines are given" "grep -q 'be:line.*: 3 ' /tmp/sen-e2e.js && grep -q 'be:line.*: 9 ' /tmp/sen-e2e.js && grep -q 'be:line.*: 14 ' /tmp/sen-e2e.js"
+check "a JavaScript file gets text/javascript" "[ \"\$(catattr -d META:TYPE $W/main.js)\" = text/javascript ]"
+
+echo "== imports of a TypeScript file"
+for f in types.d.ts models.ts legacy.ts u.ts view.ts node_modules/lodash/index.js; do echo '// x' > $W/$f; done
+cat > $W/app.ts <<'TS'
+/// <reference path="./types.d.ts" />
+import type { T } from './models';
+import x = require('./legacy');
+export type { U } from './u';
+import { v } from "./view.js";
+import _ from 'lodash';
+TS
+addattr -t mime BEOS:TYPE text/x-source-code $W/app.ts
+hey $SIG SRsg with refs=$W/app.ts and SEN:relationType=relation/x-vnd.sen-labs.relation.sourcecode.include > /tmp/sen-e2e.ts 2>&1
+check "the reference directive, type imports, import = require, export type from and imports are found" "grep -q 'types.d.ts' /tmp/sen-e2e.ts && grep -q 'models' /tmp/sen-e2e.ts && grep -q 'legacy' /tmp/sen-e2e.ts && grep -q '\./u' /tmp/sen-e2e.ts && grep -q 'view.js' /tmp/sen-e2e.ts && grep -q 'lodash' /tmp/sen-e2e.ts"
+check "TypeScript finds .ts files, also for imports of the compiled .js, and packages in node_modules" "grep -q 'includePath.*js/models.ts' /tmp/sen-e2e.ts && grep -q 'includePath.*js/view.ts' /tmp/sen-e2e.ts && grep -q 'includePath.*js/types.d.ts' /tmp/sen-e2e.ts && grep -q 'includePath.*node_modules/lodash/index.js' /tmp/sen-e2e.ts"
+check "a TypeScript file gets text/x-typescript" "[ \"\$(catattr -d META:TYPE $W/app.ts)\" = text/x-typescript ]"
+
 echo "== modules and uses of a Rust file"
 R=$C/rt; mkdir -p $R/src/net $R/src/other $R/src/inline
 printf '[package]\nname = "rt"\n' > $R/Cargo.toml
