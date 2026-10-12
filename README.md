@@ -46,8 +46,8 @@ them on every volume at start and when a volume is mounted. `create-sen-indices.
 
 The server adds an item with the SEN knot to the Deskbar, like the mail server does (`src/deskbar`): a click opens the query with all SEN objects, the
 menu gives access to contexts, classifications, the Info and Check windows, the ontologies and the Settings (`src/ui`), and has Restart and Quit. The windows are shown by the
-server (the item only sends messages), the statistics are shared with the command line (`src/stats`). The menus of the contexts and of the ontologies are menus of Tracker
-(`BNavMenu` of `libtracker`: the files of a folder with their icons, see `src/deskbar/tracker`).
+server (the item only sends messages), the statistics are shared with the command line (`src/stats`). The Context menu lists the contexts (the folders in `~/config/settings/sen/contexts`, with their icon, the current one marked; choosing one makes it the current one), the
+Ontologies menu the installed ones with their icon, each opening down to its types and their attributes.
 
 Quit stops the server as a service of the launch daemon (`launch_roster stop`: the daemon starts a service again when it just quits); `sen start` or the next login starts it.
 Restart quits it and lets the daemon start it again, or, for a server that was started by hand, a command of its own.

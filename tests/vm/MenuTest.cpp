@@ -18,10 +18,7 @@
 #include <vector>
 
 #define private public
-#define protected public
 #include "../../src/deskbar/DeskbarView.h"
-#include "../../src/deskbar/tracker/NavMenu.h"
-#undef protected
 #undef private
 
 static void
@@ -59,14 +56,6 @@ main()
 	sen::deskbar::DeskbarView view(BRect(0, 0, 15, 15));
 	BPopUpMenu* menu = view._BuildMenu();
 
-	// the menus of Tracker (BNavMenu) fill themselves when they are shown: here it is done by hand
-	for (int32 i = 0; i < menu->CountItems(); i++) {
-		BMenu* sub = menu->SubmenuAt(i);
-		if (BNavMenu* nav = dynamic_cast<BNavMenu*>(sub)) {
-			nav->AddDynamicItem(BMenu::B_INITIAL_ADD);
-			printf("(built %d items of %s)\n", (int) nav->CountItems(), nav->Superitem() != NULL ? nav->Superitem()->Label() : "?");
-		}
-	}
 	std::vector<std::string> top;
 	Print(menu, 0, &top);
 
@@ -78,15 +67,27 @@ main()
 	BMenuItem* item = menu->ItemAt(ontologies);
 	check("Ontologies has a menu with Show all and Update first", item != NULL && item->Submenu() != NULL && item->Submenu()->CountItems() >= 2
 		&& strncmp(item->Submenu()->ItemAt(0)->Label(), "Show all", 8) == 0 && strcmp(item->Submenu()->ItemAt(1)->Label(), "Update") == 0);
-	bool versions = false;
+	// the ontologies have a menu each, with their types, which show their attributes (the result depends on what is installed)
+	bool types = false, attributes = false;
 	if (item != NULL && item->Submenu() != NULL) {
 		for (int32 i = 2; i < item->Submenu()->CountItems(); i++) {
-			const char* label = item->Submenu()->ItemAt(i)->Label();
-			if (label != NULL && strstr(label, " (") != NULL && label[strlen(label) - 1] == ')')
-				versions = true;
+			BMenu* ontology = item->Submenu()->SubmenuAt(i);
+			if (ontology == NULL)
+				continue;
+			for (int32 j = 0; j < ontology->CountItems(); j++) {
+				types = types || ontology->ItemAt(j)->Label() != NULL;
+				BMenu* type = ontology->SubmenuAt(j);
+				attributes = attributes || (type != NULL && type->CountItems() > 2);
+			}
 		}
 	}
-	check("the ontologies have their version in parentheses", versions);
+	check("the ontologies show their types", types);
+	check("a type shows its attributes", attributes);
+	// the contexts are listed, the global one first, each with a message that sets it
+	BMenuItem* context = menu->ItemAt(Index(top, "Context"));
+	check("the Context menu lists the contexts, global first",
+		context != NULL && context->Submenu() != NULL && context->Submenu()->CountItems() >= 1
+		&& strcmp(context->Submenu()->ItemAt(0)->Label(), "global") == 0 && context->Submenu()->ItemAt(0)->Message() != NULL);
 	printf("%s\n", failed == 0 ? "all ok" : "FAILED");
 	delete menu;
 	return failed == 0 ? 0 : 1;

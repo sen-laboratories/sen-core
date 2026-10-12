@@ -47,6 +47,7 @@ private:
 	void			_Restart();
 	void			_OpenOntologies();
 	void			_OpenOntology(const BMessage* message);
+	void			_OpenType(const BMessage* message);
 	void			_Report(const char* what, status_t result);
 
 	SenConfigHandler*	fConfig;

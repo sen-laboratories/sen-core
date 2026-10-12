@@ -9,6 +9,7 @@
 #include <AppFileInfo.h>
 #include <Autolock.h>
 #include <Directory.h>
+#include <Entry.h>
 #include <File.h>
 #include <FindDirectory.h>
 #include <Mime.h>
@@ -16,6 +17,7 @@
 #include <NodeInfo.h>
 #include <Path.h>
 #include <Resources.h>
+#include <string.h>
 #include <spdlog/spdlog.h>
 #include "../server/Reply.h"
 
@@ -274,6 +276,15 @@ status_t SenConfigHandler::FindContextByName(const char* name, BMessage *reply)
 
 status_t SenConfigHandler::AddClassification(const char* context, const char* name, const char* type, BMessage* reply)
 {
+    // a context is not classified in a context: it is a folder of its own in the contexts folder (like the global one)
+    if (strcmp(type, sen::mime::kContext) == 0) {
+        entry_ref contextRef;
+        status_t created = CreateContext(name, &contextRef);
+        if (created == B_OK)
+            created = reply->AddRef("refs", &contextRef);
+        return created;
+    }
+
     // get context path
     entry_ref classDirRef;
     status_t status = GetClassificationDir(context, type, &classDirRef, true);
@@ -312,6 +323,16 @@ status_t SenConfigHandler::AddClassification(const char* context, const char* na
 
 status_t SenConfigHandler::GetClassification(const char* context, const char* name, const char* type, BMessage* reply)
 {
+    if (strcmp(type, sen::mime::kContext) == 0) {
+        entry_ref contextRef;
+        status_t found = GetContextDir(name, &contextRef);
+        if (found == B_OK && !BEntry(&contextRef).IsDirectory())
+            found = B_ENTRY_NOT_FOUND;
+        if (found == B_OK)
+            found = reply->AddRef("refs", &contextRef);
+        return found;
+    }
+
     entry_ref classtRef;
     status_t status = GetClassificationDir(context, type, &classtRef, false);
 
@@ -341,6 +362,26 @@ status_t SenConfigHandler::FindClassification(
     const BString* type,
     BMessage *reply)
 {
+    // the contexts are the folders in the contexts folder
+    if (*type == sen::mime::kContext) {
+        entry_ref contextBase;
+        status_t listed = fSettingsMsg->FindRef(sen::key::kContextPathRef, &contextBase);
+        BDirectory contexts(&contextBase);
+        if (listed == B_OK)
+            listed = contexts.InitCheck();
+        BEntry contextEntry;
+        while (listed == B_OK && contexts.GetNextEntry(&contextEntry) == B_OK) {
+            entry_ref contextRef;
+            if (contextEntry.IsDirectory() && (name->IsEmpty() || *name == contextEntry.Name()) && contextEntry.GetRef(&contextRef) == B_OK) {
+                reply->AddString("types", sen::mime::kContext);
+                reply->AddRef("refs", &contextRef);
+            }
+        }
+        if (listed != B_OK)
+            reply->AddString(sen::key::kDetail, strerror(listed));
+        return listed;
+    }
+
     entry_ref classtRef;
     status_t status = GetClassificationDir(context, type->String(), &classtRef, false);
 
@@ -514,25 +555,39 @@ status_t SenConfigHandler::GetClassificationDir(const char* context, const char*
 
 status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
 {
+    if (name == NULL || name[0] == '\0' || strchr(name, '/') != NULL || name[0] == '.')
+        return B_BAD_VALUE;
+
     entry_ref contextRef;
     status_t status = GetContextDir(name, &contextRef);
+    if (status != B_OK)
+        return status;
 
-    BFile contextFile(&contextRef, B_CREATE_FILE);
-    status = contextFile.InitCheck();
-
-    // esp. must not exist already
+    // a context is a folder with the type of a context (like the global one), which holds the classifications that are made in it;
+    // it must not exist already
+    BEntry existing(&contextRef);
+    if (existing.Exists()) {
+        spdlog::error("context '{}' exists already", name);
+        return B_FILE_EXISTS;
+    }
+    BPath path(&contextRef);
+    status = create_directory(path.Path(), 0755);
+    if (status == B_OK) {
+        BDirectory contextDir(path.Path());
+        status = contextDir.InitCheck();
+        if (status == B_OK)
+            status = BNodeInfo(&contextDir).SetType(sen::mime::kContext);
+        BPath classifications(path);
+        if (status == B_OK && classifications.Append(sen::config::kClassificationsDir) == B_OK)
+            create_directory(classifications.Path(), 0755);
+    }
     if (status != B_OK) {
-        spdlog::error("could not create directory for context '{}': {}",
-              name, strerror(status));
+        spdlog::error("could not create the folder of context '{}': {}", name, strerror(status));
         return status;
     }
 
-    BNodeInfo contextInfo(&contextFile);
-    status = contextInfo.SetType(sen::mime::kContext);
-
     // optionally return the ref to the newly created context
-    if (status == B_OK && ref != NULL) {
-        *ref = contextRef;
-    }
+    if (ref != NULL)
+        status = BEntry(path.Path()).GetRef(ref);
     return status;
 }

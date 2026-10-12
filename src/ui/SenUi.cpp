@@ -104,6 +104,9 @@ SenUi::Handle(BMessage* message)
 		case sen::cmd::kUiOpenOntology:
 			_OpenOntology(message);
 			return true;
+		case sen::cmd::kUiOpenType:
+			_OpenType(message);
+			return true;
 	}
 	return false;
 }
@@ -329,6 +332,43 @@ SenUi::_OpenOntology(const BMessage* message)
 	if (message->FindRef("refs", &ontology) != B_OK)
 		return;
 	_Report("show the ontology", ShowInTracker(ontology));
+}
+
+
+/** A type of an ontology (and one of its attributes) in FileTypes: the one of SEN if it is there (it is asked by a message), else the one of Haiku,
+ *  started for the type (it cannot be asked for an attribute). */
+void
+SenUi::_OpenType(const BMessage* message)
+{
+	const char* type = message->GetString(sen::key::kType, "");
+	if (type[0] == '\0')
+		return;
+
+	status_t result;
+	entry_ref senFileTypes;
+	if (be_roster->FindApp(sen::kFileTypesSignature, &senFileTypes) == B_OK) {
+		BMessenger messenger(sen::kFileTypesSignature);
+		if (!messenger.IsValid()) {
+			be_roster->Launch(sen::kFileTypesSignature);
+			for (int tries = 0; tries < 50 && !messenger.IsValid(); tries++) {
+				snooze(100000);
+				messenger = BMessenger(sen::kFileTypesSignature);
+			}
+		}
+		BMessage open(sen::cmd::kOpenMimeAttribute);
+		open.AddString(sen::key::kMimeType, type);
+		const char* attribute = message->GetString(sen::key::kAttributeName, "");
+		if (attribute[0] != '\0')
+			open.AddString(sen::key::kAttributeName, attribute);
+		result = messenger.SendMessage(&open);
+	} else {
+		// (the roster puts the program in front of the arguments itself; one that runs is only brought to the front)
+		const char* arguments[] = {"-type", type};
+		result = be_roster->Launch(sen::kHaikuFileTypesSignature, 2, arguments);
+		if (result == B_ALREADY_RUNNING)
+			result = B_OK;
+	}
+	_Report("show the type", result);
 }
 
 }	// namespace ui

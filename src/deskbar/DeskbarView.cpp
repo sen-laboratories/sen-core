@@ -6,14 +6,15 @@
 #include "DeskbarView.h"
 
 #include "../ui/Knot.h"
-#include "tracker/NavMenu.h"
 
 #include <sen/Sen.h>
 #include <sen/SenLookup.h>
+#include <sen/SenOntoCore.h>
 
 #include <Bitmap.h>
-#include <SeparatorItem.h>
-#include <StringList.h>
+#include <Menu.h>
+#include <MimeType.h>
+#include <NodeInfo.h>
 #include <Deskbar.h>
 #include <Directory.h>
 #include <Entry.h>
@@ -210,80 +211,269 @@ SettingsPath()
 }
 
 
-/**
- * A menu of the files in a folder of the settings of SEN, the one that Tracker makes (BNavMenu, from libtracker): the icon and the name of every file,
- * folders are menus of their own. What is chosen is sent to the target.
- */
-class FolderMenu : public BNavMenu {
+static const float kIconSize = 16;
+static const float kIconPadding = 4;
+
+
+/** A menu item with a small icon in front of its label, as the menus of Tracker have them. The icon is the item's. */
+class IconItem : public BMenuItem {
 public:
-	FolderMenu(const char* title, uint32 what, const BMessenger& target)
+	IconItem(const char* label, BMessage* message, BBitmap* icon)
 		:
-		BNavMenu(title, what, target)
+		BMenuItem(label, message),
+		fIcon(icon)
 	{
 	}
 
-	/** the folder below the settings of SEN: its name (contexts, ontologies); the folder is made if it is not there */
-	void SetFolder(const char* name)
-	{
-		BPath path = SettingsPath();
-		if (path.InitCheck() != B_OK || path.Append(name) != B_OK)
-			return;
-		create_directory(path.Path(), 0755);
-		entry_ref ref;
-		if (get_ref_for_path(path.Path(), &ref) == B_OK)
-			SetNavDir(&ref);
-	}
-};
-
-
-/**
- * The ontologies as a menu of Tracker: a file for each, with its icon and name, and the version in parentheses; the first items open the folder with
- * all of them and bring them up to date with the packages. Choosing one shows it in its folder.
- */
-class OntologyMenu : public FolderMenu {
-public:
-	OntologyMenu(const BMessenger& server)
+	IconItem(BMenu* submenu, BBitmap* icon)
 		:
-		FolderMenu("Ontologies", sen::cmd::kUiOpenOntology, server),
-		fServer(server)
+		BMenuItem(submenu),
+		fIcon(icon)
 	{
-		SetFolder(sen::config::kOntologiesDir);
 	}
 
-protected:
-	virtual void DoneBuildingItemList()
+	virtual ~IconItem()
 	{
-		BNavMenu::DoneBuildingItemList();
+		delete fIcon;
+	}
 
-		// (the file of an ontology has its version as an attribute)
-		for (int32 index = 0; index < CountItems(); index++) {
-			BMenuItem* item = ItemAt(index);
-			entry_ref ref;
-			if (item == NULL || item->Message() == NULL || item->Message()->FindRef("refs", &ref) != B_OK)
-				continue;
-			BString version;
-			BNode(&ref).ReadAttrString("SEN:onto:version", &version);
-			if (!version.IsEmpty()) {
-				BString label(item->Label());
-				label << " (" << version << ")";
-				item->SetLabel(label.String());
-			}
+	virtual void GetContentSize(float* width, float* height)
+	{
+		BMenuItem::GetContentSize(width, height);
+		if (fIcon != NULL) {
+			*width += kIconSize + kIconPadding;
+			*height = std::max(*height, kIconSize + 2);
 		}
+	}
 
-		BString ellipsis(B_UTF8_ELLIPSIS);
-		BMenuItem* showAll = new BMenuItem((BString("Show all") << ellipsis).String(), new BMessage(sen::cmd::kUiOpenOntologies));
-		BMenuItem* update = new BMenuItem("Update", new BMessage(sen::cmd::kUiUpdateOntologies));
-		showAll->SetTarget(fServer);
-		update->SetTarget(fServer);
-		AddItem(update, 0);
-		AddItem(showAll, 0);
-		if (CountItems() > 2)
-			AddItem(new BSeparatorItem(), 2);
+	virtual void DrawContent()
+	{
+		if (fIcon != NULL && Menu() != NULL) {
+			BPoint where = ContentLocation();
+			BRect frame = Frame();
+			where.y = frame.top + (frame.Height() - kIconSize) / 2;
+			Menu()->SetDrawingMode(B_OP_ALPHA);
+			Menu()->DrawBitmap(fIcon, where);
+			Menu()->SetDrawingMode(B_OP_COPY);
+			Menu()->MovePenBy(kIconSize + kIconPadding, 0);
+		}
+		BMenuItem::DrawContent();
 	}
 
 private:
-	BMessenger	fServer;
+	BBitmap*	fIcon;
 };
+
+
+/** the icon of a file or folder, as Tracker shows it; NULL if there is none */
+static BBitmap*
+IconOfEntry(const entry_ref& ref)
+{
+	BBitmap* icon = new BBitmap(BRect(0, 0, kIconSize - 1, kIconSize - 1), B_RGBA32);
+	if (BNodeInfo::GetTrackerIcon(&ref, icon, B_MINI_ICON) != B_OK) {
+		delete icon;
+		return NULL;
+	}
+	return icon;
+}
+
+
+/** the icon of a MIME type (that of its supertype if it has none of its own); NULL if there is none */
+static BBitmap*
+IconOfType(const char* type)
+{
+	BBitmap* icon = new BBitmap(BRect(0, 0, kIconSize - 1, kIconSize - 1), B_RGBA32);
+	BMimeType mime(type);
+	if (mime.GetIcon(icon, B_MINI_ICON) == B_OK)
+		return icon;
+	BMimeType super;
+	if (mime.GetSupertype(&super) == B_OK && super.GetIcon(icon, B_MINI_ICON) == B_OK)
+		return icon;
+	delete icon;
+	return NULL;
+}
+
+
+/** The contexts that are set up: the folders in the contexts folder of the settings (the global one first), with their icon; the current one is marked. */
+void
+DeskbarView::_AddContextMenu(BMenu* menu)
+{
+	BPath path = SettingsPath();
+	std::vector<std::string> names;
+	if (path.InitCheck() == B_OK && path.Append(sen::config::kContextsDir) == B_OK) {
+		BDirectory directory(path.Path());
+		entry_ref ref;
+		while (directory.GetNextRef(&ref) == B_OK) {
+			BEntry entry(&ref, true);
+			if (entry.IsDirectory())
+				names.push_back(ref.name);
+		}
+	}
+	std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
+	auto global = std::find(names.begin(), names.end(), sen::config::kContextGlobal);
+	if (global != names.end())
+		names.erase(global);
+	names.insert(names.begin(), sen::config::kContextGlobal);
+
+	// the current one (the global one if none was chosen)
+	BString current(sen::config::kContextGlobal);
+	BPath settingsPath = SettingsPath();
+	if (settingsPath.InitCheck() == B_OK && settingsPath.Append(sen::config::kSettingsFile) == B_OK) {
+		BFile file(settingsPath.Path(), B_READ_ONLY);
+		BMessage settings;
+		if (file.InitCheck() == B_OK && settings.Unflatten(&file) == B_OK)
+			current = settings.GetString(sen::key::kCurrentContext, sen::config::kContextGlobal);
+	}
+
+	BMenu* contexts = new BMenu("Context");
+	for (const std::string& name : names) {
+		BMessage* message = new BMessage(sen::cmd::kUiSetContext);
+		message->AddString(sen::key::kContext, name.c_str());
+		BBitmap* icon = NULL;
+		BPath contextPath(path);
+		entry_ref contextRef;
+		if (contextPath.Append(name.c_str()) == B_OK && get_ref_for_path(contextPath.Path(), &contextRef) == B_OK)
+			icon = IconOfEntry(contextRef);
+		if (icon == NULL)
+			icon = IconOfType(sen::mime::kContext);
+		BMenuItem* item = new IconItem(name.c_str(), message, icon);
+		item->SetMarked(current == name.c_str());
+		contexts->AddItem(item);
+	}
+	contexts->SetTargetForItems(this);
+	menu->AddItem(new IconItem(contexts, IconOfType(sen::mime::kContext)));
+}
+
+
+/** The types that an ontology provides (the targets of its relations that are types of the MIME database of the user), as MIME types. */
+static std::vector<std::string>
+TypesOfOntology(const entry_ref& ontology)
+{
+	std::vector<std::string> types;
+	BPath mimeDb;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &mimeDb) != B_OK || mimeDb.Append("mime_db") != B_OK)
+		return types;
+	const size_t prefix = strlen(mimeDb.Path()) + 1;
+
+	std::vector<entry_ref> targets;
+	if (sen::lookup::Targets(ontology, &targets) != B_OK)
+		return types;
+	for (const entry_ref& target : targets) {
+		BPath path(&target);
+		if (path.InitCheck() == B_OK && strncmp(path.Path(), mimeDb.Path(), prefix - 1) == 0 && strlen(path.Path()) > prefix)
+			types.push_back(path.Path() + prefix);
+	}
+	return types;
+}
+
+
+/** where a type goes in the list of the types of an ontology: the entities, the relations, the classifications, the meta types, the rest */
+static int
+TypeGroup(const std::string& type)
+{
+	static const char* const kGroups[] = {"entity/", "relation/", "classification/", "meta/"};
+	for (int i = 0; i < 4; i++) {
+		if (type.compare(0, strlen(kGroups[i]), kGroups[i]) == 0)
+			return i;
+	}
+	return 4;
+}
+
+
+/**
+ * The menu of a type of an ontology: Show (the type in FileTypes), and its attributes (the attribute info of the type), each of which opens the
+ * attribute in FileTypes. A type without attributes is an item.
+ */
+static BMenuItem*
+TypeItem(const std::string& type, const std::string& name)
+{
+	BMessage info;
+	BMimeType(type.c_str()).GetAttrInfo(&info);
+
+	BMessage* show = new BMessage(sen::cmd::kUiOpenType);
+	show->AddString(sen::key::kType, type.c_str());
+
+	const char* attributeName;
+	if (info.FindString("attr:name", 0, &attributeName) != B_OK)
+		return new IconItem(name.c_str(), show, IconOfType(type.c_str()));
+
+	BMenu* menu = new BMenu(name.c_str());
+	BString ellipsis(B_UTF8_ELLIPSIS);
+	menu->AddItem(new BMenuItem((BString("Show") << ellipsis).String(), show));
+	menu->AddSeparatorItem();
+	const char* publicName;
+	for (int32 index = 0; info.FindString("attr:name", index, &attributeName) == B_OK; index++) {
+		if (info.FindString("attr:public_name", index, &publicName) != B_OK || publicName[0] == '\0')
+			publicName = attributeName;
+		BMessage* open = new BMessage(sen::cmd::kUiOpenType);
+		open->AddString(sen::key::kType, type.c_str());
+		open->AddString(sen::key::kAttributeName, attributeName);
+		menu->AddItem(new IconItem(publicName, open, IconOfType(sen::onto::core::mime::kMimeAttribute)));
+	}
+	return new IconItem(menu, IconOfType(type.c_str()));
+}
+
+
+/**
+ * The ontologies are configuration, not what people work with: their menu is next to the settings. It opens the folder with them and brings them up to
+ * date with the packages, and has an item for each installed ontology (a file for each in the settings, with its icon): its menu shows it in its folder,
+ * and then its types, which show their attributes, as when the ontology is opened down to its relations.
+ */
+void
+DeskbarView::_AddOntologyMenu(BMenu* menu)
+{
+	BMenu* ontologies = new BMenu("Ontologies");
+	BString ellipsis(B_UTF8_ELLIPSIS);
+	ontologies->AddItem(new BMenuItem((BString("Show all") << ellipsis).String(), new BMessage(sen::cmd::kUiOpenOntologies)));
+	ontologies->AddItem(new BMenuItem("Update", new BMessage(sen::cmd::kUiUpdateOntologies)));
+
+	BPath path = SettingsPath();
+	std::vector<entry_ref> installed;
+	if (path.InitCheck() == B_OK && path.Append(sen::config::kOntologiesDir) == B_OK) {
+		BDirectory directory(path.Path());
+		entry_ref ref;
+		while (directory.GetNextRef(&ref) == B_OK) {
+			BEntry entry(&ref, true);
+			if (entry.IsFile())
+				installed.push_back(ref);
+		}
+	}
+	std::sort(installed.begin(), installed.end(), [](const entry_ref& a, const entry_ref& b) { return strcasecmp(a.name, b.name) < 0; });
+	if (!installed.empty())
+		ontologies->AddSeparatorItem();
+
+	for (const entry_ref& ref : installed) {
+		BMenu* ontology = new BMenu(ref.name);
+		BMessage* show = new BMessage(sen::cmd::kUiOpenOntology);
+		show->AddRef("refs", &ref);
+		ontology->AddItem(new BMenuItem((BString("Show") << ellipsis).String(), show));
+
+		// its types, with the names that people read (the short description of the type)
+		std::vector<std::pair<std::string, std::string>> named;
+		for (const std::string& type : TypesOfOntology(ref)) {
+			char shortName[B_MIME_TYPE_LENGTH];
+			std::string name = BMimeType(type.c_str()).GetShortDescription(shortName) == B_OK && shortName[0] != '\0'
+				? shortName : type.substr(type.find('/') + 1);
+			named.push_back({type, name});
+		}
+		std::sort(named.begin(), named.end(), [](const auto& a, const auto& b) {
+			int groupA = TypeGroup(a.first), groupB = TypeGroup(b.first);
+			return groupA != groupB ? groupA < groupB : strcasecmp(a.second.c_str(), b.second.c_str()) < 0;
+		});
+		int lastGroup = -1;
+		for (const auto& type : named) {
+			int group = TypeGroup(type.first);
+			if (group != lastGroup)
+				ontology->AddSeparatorItem();
+			lastGroup = group;
+			ontology->AddItem(TypeItem(type.first, type.second));
+		}
+		ontology->SetTargetForItems(this);
+		ontologies->AddItem(new IconItem(ontology, IconOfEntry(ref)));
+	}
+	ontologies->SetTargetForItems(this);
+	menu->AddItem(ontologies);
+}
 
 
 /** A menu for every type of classification (labels, topics, projects...): the first item opens a query with all of them, then the entities. */
@@ -363,10 +553,7 @@ DeskbarView::_BuildMenu()
 	BPopUpMenu* menu = new BPopUpMenu("", false, false);
 	menu->SetFont(be_plain_font);
 
-	// the contexts: the folders in the settings, shown like Tracker shows them (what is chosen is opened by Tracker)
-	FolderMenu* contexts = new FolderMenu("Context", B_REFS_RECEIVED, BMessenger("application/x-vnd.Be-TRAK"));
-	contexts->SetFolder(sen::config::kContextsDir);
-	menu->AddItem(contexts);
+	_AddContextMenu(menu);
 	menu->AddSeparatorItem();
 
 	int32 before = menu->CountItems();
@@ -378,7 +565,7 @@ DeskbarView::_BuildMenu()
 	menu->AddItem(new BMenuItem((BString("Info") << ellipsis).String(), new BMessage(sen::cmd::kUiShowInfo)));
 	menu->AddItem(new BMenuItem((BString("Check") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
 	// (the ontologies are configuration, not what people work with: next to the settings)
-	menu->AddItem(new OntologyMenu(BMessenger(sen::kServerSignature)));
+	_AddOntologyMenu(menu);
 	menu->AddItem(new BMenuItem((BString("Settings") << ellipsis).String(), new BMessage(sen::cmd::kUiShowSettings)));
 	menu->AddSeparatorItem();
 	menu->AddItem(new BMenuItem((BString("About") << ellipsis).String(), new BMessage(sen::cmd::kUiShowAbout)));

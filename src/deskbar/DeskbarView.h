@@ -41,7 +41,9 @@ public:
 private:
 	void				_Init();
 	BPopUpMenu*			_BuildMenu();
+	void				_AddContextMenu(BMenu* menu);
 	void				_AddClassificationMenus(BMenu* menu);
+	void				_AddOntologyMenu(BMenu* menu);
 	void				_Send(uint32 command);
 
 	BBitmap*			fKnot;

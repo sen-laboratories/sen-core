@@ -5,8 +5,9 @@
 # Creates the command "sen", a small wrapper around the SEN server, so that its commands are easy to type:
 #
 #   sen              start the server (in this terminal, like sen_server)
-#   sen start        start the server, detached
-#   sen stop         quit the running server
+#   sen start        start the server, detached (the packaged one, if there is one)
+#   sen stop         stop the server (as a service of the launch daemon, which would start it again if it just quit)
+#   sen restart      stop the server and start it again
 #   sen version      the same as sen_server --version
 #   sen info         --info:    an overview of SEN objects, types and relations
 #   sen types        --types:   the types and relations as a tree, with the number of files
@@ -57,24 +58,90 @@ cat > "$COMMAND" <<WRAPPER
 #
 # Wrapper for the SEN server, made by create-sen-wrapper.sh.
 
-SERVER="$SERVER"
+CONFIGURED="$SERVER"
 SIGNATURE=application/x-vnd.sen-labs.sen-server
+SERVICE=x-vnd.sen-labs.sen-server
+
+# The server to start: the one of the package (for the system, then for the user), only then the one that this wrapper was made for. A server is not
+# looked up by its signature: that finds any version of it, also an old build.
+server()
+{
+    for candidate in /boot/system/bin/sen_server "\$(finddir B_USER_BIN_DIRECTORY)/sen_server"; do
+        if [ -x "\$candidate" ]; then
+            echo "\$candidate"
+            return
+        fi
+    done
+    echo "\$CONFIGURED"
+}
+
+running()
+{
+    hey "\$SIGNATURE" SCst >/dev/null 2>&1
+}
+
+# the team of the running server (empty if there is none)
+team()
+{
+    ps | grep "[s]en_server" | awk '{print \$(NF-3)}' | head -1
+}
+
+# wait until the server is (up, or else) gone; seconds
+wait_for()
+{
+    i=0
+    while [ \$i -lt \$2 ]; do
+        if [ "\$1" = up ] && running; then return 0; fi
+        if [ "\$1" = gone ] && ! running; then return 0; fi
+        sleep 1
+        i=\$((i + 1))
+    done
+    return 1
+}
+
+stop_server()
+{
+    # As a service of the launch daemon the server is started again when it quits: it is stopped as a service. One that was started by hand is no
+    # service, it is asked to quit.
+    launch_roster stop "\$SERVICE" >/dev/null 2>&1
+    wait_for gone 3 && return 0
+    hey "\$SIGNATURE" quit >/dev/null 2>&1
+    wait_for gone 10
+}
 
 case "\$1" in
     version|info|types|check|help)
         option="--\$1"
         shift
-        exec "\$SERVER" "\$option" "\$@"
+        exec "\$(server)" "\$option" "\$@"
         ;;
     start)
         shift
-        "\$SERVER" "\$@" > /dev/null 2>&1 < /dev/null &
+        if running; then
+            echo "the SEN server is running already."
+            exit 0
+        fi
+        "\$(server)" "\$@" > /dev/null 2>&1 < /dev/null &
         ;;
     stop)
-        exec hey "\$SIGNATURE" quit
+        stop_server
+        ;;
+    restart)
+        shift
+        # quitting is enough for a service (the launch daemon starts it again at once); else it is started here
+        old="\$(team)"
+        hey "\$SIGNATURE" quit >/dev/null 2>&1
+        i=0
+        while [ \$i -lt 10 ] && [ "\$(team)" = "\$old" ]; do
+            sleep 1
+            i=\$((i + 1))
+        done
+        if ! wait_for up 8; then
+            "\$(server)" "\$@" > /dev/null 2>&1 < /dev/null &
+        fi
         ;;
     *)
-        exec "\$SERVER" "\$@"
+        exec "\$(server)" "\$@"
         ;;
 esac
 WRAPPER
