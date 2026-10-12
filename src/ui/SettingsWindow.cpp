@@ -10,13 +10,19 @@
 #include <sen/Sen.h>
 
 #include <CheckBox.h>
+#include <Entry.h>
+#include <FindDirectory.h>
 #include <InterfaceDefs.h>
 #include <LayoutBuilder.h>
 #include <Menu.h>
 #include <MenuField.h>
 #include <MenuItem.h>
 #include <PopUpMenu.h>
+#include <Path.h>
+#include <String.h>
 #include <StringView.h>
+
+#include <stdlib.h>
 
 namespace sen {
 namespace ui {
@@ -25,6 +31,40 @@ static const uint32 kSetKey = 'SWky';
 static const uint32 kSetAkita = 'SWak';
 static const uint32 kSetFileTypes = 'SWft';
 static const uint32 kActivate = 'SWac';
+
+
+/** A file of Akita or its command: in the folder of the system or of the user. */
+static bool
+AkitaFile(directory_which system, directory_which user, const char* name, BPath* found = NULL)
+{
+	for (directory_which which : {system, user}) {
+		BPath path;
+		if (find_directory(which, &path) == B_OK && path.Append(name) == B_OK && BEntry(path.Path()).Exists()) {
+			if (found != NULL)
+				*found = path;
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/** Whether Akita is installed, and whether it replaces Tracker at login (the default of its package: until the file of the user that undoes it is there). */
+static bool
+AkitaInstalled()
+{
+	return AkitaFile(B_SYSTEM_APPS_DIRECTORY, B_USER_APPS_DIRECTORY, "Akita/Akita");
+}
+
+
+static bool
+AkitaEnabled()
+{
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK || path.Append("launch/akita") != B_OK)
+		return true;
+	return !BEntry(path.Path()).Exists();
+}
 
 
 struct KeyChoice {
@@ -49,7 +89,7 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	BMessage settings;
 	config->GetConfig(&settings);
 	int32 current = settings.GetInt32(sen::key::kModifierKey, B_COMMAND_KEY);
-	bool useAkita = settings.GetBool(sen::key::kUseAkita, false);
+	bool akitaInstalled = AkitaInstalled();
 	bool useFileTypes = settings.GetBool(sen::key::kUseSenFileTypes, true);
 
 	BPopUpMenu* menu = new BPopUpMenu("key");
@@ -67,8 +107,10 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	keyHelp->SetFont(be_plain_font);
 
 	fAkita = new BCheckBox("akita", "Use Akita instead of Tracker", new BMessage(kSetAkita));
-	fAkita->SetValue(useAkita ? B_CONTROL_ON : B_CONTROL_OFF);
-	BStringView* akitaHelp = new BStringView("akitahelp", "Takes effect when the system is started the next time.");
+	fAkita->SetValue(akitaInstalled && AkitaEnabled() ? B_CONTROL_ON : B_CONTROL_OFF);
+	fAkita->SetEnabled(akitaInstalled);
+	BStringView* akitaHelp = new BStringView("akitahelp",
+		akitaInstalled ? "Takes effect at the next login (the command akita switches at once)." : "Akita is not installed (package akita).");
 
 	fFileTypes = new BCheckBox("filetypes", "Use the FileTypes of SEN instead of the one of Haiku", new BMessage(kSetFileTypes));
 	fFileTypes->SetValue(useFileTypes ? B_CONTROL_ON : B_CONTROL_OFF);
@@ -101,9 +143,12 @@ SettingsWindow::MessageReceived(BMessage* message)
 		}
 		case kSetAkita:
 		{
-			BMessage change;
-			change.AddBool(sen::key::kUseAkita, fAkita->Value() == B_CONTROL_ON);
-			fConfig->UpdateSettings(&change);
+			// (the command does it: a file of the user for the launch daemon, which undoes what the package of Akita does)
+			BPath command;
+			AkitaFile(B_SYSTEM_BIN_DIRECTORY, B_USER_BIN_DIRECTORY, "akita", &command);
+			BString line(command.Path() != NULL ? command.Path() : "akita");
+			line << (fAkita->Value() == B_CONTROL_ON ? " enable" : " disable") << " >/dev/null 2>&1";
+			system(line.String());
 			break;
 		}
 		case kSetFileTypes:
