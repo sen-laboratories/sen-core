@@ -167,6 +167,10 @@ void SenServer::WatchVolume(dev_t device)
 
 void SenServer::EnsureIndices(dev_t device)
 {
+	// the type of a file is queried for the entities of a kind (the sticky classifications): Haiku has the index on its boot volume only
+	if (fs_create_index(device, "BEOS:TYPE", B_STRING_TYPE, 0) == 0)
+		spdlog::info("created index BEOS:TYPE on volume {}", (int)device);
+
 	for (unsigned i = 0; i < sen::onto::core::kIndexCount; i++) {
 		const sen::onto::core::Index& index = sen::onto::core::kIndices[i];
 		if (fs_create_index(device, index.name, index.type, 0) == 0) {
@@ -552,7 +556,8 @@ void SenServer::MessageReceived(BMessage* message)
 		case sen::cmd::kRelationAdd:
 		case sen::cmd::kRelationRemove:
 		case sen::cmd::kRelationUpdate:
-		case sen::cmd::kRelationsRemoveAll: // fallthrough
+		case sen::cmd::kRelationsRemoveAll:
+		case sen::cmd::kClassificationApplySticky: // fallthrough
         {
             relationHandler->MessageReceived(message);
             return; // done

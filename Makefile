@@ -10,6 +10,7 @@ APP_MIME_SIG = application/x-vnd.sen-labs.sen-server
 
 SRCS := src/relations/RelationHandler.cpp \
     	src/relations/RelationWrite.cpp \
+	src/relations/RelationSticky.cpp \
     	src/relations/RelationSets.cpp \
     	src/relations/SelfRelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \

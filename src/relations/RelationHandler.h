@@ -13,6 +13,7 @@
 #include <Query.h>
 #include <StringList.h>
 
+#include <string>
 #include <vector>
 
 #include <sen/Sensei.h>
@@ -41,6 +42,11 @@ public:
         status_t    UpdateRelation          (const BMessage* message, BMessage* reply);
         /** remove all relations of a file (of one type if given) */
         status_t    RemoveAllRelations      (const BMessage* message, BMessage* reply);
+        /** put files (refs) into the sticky classifications, see RelationSticky.cpp */
+        status_t    ApplySticky             (const BMessage* message, BMessage* reply);
+        /** the classifications that are sticky now (of the contexts only the current one), and their SEN:IDs */
+        status_t    StickyClassifications   (std::vector<entry_ref>* result);
+        status_t    StickyClassificationIds (std::vector<std::string>* ids);
 
         /** @return a new TSID, see sen::id::New() */
         BString     GenerateId();

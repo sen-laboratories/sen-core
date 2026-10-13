@@ -15,6 +15,7 @@ DONE=${DONE:-/tmp/sen-tracker-folders.done}
 rm -f "$DONE" "$OUT" /tmp/tracker-folders-test
 export TEST_DIR
 {
+launch_roster stop x-vnd.sen-labs.sen-server > /dev/null 2>&1   # (a service: it would be started again, and answer instead of the one under test)
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
 sleep 2
 echo "== compiling"
@@ -26,5 +27,6 @@ sleep 4
 echo "== tracker relation folders"
 /tmp/tracker-folders-test 2>&1 | grep -vE "^(adding|skipping|writing|got |\\*|  \\*|  >|  o|  -|BMessage|\\t|\\}|  x WARN)"
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
+launch_roster start x-vnd.sen-labs.sen-server > /dev/null 2>&1
 } > "$OUT" 2>&1
 touch "$DONE"

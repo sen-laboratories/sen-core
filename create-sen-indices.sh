@@ -19,11 +19,12 @@
 #   SEN:TO     the targets of the normal relations, chunked    ("SEN:TO == '*<id>*'")
 #   SEN:META   the targets of the meta relations (same)        ("SEN:META == '*<id>*'")
 #   META:TYPE  the semantic type; plugins carry the plugin type here, so they are found by it
+#   BEOS:TYPE  the type of a file (the boot volume of Haiku has this index, others do not): the sticky classifications are found by it
 # The feature flags of plugins (SEN:plugin:*, int32) are not indexed: a query needs only one indexed attribute (META:TYPE).
 
 set -e
 
-ATTRS="SEN:ID SEN:TO SEN:META META:TYPE"
+ATTRS="SEN:ID SEN:TO SEN:META META:TYPE BEOS:TYPE"
 
 if [ $# -gt 0 ]; then
     VOLUMES="$@"

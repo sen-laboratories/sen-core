@@ -280,6 +280,16 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
     BMessage properties;
     message->FindMessage(sen::key::kRelationProperties, &properties);
 
+    // what is related is put into the sticky classifications: the relation lists them (not those of the ontologies, and not the associations)
+    if (!IsMetaRelation(relationType) && !properties.HasString(sen::key::kClassifications)
+            && !properties.GetBool(sen::attr::kRelationReadOnly, false)) {
+        std::vector<std::string> sticky;
+        if (StickyClassificationIds(&sticky) == B_OK) {
+            for (const std::string& id : sticky)
+                properties.AddString(sen::key::kClassifications, id.c_str());
+        }
+    }
+
     // associations are stored with the file that is classified, never with the classification entity: if a label is
     // dropped on a file, it is the file that gets the relation to the label
     if (IsMetaRelation(relationType)) {

@@ -27,6 +27,7 @@ BLANK=$!
 
 {
 echo "== start the server as a service"
+launch_roster stop x-vnd.sen-labs.sen-server > /dev/null 2>&1   # (a service: it would be started again, and answer instead of the one under test)
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
 sleep 2
 SEN_LOG_LEVEL=info $SERVER > $OUT_DIR/server.log 2>&1 &
@@ -50,7 +51,10 @@ check "contained relations of the PDF come from the extractor plugin" "grep -q '
 
 echo "== Akita next to the server"
 check "the Tracker build is there" "[ -x $AKITA/Akita ]"
+# (the file manager is a service, either the stock Tracker or Akita: it would be started again when it quits)
 launch_roster stop x-vnd.be-trak > /dev/null 2>&1
+launch_roster stop x-vnd.sen-labs.akita > /dev/null 2>&1
+for p in $(ps | grep "[T]racker\|[A]kita" | awk '{print $(NF-3)}'); do hey application/x-vnd.Be-TRAK quit > /dev/null 2>&1; done
 sleep 2
 export LIBRARY_PATH=%A/lib:/boot/home/config/non-packaged/lib:/boot/home/config/lib:/boot/system/non-packaged/lib:/boot/system/lib
 ( cd $AKITA && ./Akita $LIVE > $OUT_DIR/tracker.log 2>&1 & )
@@ -66,10 +70,11 @@ check "the Tracker did not crash" "ps | grep -q '[A]kita' && ! ls ~/Desktop/Akit
 echo "== clean up"
 for p in $(ps | grep "[A]kita" | awk '{print $(NF-3)}'); do kill -9 $p; done
 sleep 1
-launch_roster start x-vnd.be-trak > /dev/null 2>&1 || /boot/system/Tracker > /dev/null 2>&1 &
+launch_roster start x-vnd.sen-labs.akita > /dev/null 2>&1 || launch_roster start x-vnd.be-trak > /dev/null 2>&1 || /boot/system/Tracker > /dev/null 2>&1 &
 sleep 3
-check "the system Tracker is back" "ps | grep -q '[T]racker'"
+check "the file manager is back" "ps | grep -q '[T]racker\\|[A]kita'"
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
+launch_roster start x-vnd.sen-labs.sen-server > /dev/null 2>&1
 rm -rf $LIVE
 echo "$PASSED passed, $FAILED failed"
 } > "$OUT" 2>&1

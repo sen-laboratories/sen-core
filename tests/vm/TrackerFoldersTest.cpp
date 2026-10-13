@@ -199,6 +199,23 @@ TEST(DeletingAFileRemovesTheRelation)
 	CHECK(!RelationFolders::Instance().IsRelationFile(node));
 }
 
+TEST(DeletingAFileWithRelationsToFilesThatAreGoneRemovesTheRelationsWithoutAsking)
+{
+	Fixture f("deletestale", 3);
+	Relate(f.refs[0], f.refs[1]);
+	std::string a = IdOf(f.refs[0]), b = IdOf(f.refs[1]);
+	CHECK(HasAttr(f.refs[0], sen::attr::kTo));
+	BEntry(&f.refs[1]).Remove();           // the target is gone: nothing to tell the user
+
+	// (a file that has relations to files that are there asks the user, which needs a window: not tested here)
+	BObjectList<entry_ref, true> files;
+	files.AddItem(new entry_ref(f.refs[0]));
+	files.AddItem(new entry_ref(f.refs[2]));        // no relations: nothing happens
+	CHECK(TrackerSenRelations::ConfirmDeletion(files));
+	CHECK(WaitFor([&]() { return !HasAttr(f.refs[0], sen::attr::kTo); }));
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 0);
+}
+
 TEST(MovingAFileOutOfTheFolderRemovesTheRelation)
 {
 	Fixture f("trash", 2);
@@ -373,7 +390,13 @@ TEST(DroppingOnTheTopLevelCreatesAGenericRelation)
 	CHECK(RelationFolders::Instance().HandleDrop(drop, folder.node));
 
 	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
-	entry_ref file = RefOf(BString(root.Path()) << "/x-vnd.sen-labs.relation.reference", "file1");
+	// the folder of the type is named after the relation (not after its MIME type): it is the only one that was made
+	BDirectory made(root.Path());
+	BEntry typeFolder;
+	CHECK(made.GetNextEntry(&typeFolder) == B_OK);
+	BPath typePath;
+	typeFolder.GetPath(&typePath);
+	entry_ref file = RefOf(typePath.Path(), "file1");
 	CHECK(Exists(file));
 	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(file)));
 }

@@ -119,6 +119,11 @@ void RelationHandler::MessageReceived(BMessage* message)
             result = RemoveAllRelations(message, reply);
             break;
         }
+        case sen::cmd::kClassificationApplySticky:
+        {
+            result = ApplySticky(message, reply);
+            break;
+        }
         default:
         {
             spdlog::warn("RelationHandler: unkown message received: {}", message->what);

@@ -15,6 +15,7 @@ rm -f "$DONE" "$OUT"
 export TEST_DIR
 
 {
+launch_roster stop x-vnd.sen-labs.sen-server > /dev/null 2>&1   # (a service: it would be started again, and answer instead of the one under test)
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
 sleep 2
 
@@ -30,5 +31,6 @@ echo "== relation tests"
 echo "exit $?"
 
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
+launch_roster start x-vnd.sen-labs.sen-server > /dev/null 2>&1
 } > "$OUT" 2>&1
 touch "$DONE"

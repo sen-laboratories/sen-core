@@ -20,6 +20,7 @@ check() {	# check <name> <command that succeeds when the check passes>
 
 {
 # a stale instance would answer instead of the one under test
+launch_roster stop x-vnd.sen-labs.sen-server > /dev/null 2>&1   # (a service: it would be started again, and answer instead of the one under test)
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
 sleep 2
 SEN_LOG_LEVEL=info $SERVER > /tmp/sen_server.log 2>&1 &
@@ -268,6 +269,7 @@ check "the copy keeps content metadata" "listattr copy | grep -q SEN:annotations
 cd /; rm -rf $D
 
 for p in $(ps | grep "[s]en_server" | awk '{print $(NF-3)}'); do kill -9 $p; done
+launch_roster start x-vnd.sen-labs.sen-server > /dev/null 2>&1
 echo "$PASSED passed, $FAILED failed"
 } > "$OUT" 2>&1
 touch "$DONE"
