@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #define private public
@@ -47,6 +48,19 @@ Index(const std::vector<std::string>& list, const char* label)
 			return (int) i;
 	}
 	return -1;
+}
+
+/** every item of the menu, with a message: collected from the whole tree */
+static void
+Messages(BMenu* menu, std::vector<std::pair<std::string, uint32>>* found)
+{
+	for (int32 i = 0; i < menu->CountItems(); i++) {
+		BMenuItem* item = menu->ItemAt(i);
+		if (item->Message() != NULL)
+			found->push_back({item->Label() != NULL ? item->Label() : "", item->Message()->what});
+		if (item->Submenu() != NULL)
+			Messages(item->Submenu(), found);
+	}
 }
 
 int
@@ -89,6 +103,17 @@ main()
 	check("the Context menu lists the contexts, global first",
 		context != NULL && context->Submenu() != NULL && context->Submenu()->CountItems() >= 1
 		&& strcmp(context->Submenu()->ItemAt(0)->Label(), "global") == 0 && context->Submenu()->ItemAt(0)->Message() != NULL);
+	// the view only passes messages on to the server (it has no other handler): every message of every item has to be one that it knows
+	std::vector<std::pair<std::string, uint32>> messages;
+	Messages(menu, &messages);
+	bool known = !messages.empty();
+	for (const auto& message : messages) {
+		if (!sen::deskbar::DeskbarView::IsServerCommand(message.second)) {
+			printf("     the view does not pass on the message of \"%s\"\n", message.first.c_str());
+			known = false;
+		}
+	}
+	check("the view passes on the message of every item of the menu", known);
 	printf("%s\n", failed == 0 ? "all ok" : "FAILED");
 	delete menu;
 	return failed == 0 ? 0 : 1;

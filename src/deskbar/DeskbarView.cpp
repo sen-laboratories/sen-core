@@ -173,10 +173,10 @@ DeskbarView::MouseUp(BPoint)
 }
 
 
-void
-DeskbarView::MessageReceived(BMessage* message)
+bool
+DeskbarView::IsServerCommand(uint32 command)
 {
-	switch (message->what) {
+	switch (command) {
 		case sen::cmd::kUiShowInfo:
 		case sen::cmd::kUiShowCheck:
 		case sen::cmd::kUiShowSettings:
@@ -185,17 +185,36 @@ DeskbarView::MessageReceived(BMessage* message)
 		case sen::cmd::kUiRequestRestart:
 		case sen::cmd::kUiOpenOntologies:
 		case sen::cmd::kUiOpenOntology:
+		case sen::cmd::kUiOpenType:
 		case sen::cmd::kUiUpdateOntologies:
 		case sen::cmd::kUiOpenObjects:
 		case sen::cmd::kUiOpenClassification:
 		case sen::cmd::kUiOpenClassified:
 		case sen::cmd::kUiSetContext:
-			// the server does it
-			BMessenger(sen::kServerSignature).SendMessage(message);
-			break;
-		default:
-			BView::MessageReceived(message);
+			return true;
 	}
+	return false;
+}
+
+
+void
+DeskbarView::MessageReceived(BMessage* message)
+{
+	if (!IsServerCommand(message->what)) {
+		BView::MessageReceived(message);
+		return;
+	}
+
+	if (message->what == sen::cmd::kUiOpenClassified) {
+		// with the Shift key the classification sticks (or does not any more) instead of opening: the server is told how the key was held now
+		BMessage chosen(*message);
+		chosen.AddBool(sen::key::kShift, (modifiers() & B_SHIFT_KEY) != 0);
+		BMessenger(sen::kServerSignature).SendMessage(&chosen);
+		return;
+	}
+
+	// the server does it
+	BMessenger(sen::kServerSignature).SendMessage(message);
 }
 
 
@@ -528,10 +547,15 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 		for (const entry_ref& entity : entities) {
 			if (listed++ >= kMaxEntities)
 				break;
-			// choosing one shows the files that it classifies
+			// choosing one shows the files that it classifies; with the Shift key it sticks (what is made new is put into it: the check mark)
 			BMessage* classified = new BMessage(sen::cmd::kUiOpenClassified);
 			classified->AddRef("refs", &entity);
-			submenu->AddItem(new BMenuItem(entity.name, classified));
+			BMenuItem* item = new BMenuItem(entity.name, classified);
+			bool sticky = false;
+			BNode node(&entity);
+			if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky))
+				item->SetMarked(sticky);
+			submenu->AddItem(item);
 		}
 		submenu->SetTargetForItems(this);
 		menu->AddItem(new BMenuItem(submenu, showAll));

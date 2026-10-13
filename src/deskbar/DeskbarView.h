@@ -38,6 +38,9 @@ public:
 	virtual void		MouseUp(BPoint where);
 	virtual void		MessageReceived(BMessage* message);
 
+	/** Whether the view passes a message of the menu on to the server (every message of an item of the menu has to be one: the view does nothing else). */
+	static bool			IsServerCommand(uint32 command);
+
 private:
 	void				_Init();
 	BPopUpMenu*			_BuildMenu();

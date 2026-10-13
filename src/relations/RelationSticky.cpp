@@ -7,9 +7,11 @@
  * @file RelationSticky.cpp
  * @brief Sticky classifications: what is made new is put into them automatically.
  *
- * A classification (label, topic, project, context...) that has the attribute SEN:sticky is applied to every file that the file manager has made
+ * A classification (label, topic, project...) that has the attribute SEN:sticky (the user locks it with Shift+click in the menu of SEN) and the current
+ * context are applied to every file that the file manager has made
  * (a new file, a new related file) and to every relation that is made: the file gets a relation of the association type to it, the relation lists the
- * classification in its properties (key::kClassifications), so that they can be filtered by it later. Of the contexts only the current one counts.
+ * classification in its properties (key::kClassifications), so that they can be filtered by it later. Of the contexts only the current one counts
+ * (the attribute is not looked at: choosing a context is what makes it stick).
  */
 
 #include <Directory.h>
@@ -70,16 +72,20 @@ status_t RelationHandler::StickyClassifications(std::vector<entry_ref>* result)
     BString current = CurrentContext();
     for (const entry_ref& candidate : candidates) {
         BNode node(&candidate);
-        bool sticky = false;
-        if (node.InitCheck() != B_OK || node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) != sizeof(sticky) || !sticky)
+        if (node.InitCheck() != B_OK || InTrash(candidate))
             continue;
-        if (InTrash(candidate))
-            continue;
-        // (a context is only applied while it is the current one)
+
+        // the current context sticks by being the current one (not the global one, which is every file); the others when they were locked
+        // (Shift+click in the menu of SEN), which sets their attribute
         entry_ref copy(candidate);
-        if (GetMimeTypeForRef(&copy) == sen::mime::kContext && current != candidate.name)
+        if (GetMimeTypeForRef(&copy) == sen::mime::kContext) {
+            if (current == candidate.name && current != sen::config::kContextGlobal)
+                result->push_back(candidate);
             continue;
-        result->push_back(candidate);
+        }
+        bool sticky = false;
+        if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky) && sticky)
+            result->push_back(candidate);
     }
     return B_OK;
 }

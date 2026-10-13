@@ -210,6 +210,18 @@ SenUi::_OpenClassified(const BMessage* message)
 	if (message->FindRef("refs", &entity) != B_OK)
 		return;
 
+	// with the Shift key held it is made sticky, or not any more: what is made new is put into a sticky classification (see RelationSticky.cpp)
+	if (message->GetBool(sen::key::kShift, false)) {
+		BNode node(&entity);
+		bool sticky = false;
+		if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) != sizeof(sticky))
+			sticky = false;
+		sticky = !sticky;
+		ssize_t written = node.WriteAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky));
+		_Report(sticky ? "make the classification sticky" : "make the classification not sticky", written == (ssize_t) sizeof(sticky) ? B_OK : (written < 0 ? (status_t) written : B_ERROR));
+		return;
+	}
+
 	// the files that have the entity (a label, a topic...) as a target: of an association (SEN:META), or any other relation (SEN:TO)
 	char id[sen::id::kLength];
 	status_t result = fRelations->GetOrCreateId(&entity, id, true);
