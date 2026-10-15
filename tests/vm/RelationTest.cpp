@@ -507,6 +507,33 @@ TEST(TheOppositeDirectionCanGetItsOwnLabelWhenAdded)
 	CHECK_STR(opposite.GetString(sen::attr::kRelationLabel, ""), "provided by");
 }
 
+TEST(AClassificationHasTheAssociationOfTheFilesThatHaveIt)
+{
+	Fixture f("assocreverse", 1);
+	entry_ref label = f.Create("a label", kLabelType);
+
+	// nothing has it yet: no relations
+	BMessage ask(sen::cmd::kRelationsGetAll);
+	ask.AddRef(sen::key::kSourceRef, &label);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+	CHECK(!reply.HasString(sen::key::kRelations));
+
+	// a file has it: the label has the association (the open relations menu of the label offers it)
+	BMessage added = Send(sen::cmd::kRelationAdd, &f.refs[0], kAssociation, &label);
+	CHECK_EQ(SenStatus(added), sen::status::kCreated);
+	reply.MakeEmpty();
+	BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+	CHECK_STR(reply.GetString(sen::key::kRelations, ""), kAssociation);
+
+	// a file is not a classification: it only has what it holds itself
+	BMessage askFile(sen::cmd::kRelationsGetAll);
+	askFile.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	reply.MakeEmpty();
+	BMessenger(sen::kServerSignature).SendMessage(&askFile, &reply, 10000000, 10000000);
+	CHECK_STR(reply.GetString(sen::key::kRelations, ""), kAssociation);
+}
+
 TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 {
 	// (what is sticky on this machine already is applied, too: the test only looks at its own label)

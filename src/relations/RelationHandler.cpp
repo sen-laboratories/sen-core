@@ -157,6 +157,18 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
 
     BStringList relationNames;
     status = ReadRelationNames(&sourceRef, &relationNames);
+
+    // A classification (a label, a topic, a context...) has no relations stored with it: the files that have it hold the associations. It has them
+    // all the same, the other end of the association (what is shown for them is the reverse lookup of GetRelationsOfType).
+    if (!relationNames.HasString(sen::mime::kAssociationRelation) && GetMimeTypeForRef(&sourceRef).StartsWith(sen::mime::kClassificationPrefix)) {
+        char sourceId[sen::id::kLength];
+        std::vector<entry_ref> holders;
+        if (GetOrCreateId(&sourceRef, sourceId, false) == B_OK
+                && sen::QueryAllVolumes(sen::idlist::ContainsPredicate(sen::attr::kMeta, sourceId).c_str(), &holders) == B_OK && !holders.empty()) {
+            relationNames.Add(sen::mime::kAssociationRelation);
+            status = B_OK;
+        }
+    }
     if (relationNames.IsEmpty()) {
         return status;
     }

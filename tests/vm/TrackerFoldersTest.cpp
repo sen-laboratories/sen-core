@@ -135,6 +135,11 @@ TEST(AClassificationShowsTheFilesThatHaveItAsAFolderOfRelations)
 	BPath path(&typeDir);
 	CHECK(Exists(RefOf(path.Path(), "file0")));
 	CHECK(Exists(RefOf(path.Path(), "file1")));
+
+	// the title of the window says what it shows
+	BString title;
+	BNode(&typeDir).ReadAttrString(sen::attr::kFolderName, &title);
+	CHECK_STR(title.String(), "Files with Label \"my label\"");
 }
 
 TEST(EveryViewHasItsOwnFolder)
