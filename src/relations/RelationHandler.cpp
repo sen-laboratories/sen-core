@@ -158,15 +158,23 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
     BStringList relationNames;
     status = ReadRelationNames(&sourceRef, &relationNames);
 
-    // A classification (a label, a topic, a context...) has no relations stored with it: the files that have it hold the associations. It has them
-    // all the same, the other end of the association (what is shown for them is the reverse lookup of GetRelationsOfType).
-    if (!relationNames.HasString(sen::mime::kAssociationRelation) && GetMimeTypeForRef(&sourceRef).StartsWith(sen::mime::kClassificationPrefix)) {
-        char sourceId[sen::id::kLength];
-        std::vector<entry_ref> holders;
-        if (GetOrCreateId(&sourceRef, sourceId, false) == B_OK
-                && sen::QueryAllVolumes(sen::idlist::ContainsPredicate(sen::attr::kMeta, sourceId).c_str(), &holders) == B_OK && !holders.empty()) {
-            relationNames.Add(sen::mime::kAssociationRelation);
-            status = B_OK;
+    // Unidirectional relation types (bidir = false in their config, the associations) are not stored with their target: a file that only has such relations
+    // pointing to it (a label, a topic, a context...) has none stored itself. What points to it is found by query, as for the relations of one type
+    // (ResolveReverseRelations): the types that have something that points to this file are added.
+    BMessage installedTypes;
+    BStringList installed;
+    if (BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &installedTypes) == B_OK && installedTypes.FindStrings("types", &installed) == B_OK) {
+        for (int32 i = 0; i < installed.CountStrings(); i++) {
+            const BString& type = installed.StringAt(i);
+            BMessage config;
+            if (relationNames.HasString(type) || GetRelationConfig(type.String(), &config) != B_OK)
+                continue;
+            if (config.GetBool(sen::conf::kBidirectional, true) || config.GetBool(sen::conf::kDynamic, false))
+                continue;
+            if (HasReverseRelations(&sourceRef, type.String())) {
+                relationNames.Add(type);
+                status = B_OK;
+            }
         }
     }
     if (relationNames.IsEmpty()) {

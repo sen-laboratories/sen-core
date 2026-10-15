@@ -698,6 +698,22 @@ status_t RelationHandler::UpdateRelation(const BMessage* message, BMessage* repl
 // the relations that point to a file
 //
 
+bool RelationHandler::HasReverseRelations(const entry_ref* ref, const char* relationType)
+{
+    char sourceId[sen::id::kLength];
+    if (GetOrCreateId(ref, sourceId, false) != B_OK)
+        return false;       // no ID: nothing can point to the file
+
+    std::vector<entry_ref> files;
+    if (sen::QueryAllVolumes(sen::idlist::ContainsPredicate(ListAttrFor(relationType), sourceId).c_str(), &files) != B_OK)
+        return false;
+    for (const entry_ref& file : files) {
+        if (!(file == *ref))
+            return true;
+    }
+    return false;
+}
+
 status_t RelationHandler::ResolveReverseRelations(const entry_ref* ref, const char* relationType,
                                                   const BMessage& relationConfig, BMessage* relations, BMessage* idToRef)
 {

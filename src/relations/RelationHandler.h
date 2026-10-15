@@ -124,6 +124,8 @@ private:
         /** the relations of unidirectional types that point to a file, found by query for its ID in SEN:META / SEN:TO */
         status_t    ResolveReverseRelations(const entry_ref* ref, const char* relationType, const BMessage& relationConfig,
                                             BMessage* relations, BMessage* idToRefMap);
+        /** whether a file of the ID of this one lists it as a target of a relation of the type (what ResolveReverseRelations() would find) */
+        bool        HasReverseRelations(const entry_ref* ref, const char* relationType);
 
         // helper methods
         status_t    GetSubtype(const BString* type, BString* subtype);
