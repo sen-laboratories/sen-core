@@ -307,8 +307,8 @@ SenUi::_SetContext(const BMessage* message)
 		return;
 
 	bool lock = false;
-	if (message->GetBool(sen::key::kShift, false) && strcmp(name, sen::config::kContextGlobal) != 0) {
-		// (the global context is every file: it is not locked)
+	if (message->GetBool(sen::key::kShift, false) && strcmp(name, sen::config::kContextDefault) != 0) {
+		// (the default context is every file: it is not locked)
 		bool sticky = false;
 		BPath path = ContextPath(name);
 		BNode node(path.Path());

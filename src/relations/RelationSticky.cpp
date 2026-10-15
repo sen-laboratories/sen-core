@@ -10,7 +10,7 @@
  * A classification (label, topic, project...) or context that has the attribute SEN:sticky (the user locks it with Shift+click in the menu of SEN)
  * is applied to every file that the file manager has made
  * (a new file, a new related file) and to every relation that is made: the file gets a relation of the association type to it, the relation lists the
- * classification in its properties (key::kClassifications), so that they can be filtered by it later. (The global context does not stick: it is every
+ * classification in its properties (key::kClassifications), so that they can be filtered by it later. (The default context does not stick: it is every
  * file. The menu of SEN makes only one context sticky.)
  */
 
@@ -58,9 +58,9 @@ status_t RelationHandler::StickyClassifications(std::vector<entry_ref>* result)
         if (node.InitCheck() != B_OK || InTrash(candidate))
             continue;
 
-        // (the global context is every file: it does not stick)
+        // (the default context is every file: it does not stick)
         entry_ref copy(candidate);
-        if (GetMimeTypeForRef(&copy) == sen::mime::kContext && strcmp(candidate.name, sen::config::kContextGlobal) == 0)
+        if (GetMimeTypeForRef(&copy) == sen::mime::kContext && strcmp(candidate.name, sen::config::kContextDefault) == 0)
             continue;
         bool sticky = false;
         if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky) && sticky)

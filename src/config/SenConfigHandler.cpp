@@ -85,10 +85,54 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
             return status;
         }
     }
+    // the default context was called "global": its folder gets the new name, and the settings follow
+    if (MigrateDefaultContext(path, settingsMessage))
+        SaveSettings(settingsMessage);
+
     spdlog::debug("successfully retrieved settings:");
     sen::DumpMessage(settingsMessage);
 
     return status;
+}
+
+/** Renames the folder of the old default context ("global") and corrects what the settings say about it. @return true if the settings changed. */
+bool SenConfigHandler::MigrateDefaultContext(const BPath& settingsPath, BMessage* settings)
+{
+    BPath contexts(settingsPath);
+    contexts.Append(sen::config::kContextsDir);
+    BPath legacy(contexts), current(contexts);
+    legacy.Append(sen::config::kContextGlobalLegacy);
+    current.Append(sen::config::kContextDefault);
+
+    bool changed = false;
+    BEntry legacyEntry(legacy.Path());
+    if (legacyEntry.Exists() && !BEntry(current.Path()).Exists()) {
+        if (legacyEntry.Rename(sen::config::kContextDefault) == B_OK) {
+            spdlog::info("the context \"{}\" is now called \"{}\"", sen::config::kContextGlobalLegacy, sen::config::kContextDefault);
+            changed = true;
+        } else {
+            spdlog::error("could not rename the context \"{}\"", sen::config::kContextGlobalLegacy);
+        }
+    }
+
+    // (the settings name the folder of the classifications by path and by ref)
+    BPath classifications(current);
+    classifications.Append(sen::config::kClassificationsDir);
+    BEntry classificationsEntry(classifications.Path());
+    entry_ref classificationsRef;
+    if (changed && classificationsEntry.Exists() && classificationsEntry.GetRef(&classificationsRef) == B_OK) {
+        settings->RemoveName(sen::key::kClassificationPath);
+        settings->AddString(sen::key::kClassificationPath, classifications.Path());
+        settings->RemoveName(sen::key::kClassificationPathRef);
+        settings->AddRef(sen::key::kClassificationPathRef, &classificationsRef);
+    }
+
+    if (strcmp(settings->GetString(sen::key::kCurrentContext, ""), sen::config::kContextGlobalLegacy) == 0) {
+        settings->RemoveName(sen::key::kCurrentContext);
+        settings->AddString(sen::key::kCurrentContext, sen::config::kContextDefault);
+        changed = true;
+    }
+    return changed;
 }
 
 status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* settingsMessage)
@@ -132,10 +176,10 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* se
     settingsDirEntry.GetRef(&contextBaseRef);
     settingsMessage->AddRef(sen::key::kContextPathRef, &contextBaseRef);
 
-    // create initial global context as default
+    // create the default context
     // Note: we do this manually here since CreateContext() rightfully relies on setup to be completed.
     // set up context directories
-    path.Append(sen::config::kContextGlobal);
+    path.Append(sen::config::kContextDefault);
     settingsDirEntry.SetTo(path.Path());
 
     if (! settingsDirEntry.Exists()) {
@@ -148,13 +192,13 @@ status_t SenConfigHandler::InitDefaultSettings(BPath* settingsPath, BMessage* se
             status = contextDirInfo.SetType(sen::mime::kContext);
         }
         if (status != B_OK) {
-            spdlog::error("failed to set up global context: {}", strerror(status));
+            spdlog::error("failed to set up the default context: {}", strerror(status));
             return status;
         }
     }
     settingsDir.SetTo(path.Path());
 
-    // set up default classification directory in global context setup above
+    // set up the classification directory of the default context
     path.Append(sen::config::kClassificationsDir);
     settingsDirEntry.SetTo(path.Path());
 
@@ -199,8 +243,8 @@ void SenConfigHandler::MessageReceived(BMessage* message)
     sen::DumpMessage(message);
 
     // for now, we always need these same parameters for context
-    // if optional context is empty, use global default context
-    const char* context = message->GetString(sen::key::kContext, sen::config::kContextGlobal);
+    // if optional context is empty, use the default context
+    const char* context = message->GetString(sen::key::kContext, sen::config::kContextDefault);
     const BString name = message->GetString(sen::key::kName, "");
     const BString type = message->GetString(sen::key::kType, "");
 
@@ -276,7 +320,7 @@ status_t SenConfigHandler::FindContextByName(const char* name, BMessage *reply)
 
 status_t SenConfigHandler::AddClassification(const char* context, const char* name, const char* type, BMessage* reply)
 {
-    // a context is not classified in a context: it is a folder of its own in the contexts folder (like the global one)
+    // a context is not classified in a context: it is a folder of its own in the contexts folder (like the default one)
     if (strcmp(type, sen::mime::kContext) == 0) {
         entry_ref contextRef;
         status_t created = CreateContext(name, &contextRef);
@@ -563,7 +607,7 @@ status_t SenConfigHandler::CreateContext(const char* name, entry_ref* ref)
     if (status != B_OK)
         return status;
 
-    // a context is a folder with the type of a context (like the global one), which holds the classifications that are made in it;
+    // a context is a folder with the type of a context (like the default one), which holds the classifications that are made in it;
     // it must not exist already
     BEntry existing(&contextRef);
     if (existing.Exists()) {

@@ -142,6 +142,31 @@ TEST(AClassificationShowsTheFilesThatHaveItAsAQuery)
 	CHECK_STR(type, "application/x-vnd.Be-query");
 }
 
+TEST(AllOutgoingRelationsAreShownInOneFolder)
+{
+	Fixture f("showall", 3);
+	Relate(f.refs[0], f.refs[1]);
+	Relate(f.refs[0], f.refs[2], NULL, "relation/x-vnd.sen-labs.relation.dependency");
+	RelationFolders::Instance().Clear();
+
+	BString view;
+	TrackerSenRelations::NewViewId(&view);
+	entry_ref folder;
+	CHECK_EQ(TrackerSenRelations::MaterializeAll(f.refs[0], view.String(), &folder), (status_t) B_OK);
+
+	// the targets of both relations, in one folder that takes dropped files like the folder of all the types
+	BPath path(&folder);
+	entry_ref one = RefOf(path.Path(), "file1"), two = RefOf(path.Path(), "file2");
+	CHECK(Exists(one));
+	CHECK(Exists(two));
+	CHECK(RelationFolders::Instance().IsTopLevelFolder(NodeOf(folder)));
+	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(one)));
+	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(two)));
+	BString title;
+	BNode(&folder).ReadAttrString(sen::attr::kFolderName, &title);
+	CHECK_STR(title.String(), "All relations of file0");
+}
+
 TEST(EveryViewHasItsOwnFolder)
 {
 	Fixture f("views", 2);

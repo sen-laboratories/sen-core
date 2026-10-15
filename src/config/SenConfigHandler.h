@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <Path.h>
+
 #include <Application.h>
 #include <Locker.h>
 
@@ -13,6 +15,8 @@ public:
                 SenConfigHandler();
     status_t    Init();
     status_t    GetConfig(BMessage* settingsMsg);
+    /** see SenConfigHandler.cpp: the old name of the default context */
+    static bool MigrateDefaultContext(const BPath& settingsPath, BMessage* settings);
     /**
      * @brief Change settings and save them: every field of @p changes replaces the field of the same name (or is added).
      * Can be called from any thread (the windows of the Deskbar menu do).

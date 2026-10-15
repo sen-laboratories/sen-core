@@ -328,7 +328,7 @@ IconOfType(const char* type)
 }
 
 
-/** The contexts that are set up: the folders in the contexts folder of the settings (the global one first), with their icon; the current one is marked. */
+/** The contexts that are set up: the folders in the contexts folder of the settings (the default one first), with their icon; the current one is marked. */
 void
 DeskbarView::_AddContextMenu(BMenu* menu)
 {
@@ -344,19 +344,19 @@ DeskbarView::_AddContextMenu(BMenu* menu)
 		}
 	}
 	std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
-	auto global = std::find(names.begin(), names.end(), sen::config::kContextGlobal);
-	if (global != names.end())
-		names.erase(global);
-	names.insert(names.begin(), sen::config::kContextGlobal);
+	auto defaultContext = std::find(names.begin(), names.end(), sen::config::kContextDefault);
+	if (defaultContext != names.end())
+		names.erase(defaultContext);
+	names.insert(names.begin(), sen::config::kContextDefault);
 
-	// the current one (the global one if none was chosen)
-	BString current(sen::config::kContextGlobal);
+	// the current one (the default one if none was chosen)
+	BString current(sen::config::kContextDefault);
 	BPath settingsPath = SettingsPath();
 	if (settingsPath.InitCheck() == B_OK && settingsPath.Append(sen::config::kSettingsFile) == B_OK) {
 		BFile file(settingsPath.Path(), B_READ_ONLY);
 		BMessage settings;
 		if (file.InitCheck() == B_OK && settings.Unflatten(&file) == B_OK)
-			current = settings.GetString(sen::key::kCurrentContext, sen::config::kContextGlobal);
+			current = settings.GetString(sen::key::kCurrentContext, sen::config::kContextDefault);
 	}
 
 	BMenu* contexts = new BMenu("Context");

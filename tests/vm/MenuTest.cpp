@@ -100,9 +100,9 @@ main()
 	check("a type shows its attributes", attributes);
 	// the contexts are listed, the global one first, each with a message that sets it
 	BMenuItem* context = menu->ItemAt(Index(top, "Context"));
-	check("the Context menu lists the contexts, global first",
+	check("the Context menu lists the contexts, the default one first",
 		context != NULL && context->Submenu() != NULL && context->Submenu()->CountItems() >= 1
-		&& strcmp(context->Submenu()->ItemAt(0)->Label(), "global") == 0 && context->Submenu()->ItemAt(0)->Message() != NULL);
+		&& strcmp(context->Submenu()->ItemAt(0)->Label(), "default") == 0 && context->Submenu()->ItemAt(0)->Message() != NULL);
 	// the view only passes messages on to the server (it has no other handler): every message of every item has to be one that it knows
 	std::vector<std::pair<std::string, uint32>> messages;
 	Messages(menu, &messages);

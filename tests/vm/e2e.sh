@@ -60,7 +60,7 @@ CTX=~/config/settings/sen/contexts
 rm -rf $CTX/e2econtext
 hey $SIG SZad with SEN:name=e2econtext and SEN:type=classification/x-vnd.sen-labs.entity.context > /tmp/sen-e2e.ctx 2>&1
 check "a new context is a folder in the contexts folder, with the type of a context" "[ -d $CTX/e2econtext ] && [ \"\$(catattr -d BEOS:TYPE $CTX/e2econtext)\" = classification/x-vnd.sen-labs.entity.context ]"
-check "it has a folder for its classifications, and is not made among the classifications of the global context" "[ -d $CTX/e2econtext/classifications ] && [ ! -e $CTX/global/classifications/x-vnd.sen-labs.entity.context/e2econtext ]"
+check "it has a folder for its classifications, and is not made among the classifications of the default context" "[ -d $CTX/e2econtext/classifications ] && [ ! -e $CTX/default/classifications/x-vnd.sen-labs.entity.context/e2econtext ]"
 check "the answer names the new folder" "grep -q 'e2econtext' /tmp/sen-e2e.ctx"
 hey $SIG SZad with SEN:name=e2econtext and SEN:type=classification/x-vnd.sen-labs.entity.context > /tmp/sen-e2e.ctx2 2>&1
 check "a context that exists is not made again" "grep -q 'status.*409\|File exists\|exists' /tmp/sen-e2e.ctx2"
