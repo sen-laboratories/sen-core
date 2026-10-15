@@ -118,28 +118,28 @@ TEST(StoredRelationsAreShownAsFilesNamedAfterTheirTargets)
 	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(one)));
 }
 
-TEST(AClassificationShowsTheFilesThatHaveItAsAFolderOfRelations)
+TEST(AClassificationShowsTheFilesThatHaveItAsAQuery)
 {
-	// (what the menu of SEN opens when a label is chosen)
+	// (what the menu of SEN opens when a label is chosen: the files themselves, as a query shows them)
 	Fixture f("label", 2);
 	entry_ref label = f.Create("my label", kLabelType);
 	Relate(f.refs[0], label, NULL, kAssociation);
 	Relate(f.refs[1], label, NULL, kAssociation);
-	RelationFolders::Instance().Clear();
 
 	BString view;
 	TrackerSenRelations::NewViewId(&view);
-	entry_ref typeDir;
-	CHECK_EQ(TrackerSenRelations::MaterializeType(label, view.String(), kAssociation, &typeDir), (status_t) B_OK);
+	entry_ref queryFile;
+	CHECK_EQ(TrackerSenRelations::MaterializeType(label, view.String(), kAssociation, &queryFile), (status_t) B_OK);
 
-	BPath path(&typeDir);
-	CHECK(Exists(RefOf(path.Path(), "file0")));
-	CHECK(Exists(RefOf(path.Path(), "file1")));
-
-	// the title of the window says what it shows
-	BString title;
-	BNode(&typeDir).ReadAttrString(sen::attr::kFolderName, &title);
-	CHECK_STR(title.String(), "Files with Label \"my label\"");
+	// a query file with the title of the window, and the predicate for the ID of the label
+	CHECK_STR(queryFile.name, "Files with Label \"my label\"");
+	BNode node(&queryFile);
+	BString predicate;
+	node.ReadAttrString("_trk/qrystr", &predicate);
+	CHECK(predicate.FindFirst(IdOf(label).c_str()) >= 0);
+	char type[B_MIME_TYPE_LENGTH] = "";
+	BNodeInfo(&node).GetType(type);
+	CHECK_STR(type, "application/x-vnd.Be-query");
 }
 
 TEST(EveryViewHasItsOwnFolder)
