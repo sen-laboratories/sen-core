@@ -79,6 +79,27 @@ OpenInTracker(const entry_ref& ref)
 
 
 status_t
+OpenRelationsInTracker(const entry_ref& file, const char* relationType)
+{
+	BMessenger tracker(kTrackerSignature);
+	if (!tracker.IsValid())
+		return B_NOT_INITIALIZED;
+
+	BMessage open(sen::cmd::kOpenRelationsOfType);
+	open.AddRef(sen::key::kSourceRef, &file);
+	open.AddString(sen::key::kRelationType, relationType);
+	BMessage reply;
+	status_t result = tracker.SendMessage(&open, &reply, 5000000, 5000000);
+	if (result != B_OK)
+		return result;
+	// (a Tracker that does not know the message says so)
+	if (reply.what == B_MESSAGE_NOT_UNDERSTOOD)
+		return B_NOT_SUPPORTED;
+	return reply.GetInt32(sen::key::kResult, B_OK);
+}
+
+
+status_t
 ShowInTracker(const entry_ref& ref)
 {
 	BMessenger tracker(kTrackerSignature);

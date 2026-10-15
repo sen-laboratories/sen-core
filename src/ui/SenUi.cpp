@@ -225,9 +225,15 @@ SenUi::_OpenClassified(const BMessage* message)
 		return;
 	}
 
-	// the files that have the entity (a label, a topic...) as a target: of an association (SEN:META), or any other relation (SEN:TO)
+	// the folder of the relations of the classification (the files that have it, as the association of the files back to it), as for any file: Akita
+	// shows it. Else (the stock Tracker) a query shows the files that have the entity (a label, a topic...) as a target, of an association (SEN:META)
+	// or any other relation (SEN:TO)
+	status_t result = OpenRelationsInTracker(entity, sen::mime::kAssociationRelation);
+	if (result == B_OK) {
+		return;
+	}
 	char id[sen::id::kLength];
-	status_t result = fRelations->GetOrCreateId(&entity, id, true);
+	result = fRelations->GetOrCreateId(&entity, id, true);
 	if (result == B_OK) {
 		BString predicate("(");
 		predicate << sen::idlist::ContainsPredicate(sen::attr::kTo, id).c_str() << ") || ("

@@ -118,6 +118,25 @@ TEST(StoredRelationsAreShownAsFilesNamedAfterTheirTargets)
 	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(one)));
 }
 
+TEST(AClassificationShowsTheFilesThatHaveItAsAFolderOfRelations)
+{
+	// (what the menu of SEN opens when a label is chosen)
+	Fixture f("label", 2);
+	entry_ref label = f.Create("my label", kLabelType);
+	Relate(f.refs[0], label, NULL, kAssociation);
+	Relate(f.refs[1], label, NULL, kAssociation);
+	RelationFolders::Instance().Clear();
+
+	BString view;
+	TrackerSenRelations::NewViewId(&view);
+	entry_ref typeDir;
+	CHECK_EQ(TrackerSenRelations::MaterializeType(label, view.String(), kAssociation, &typeDir), (status_t) B_OK);
+
+	BPath path(&typeDir);
+	CHECK(Exists(RefOf(path.Path(), "file0")));
+	CHECK(Exists(RefOf(path.Path(), "file1")));
+}
+
 TEST(EveryViewHasItsOwnFolder)
 {
 	Fixture f("views", 2);
