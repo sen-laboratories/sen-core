@@ -7,11 +7,11 @@
  * @file RelationSticky.cpp
  * @brief Sticky classifications: what is made new is put into them automatically.
  *
- * A classification (label, topic, project...) that has the attribute SEN:sticky (the user locks it with Shift+click in the menu of SEN) and the current
- * context are applied to every file that the file manager has made
+ * A classification (label, topic, project...) or context that has the attribute SEN:sticky (the user locks it with Shift+click in the menu of SEN)
+ * is applied to every file that the file manager has made
  * (a new file, a new related file) and to every relation that is made: the file gets a relation of the association type to it, the relation lists the
- * classification in its properties (key::kClassifications), so that they can be filtered by it later. Of the contexts only the current one counts
- * (the attribute is not looked at: choosing a context is what makes it stick).
+ * classification in its properties (key::kClassifications), so that they can be filtered by it later. (The global context does not stick: it is every
+ * file. The menu of SEN makes only one context sticky.)
  */
 
 #include <Directory.h>
@@ -30,22 +30,6 @@
 #include "../server/Reply.h"
 
 namespace {
-
-/** The name of the current context: the one that is set in the settings of SEN, else the global one. */
-BString
-CurrentContext()
-{
-    BString current(sen::config::kContextGlobal);
-    BPath path;
-    if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK && path.Append("sen") == B_OK
-            && path.Append(sen::config::kSettingsFile) == B_OK) {
-        BFile file(path.Path(), B_READ_ONLY);
-        BMessage settings;
-        if (file.InitCheck() == B_OK && settings.Unflatten(&file) == B_OK)
-            current = settings.GetString(sen::key::kCurrentContext, sen::config::kContextGlobal);
-    }
-    return current;
-}
 
 /** whether a file is in the Trash (a classification that was deleted is not applied any more) */
 bool
@@ -69,20 +53,15 @@ status_t RelationHandler::StickyClassifications(std::vector<entry_ref>* result)
     if (status != B_OK)
         return status;
 
-    BString current = CurrentContext();
     for (const entry_ref& candidate : candidates) {
         BNode node(&candidate);
         if (node.InitCheck() != B_OK || InTrash(candidate))
             continue;
 
-        // the current context sticks by being the current one (not the global one, which is every file); the others when they were locked
-        // (Shift+click in the menu of SEN), which sets their attribute
+        // (the global context is every file: it does not stick)
         entry_ref copy(candidate);
-        if (GetMimeTypeForRef(&copy) == sen::mime::kContext) {
-            if (current == candidate.name && current != sen::config::kContextGlobal)
-                result->push_back(candidate);
+        if (GetMimeTypeForRef(&copy) == sen::mime::kContext && strcmp(candidate.name, sen::config::kContextGlobal) == 0)
             continue;
-        }
         bool sticky = false;
         if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky) && sticky)
             result->push_back(candidate);

@@ -191,6 +191,7 @@ DeskbarView::IsServerCommand(uint32 command)
 		case sen::cmd::kUiOpenClassification:
 		case sen::cmd::kUiOpenClassified:
 		case sen::cmd::kUiSetContext:
+		case sen::cmd::kUiOpenContexts:
 			return true;
 	}
 	return false;
@@ -205,8 +206,8 @@ DeskbarView::MessageReceived(BMessage* message)
 		return;
 	}
 
-	if (message->what == sen::cmd::kUiOpenClassified) {
-		// with the Shift key the classification sticks (or does not any more) instead of opening: the server is told how the key was held now
+	if (message->what == sen::cmd::kUiOpenClassified || message->what == sen::cmd::kUiSetContext) {
+		// with the Shift key the classification or context sticks (or does not any more) instead of opening: the server is told how the key was held now
 		BMessage chosen(*message);
 		chosen.AddBool(sen::key::kShift, (modifiers() & B_SHIFT_KEY) != 0);
 		BMessenger(sen::kServerSignature).SendMessage(&chosen);
@@ -257,9 +258,14 @@ public:
 		delete fIcon;
 	}
 
+	/** sticky ones are in bold */
+	void SetBold(bool bold) { fBold = bold; }
+
 	virtual void GetContentSize(float* width, float* height)
 	{
 		BMenuItem::GetContentSize(width, height);
+		if (fBold && Label() != NULL)
+			*width = std::max(*width, be_bold_font->StringWidth(Label()));
 		if (fIcon != NULL) {
 			*width += kIconSize + kIconPadding;
 			*height = std::max(*height, kIconSize + 2);
@@ -277,11 +283,19 @@ public:
 			Menu()->SetDrawingMode(B_OP_COPY);
 			Menu()->MovePenBy(kIconSize + kIconPadding, 0);
 		}
-		BMenuItem::DrawContent();
+		if (fBold && Menu() != NULL) {
+			BFont normal;
+			Menu()->GetFont(&normal);
+			Menu()->SetFont(be_bold_font);
+			BMenuItem::DrawContent();
+			Menu()->SetFont(&normal);
+		} else
+			BMenuItem::DrawContent();
 	}
 
 private:
 	BBitmap*	fIcon;
+	bool		fBold = false;
 };
 
 
@@ -356,12 +370,20 @@ DeskbarView::_AddContextMenu(BMenu* menu)
 			icon = IconOfEntry(contextRef);
 		if (icon == NULL)
 			icon = IconOfType(sen::mime::kContext);
-		BMenuItem* item = new IconItem(name.c_str(), message, icon);
+		IconItem* item = new IconItem(name.c_str(), message, icon);
 		item->SetMarked(current == name.c_str());
+		// (the sticky context is in bold)
+		bool sticky = false;
+		BPath stickyPath(path);
+		BNode stickyNode;
+		if (stickyPath.Append(name.c_str()) == B_OK && stickyNode.SetTo(stickyPath.Path()) == B_OK
+				&& stickyNode.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky))
+			item->SetBold(sticky);
 		contexts->AddItem(item);
 	}
 	contexts->SetTargetForItems(this);
-	menu->AddItem(new IconItem(contexts, NULL, IconOfType(sen::mime::kContext)));
+	// (choosing the menu itself opens the folder of the contexts)
+	menu->AddItem(new IconItem(contexts, new BMessage(sen::cmd::kUiOpenContexts), IconOfType(sen::mime::kContext)));
 }
 
 
@@ -547,14 +569,14 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 		for (const entry_ref& entity : entities) {
 			if (listed++ >= kMaxEntities)
 				break;
-			// choosing one shows the files that it classifies; with the Shift key it sticks (what is made new is put into it: the check mark)
+			// choosing one shows the files that it classifies; with the Shift key it sticks (what is made new is put into it: shown in bold)
 			BMessage* classified = new BMessage(sen::cmd::kUiOpenClassified);
 			classified->AddRef("refs", &entity);
-			BMenuItem* item = new BMenuItem(entity.name, classified);
+			IconItem* item = new IconItem(entity.name, classified, NULL);
 			bool sticky = false;
 			BNode node(&entity);
 			if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky))
-				item->SetMarked(sticky);
+				item->SetBold(sticky);
 			submenu->AddItem(item);
 		}
 		submenu->SetTargetForItems(this);

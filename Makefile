@@ -18,6 +18,7 @@ SRCS := src/relations/RelationHandler.cpp \
 	src/deskbar/DeskbarView.cpp \
 	src/ui/AboutWindow.cpp \
 	src/ui/CheckWindow.cpp \
+	src/ui/FileTypesLink.cpp \
 	src/ui/InfoWindow.cpp \
 	src/ui/Knot.cpp \
 	src/ui/QueryFiles.cpp \

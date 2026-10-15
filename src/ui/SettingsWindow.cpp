@@ -6,6 +6,7 @@
 #include "SettingsWindow.h"
 
 #include "../config/SenConfigHandler.h"
+#include "FileTypesLink.h"
 
 #include <sen/Sen.h>
 
@@ -114,7 +115,7 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 
 	fFileTypes = new BCheckBox("filetypes", "Use the FileTypes of SEN instead of the one of Haiku", new BMessage(kSetFileTypes));
 	fFileTypes->SetValue(useFileTypes ? B_CONTROL_ON : B_CONTROL_OFF);
-	BStringView* fileTypesHelp = new BStringView("filetypeshelp", "Where SEN shows a type and its attributes (the Ontologies menu).");
+	BStringView* fileTypesHelp = new BStringView("filetypeshelp", "Where SEN shows a type and its attributes (the Ontologies menu), and in the Preferences menu of the Deskbar.");
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
 		.SetInsets(B_USE_WINDOW_INSETS)
@@ -156,6 +157,7 @@ SettingsWindow::MessageReceived(BMessage* message)
 			BMessage change;
 			change.AddBool(sen::key::kUseSenFileTypes, fFileTypes->Value() == B_CONTROL_ON);
 			fConfig->UpdateSettings(&change);
+			ApplyFileTypesLink(fFileTypes->Value() == B_CONTROL_ON);
 			break;
 		}
 		case kActivate:

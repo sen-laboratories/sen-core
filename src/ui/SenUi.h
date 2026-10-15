@@ -45,6 +45,7 @@ private:
 	void			_AskToQuit();
 	void			_Quit();
 	void			_Restart();
+	void			_OpenContexts();
 	void			_OpenOntologies();
 	void			_OpenOntology(const BMessage* message);
 	void			_OpenType(const BMessage* message);

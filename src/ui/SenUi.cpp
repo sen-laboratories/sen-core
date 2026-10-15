@@ -98,6 +98,9 @@ SenUi::Handle(BMessage* message)
 		case kQuitFallback:
 			be_app->PostMessage(B_QUIT_REQUESTED);
 			return true;
+		case sen::cmd::kUiOpenContexts:
+			_OpenContexts();
+			return true;
 		case sen::cmd::kUiOpenOntologies:
 			_OpenOntologies();
 			return true;
@@ -240,13 +243,86 @@ SenUi::_OpenClassified(const BMessage* message)
 }
 
 
+/** The folder of the contexts: where they are (a folder each, with the classifications that belong to it). */
+void
+SenUi::_OpenContexts()
+{
+	BPath path;
+	status_t result = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
+	if (result == B_OK)
+		result = path.Append("sen");
+	if (result == B_OK)
+		result = path.Append(sen::config::kContextsDir);
+	if (result == B_OK)
+		result = create_directory(path.Path(), 0755);
+
+	entry_ref folder;
+	if (result == B_OK)
+		result = get_ref_for_path(path.Path(), &folder);
+	if (result == B_OK)
+		result = OpenInTracker(folder);
+	_Report("open the contexts", result);
+}
+
+
+/** The folder of a context in the settings. */
+static BPath
+ContextPath(const char* name)
+{
+	BPath path;
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK && path.Append("sen") == B_OK
+			&& path.Append(sen::config::kContextsDir) == B_OK && path.Append(name) == B_OK)
+		return path;
+	return BPath();
+}
+
+
+static void
+SetSticky(const char* context, bool sticky)
+{
+	BPath path = ContextPath(context);
+	if (path.InitCheck() != B_OK)
+		return;
+	BNode node(path.Path());
+	if (node.InitCheck() == B_OK)
+		node.WriteAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky));
+}
+
+
+/**
+ * Choosing a context makes it the current one, and the sticky context lets go (only one is sticky, and it is the one that was locked on purpose).
+ * With the Shift key held the context is locked instead: what is made new is put into it (it is made the current one, too); Shift again lets it go.
+ */
 void
 SenUi::_SetContext(const BMessage* message)
 {
 	const char* name = message->GetString(sen::key::kContext, "");
 	if (name[0] == '\0')
 		return;
-	// (for now the context is only remembered; what it changes comes with the global context)
+
+	bool lock = false;
+	if (message->GetBool(sen::key::kShift, false) && strcmp(name, sen::config::kContextGlobal) != 0) {
+		// (the global context is every file: it is not locked)
+		bool sticky = false;
+		BPath path = ContextPath(name);
+		BNode node(path.Path());
+		if (node.InitCheck() == B_OK)
+			node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky));
+		SetSticky(name, !sticky);
+		lock = !sticky;
+		if (!lock)
+			return;		// (let go: the current context stays)
+	}
+
+	// the others let go
+	BPath folder = ContextPath("");
+	BDirectory contexts(folder.Path());
+	entry_ref ref;
+	while (contexts.GetNextRef(&ref) == B_OK) {
+		if (strcmp(ref.name, name) != 0)
+			SetSticky(ref.name, false);
+	}
+
 	BMessage change;
 	change.AddString(sen::key::kCurrentContext, name);
 	fConfig->UpdateSettings(&change);

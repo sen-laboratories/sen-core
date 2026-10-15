@@ -509,23 +509,23 @@ TEST(TheOppositeDirectionCanGetItsOwnLabelWhenAdded)
 
 TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 {
+	// (what is sticky on this machine already is applied, too: the test only looks at its own label)
 	Fixture f("sticky", 3);
 	entry_ref sticky = f.Create("sticky label", kLabelType);
 	entry_ref plain = f.Create("plain label", kLabelType);
 	bool yes = true;
 	BNode(&sticky).WriteAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &yes, sizeof(yes));
 
-	// a file that the file manager has made: it is put into the sticky label, and only into that
+	// a file that the file manager has made: it is put into the sticky label, and not into the other one
 	BMessage apply(sen::cmd::kClassificationApplySticky);
 	apply.AddRef(sen::key::kSourceRef, &f.refs[0]);
 	BMessage reply;
 	BMessenger(sen::kServerSignature).SendMessage(&apply, &reply, 10000000, 10000000);
 	CHECK_EQ(SenStatus(reply), sen::status::kOk);
-	CHECK_EQ(reply.GetInt32(sen::key::kCount, -1), 1);
+	CHECK(reply.GetInt32(sen::key::kCount, -1) >= 1);
 	std::string stickyId = IdOf(sticky);
 	CHECK(!stickyId.empty());
 	CHECK(sen::idlist::Contains(List(f.refs[0], sen::attr::kMeta), stickyId));
-	CHECK_EQ(List(f.refs[0], sen::attr::kMeta).size(), 1u);
 	CHECK(List(sticky, sen::attr::kMeta).empty());          // the label holds nothing
 	CHECK(IdOf(plain).empty());                             // the other label was not touched
 
@@ -539,9 +539,13 @@ TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 	CHECK_EQ(SenStatus(reply), sen::status::kCreated);
 	BMessage set;
 	CHECK(Stored(f.refs[1], kReference).FindMessage(IdOf(f.refs[2]).c_str(), &set) == B_OK);
-	CHECK_STR(set.GetString(sen::key::kClassifications, ""), stickyId.c_str());
+	bool listed = false;
+	const char* listedId;
+	for (int32 i = 0; set.FindString(sen::key::kClassifications, i, &listedId) == B_OK; i++)
+		listed = listed || stickyId == listedId;
+	CHECK(listed);
 
-	// not sticky any more: nothing is applied
+	// not sticky any more: it is not applied
 	bool no = false;
 	BNode(&sticky).WriteAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &no, sizeof(no));
 	Fixture g("sticky2", 2);
@@ -549,10 +553,13 @@ TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 	again.AddRef(sen::key::kSourceRef, &g.refs[0]);
 	reply.MakeEmpty();
 	BMessenger(sen::kServerSignature).SendMessage(&again, &reply, 10000000, 10000000);
-	CHECK_EQ(reply.GetInt32(sen::key::kCount, -1), 0);
+	CHECK(!sen::idlist::Contains(List(g.refs[0], sen::attr::kMeta), stickyId));
 	reply = Send(sen::cmd::kRelationAdd, &g.refs[0], kReference, &g.refs[1]);
 	CHECK(Stored(g.refs[0], kReference).FindMessage(IdOf(g.refs[1]).c_str(), &set) == B_OK);
-	CHECK(!set.HasString(sen::key::kClassifications));
+	listed = false;
+	for (int32 i = 0; set.FindString(sen::key::kClassifications, i, &listedId) == B_OK; i++)
+		listed = listed || stickyId == listedId;
+	CHECK(!listed);
 }
 
 int

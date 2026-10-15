@@ -38,6 +38,7 @@ private:
     void                EnsureIndices(dev_t device);
 
     /** @brief Put the item of SEN in the Deskbar (the knot with the menu), like the mail server; and take it out again when the server quits. */
+    void                UpdateFileTypesLink();
     void                InstallDeskbarItem();
     void                RemoveDeskbarItem();
 

@@ -10,6 +10,7 @@
 #include "SenServer.h"
 #include "Reply.h"
 #include "../relations/RelationHandler.h"
+#include "../ui/FileTypesLink.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -203,11 +204,22 @@ void SenServer::ReadyToRun()
     relationHandler->AssignMissingNavigators();
 
     InstallDeskbarItem();
+    UpdateFileTypesLink();
 
     // ontologies that came with packages while the server was not running
     ScheduleOntologyUpdate(2000000, 1);
 
     BApplication::ReadyToRun();
+}
+
+/** The FileTypes of SEN in the Preferences menu of the Deskbar if it is installed and wanted (also when packages come and go). */
+void SenServer::UpdateFileTypesLink()
+{
+    BMessage settings;
+    bool wanted = true;
+    if (senConfigHandler->GetConfig(&settings) == B_OK)
+        wanted = settings.GetBool(sen::key::kUseSenFileTypes, true);
+    sen::ui::ApplyFileTypesLink(wanted);
 }
 
 void SenServer::InstallDeskbarItem()
@@ -243,6 +255,8 @@ void SenServer::ScheduleOntologyUpdate(bigtime_t delay, int32 count)
 
 void SenServer::StartOntologyUpdate()
 {
+    // (packages come and go: the FileTypes of SEN may have been installed or removed)
+    UpdateFileTypesLink();
     if (fOntologyUpdating) {
         fOntologyPending = true;
         return;
