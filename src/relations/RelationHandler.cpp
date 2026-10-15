@@ -245,6 +245,35 @@ static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* s
 }
 
 /**
+ * Whether a relation can end at a file of this type: the types in SEN:targetTypes if it names any, else (a relation that is stored at the target, too, as
+ * it is by default) the types that it can start at; not those that it excludes (SEN:excludeTargetTypes, and for such a relation SEN:excludeSourceTypes).
+ */
+static bool IsCompatibleWithTarget(const BMessage& relationConfig, const char* targetType)
+{
+    auto matches = [&](const char* field, int32* count) {
+        bool found = false;
+        const char* pattern;
+        *count = 0;
+        for (int32 index = 0; relationConfig.FindString(field, index, &pattern) == B_OK; index++) {
+            (*count)++;
+            found = found || BString(targetType).IStartsWith(pattern);
+        }
+        return found;
+    };
+
+    bool stored = relationConfig.GetBool(sen::conf::kBidirectional, true);
+    int32 includes, excludes, inheritedIncludes = 0, inheritedExcludes = 0;
+    bool included = matches(sen::conf::kTargetTypes, &includes);
+    bool excluded = matches(sen::conf::kExcludeTargetTypes, &excludes);
+    if (includes == 0 && stored)
+        included = matches(sen::conf::kSourceTypes, &inheritedIncludes);
+    if (stored)
+        excluded = excluded || matches(sen::conf::kExcludeSourceTypes, &inheritedExcludes);
+
+    return (includes + inheritedIncludes == 0 || included) && !excluded;
+}
+
+/**
  * The relations that can be created between files. With one or more source files (SEN:sourceRef, repeated) these are the relations
  * that all of them can start at. With target files, too (SEN:targetRef, repeated: the files that something is dropped onto), the
  * relations that can be created between each source and each target: a relation that is bidirectional (the default) is also
@@ -313,10 +342,10 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         if (hasConfig) {
             for (size_t s = 0; compatible && s < sourceTypes.size(); s++)
                 compatible = IsCompatibleWithSource(config, sourceTypes[s].String());
-            // the opposite direction is stored at the target
-            if (compatible && betweenFiles && config.GetBool(sen::conf::kBidirectional, true)) {
+            // (the opposite direction is stored at the target, too, unless the relation says it is not: see IsCompatibleWithTarget)
+            if (compatible && betweenFiles) {
                 for (size_t t = 0; compatible && t < targetTypes.size(); t++)
-                    compatible = IsCompatibleWithSource(config, targetTypes[t].String());
+                    compatible = IsCompatibleWithTarget(config, targetTypes[t].String());
             }
         }
 
@@ -368,8 +397,26 @@ status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, 
                 strerror(status));
         }
     } else {
+        // the templates of "New related": the types that the relation can end at, and not those that it cannot (as the types and the start of types: the
+        // file manager matches the templates by them). Without a config, or without types in it: all.
         spdlog::debug("using available template types allowed by relation.");
-        // todo: filter out targets excluded by relation type
+        BMessage config;
+        if (GetRelationConfig(relationType.String(), &config) == B_OK) {
+            BStringList includes, excludes;
+            config.FindStrings(sen::conf::kTargetTypes, &includes);
+            if (includes.IsEmpty() && config.GetBool(sen::conf::kBidirectional, true))
+                config.FindStrings(sen::conf::kSourceTypes, &includes);
+            config.FindStrings(sen::conf::kExcludeTargetTypes, &excludes);
+            if (config.GetBool(sen::conf::kBidirectional, true)) {
+                BStringList sourceExcludes;
+                config.FindStrings(sen::conf::kExcludeSourceTypes, &sourceExcludes);
+                excludes.Add(sourceExcludes);
+            }
+            if (!includes.IsEmpty())
+                reply->AddStrings(sen::key::kTargetType, includes);
+            if (!excludes.IsEmpty())
+                reply->AddStrings(sen::key::kExcludeTypes, excludes);
+        }
     }
 
     BStringList types;
@@ -387,7 +434,9 @@ status_t RelationHandler::GetCompatibleTargetTypes(const BString& relationType, 
 
     reply->what = sen::cmd::kReplyRelations;
     reply->AddString(sen::key::kFilter, sen::filter::kCompatible);
-    reply->AddStrings(sen::key::kTargetType, types);
+    // (for the association these are the types of the classifications that are installed; for the others the types that the relation can end at, above)
+    if (types.CountStrings() > 0)
+        reply->AddStrings(sen::key::kTargetType, types);
     reply->AddString(sen::key::kDetail, BString("got ") << types.CountStrings()
                  << " compatible target(s) for " << relationType.String());
 

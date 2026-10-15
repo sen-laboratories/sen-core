@@ -534,6 +534,59 @@ TEST(AClassificationHasTheAssociationOfTheFilesThatHaveIt)
 	CHECK_STR(reply.GetString(sen::key::kRelations, ""), kAssociation);
 }
 
+TEST(RelationsEndOnlyAtTheTypesOfFilesThatTheyFit)
+{
+	const char* kFriend = "relation/x-vnd.sen-labs.relation.person.friend";
+	const char* kEmployment = "relation/x-vnd.sen-labs.relation.person.employment";
+	const char* kPerson = "entity/x-vnd.sen-labs.entity.person";
+	const char* kOrganization = "entity/x-vnd.sen-labs.entity.organization";
+	if (!BMimeType(kFriend).IsInstalled() || !BMimeType(kEmployment).IsInstalled()) {
+		printf("     (the people ontology is not installed: skipped)\n");
+		return;
+	}
+
+	Fixture f("targets", 3);
+	auto setType = [](const entry_ref& ref, const char* type) {
+		BNode node(&ref);
+		BNodeInfo(&node).SetType(type);
+	};
+	setType(f.refs[0], kPerson);
+	setType(f.refs[1], kPerson);
+	setType(f.refs[2], kOrganization);
+	std::vector<entry_ref> anna = {f.refs[0]}, ben = {f.refs[1]}, company = {f.refs[2]};
+
+	// between two people: friends, not employment; between a person and an organization: employment, not friends
+	CHECK(OffersRelationBetween(anna, ben, kFriend));
+	CHECK(!OffersRelationBetween(anna, ben, kEmployment));
+	CHECK(OffersRelationBetween(anna, company, kEmployment));
+	CHECK(!OffersRelationBetween(anna, company, kFriend));
+
+	// the templates of "New related": the types that the relation ends at (a relation that is stored at both ends: those that it starts at)
+	auto targetTypesOf = [](const char* type) {
+		BMessage ask(sen::cmd::kRelationsGetCompatibleTypes);
+		ask.AddString(sen::key::kRelationType, type);
+		BMessage reply;
+		BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+		std::vector<std::string> types;
+		const char* each;
+		for (int32 i = 0; reply.FindString(sen::key::kTargetType, i, &each) == B_OK; i++)
+			types.push_back(each);
+		return types;
+	};
+	auto has = [](const std::vector<std::string>& types, const char* wanted) {
+		for (const std::string& each : types) {
+			if (each == wanted)
+				return true;
+		}
+		return false;
+	};
+	std::vector<std::string> friendTargets = targetTypesOf(kFriend), employmentTargets = targetTypesOf(kEmployment);
+	CHECK(has(friendTargets, kPerson));
+	CHECK(!has(friendTargets, kOrganization));
+	CHECK(has(employmentTargets, kOrganization));
+	CHECK(!has(employmentTargets, kPerson));
+}
+
 TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 {
 	// (what is sticky on this machine already is applied, too: the test only looks at its own label)
