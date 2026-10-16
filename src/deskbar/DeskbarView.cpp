@@ -10,6 +10,7 @@
 #include <sen/Sen.h>
 #include <sen/SenLookup.h>
 #include <sen/SenOntoCore.h>
+#include <sen/SenTypes.h>
 
 #include <Bitmap.h>
 #include <Menu.h>
@@ -454,6 +455,32 @@ TypeItem(const std::string& type, const std::string& name)
 
 
 /**
+ * The menu of a semantic type (org.sen-labs.paper): the attributes that it has, its own and those of what it conforms to. It is information: a semantic
+ * type is not in the MIME database, so there is nothing yet that FileTypes could open. The icon is that of the first format that it is found on.
+ */
+static BMenuItem*
+SemanticTypeItem(const sen::types::Registry& registry, const sen::types::Type& type)
+{
+	const std::string name = type.title.empty() ? type.id : type.title;
+	BBitmap* icon = type.formats.empty() ? NULL : IconOfType(type.formats[0].c_str());
+
+	BMessage info = registry.Attributes(type.id);
+	const char* attributeName;
+	if (info.FindString("attr:name", 0, &attributeName) != B_OK)
+		return new IconItem(name.c_str(), NULL, icon);
+
+	BMenu* menu = new BMenu(name.c_str());
+	const char* publicName;
+	for (int32 index = 0; info.FindString("attr:name", index, &attributeName) == B_OK; index++) {
+		if (info.FindString("attr:public_name", index, &publicName) != B_OK || publicName[0] == '\0')
+			publicName = attributeName;
+		menu->AddItem(new IconItem(publicName, NULL, IconOfType(sen::onto::core::mime::kMimeAttribute)));
+	}
+	return new IconItem(menu, NULL, icon);
+}
+
+
+/**
  * The ontologies are configuration, not what people work with: their menu is next to the settings. It opens the folder with them and brings them up to
  * date with the packages, and has an item for each installed ontology (a file for each in the settings, with its icon): its menu shows it in its folder,
  * and then its types, which show their attributes, as when the ontology is opened down to its relations.
@@ -479,6 +506,7 @@ DeskbarView::_AddOntologyMenu(BMenu* menu)
 	if (!installed.empty())
 		ontologies->AddSeparatorItem();
 
+	const sen::types::Registry registry;
 	for (const entry_ref& ref : installed) {
 		BMenu* ontology = new BMenu(ref.name);
 		BMessage* show = new BMessage(sen::cmd::kUiOpenOntology);
@@ -503,6 +531,14 @@ DeskbarView::_AddOntologyMenu(BMenu* menu)
 				ontology->AddSeparatorItem();
 			lastGroup = group;
 			ontology->AddItem(TypeItem(type.first, type.second));
+		}
+		// the semantic types of the ontology (not MIME types), after the others
+		const std::vector<const sen::types::Type*> semantic = registry.OfOntology(ref.name);
+		if (!semantic.empty() && ontology->CountItems() > 0)
+			ontology->AddSeparatorItem();
+		for (const sen::types::Type* type : semantic) {
+			if (!type->abstract)
+				ontology->AddItem(SemanticTypeItem(registry, *type));
 		}
 		ontology->SetTargetForItems(this);
 		ontologies->AddItem(new IconItem(ontology, show, IconOfEntry(ref)));

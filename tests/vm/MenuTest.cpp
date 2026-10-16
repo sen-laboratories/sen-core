@@ -19,6 +19,8 @@
 #include <vector>
 
 #define private public
+#include <sen/SenTypes.h>
+
 #include "../../src/deskbar/DeskbarView.h"
 #undef private
 
@@ -98,6 +100,24 @@ main()
 	}
 	check("the ontologies show their types", types);
 	check("a type shows its attributes", attributes);
+	// the semantic types of an ontology (the registry) are in its menu, with their attributes
+	sen::types::Registry registry;
+	bool semantic = true, anySemantic = false;
+	for (const sen::types::Type& type : registry.All()) {
+		if (type.abstract || type.ontology.empty() || item == NULL || item->Submenu() == NULL)
+			continue;
+		BMenu* ontology = NULL;
+		for (int32 i = 1; i < item->Submenu()->CountItems(); i++) {
+			if (item->Submenu()->ItemAt(i)->Label() != NULL && type.ontology == item->Submenu()->ItemAt(i)->Label())
+				ontology = item->Submenu()->SubmenuAt(i);
+		}
+		BMenuItem* typeItem = ontology == NULL ? NULL : ontology->FindItem(type.title.empty() ? type.id.c_str() : type.title.c_str());
+		anySemantic = true;
+		semantic = semantic && typeItem != NULL;
+	}
+	check("the semantic types are in the menu of their ontology", semantic);
+	if (!anySemantic)
+		printf("     (no semantic types are installed)\n");
 	// the contexts are listed, the global one first, each with a message that sets it
 	BMenuItem* context = menu->ItemAt(Index(top, "Context"));
 	check("the Context menu lists the contexts, the default one first",
