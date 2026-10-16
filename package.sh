@@ -16,7 +16,8 @@ major=$(sed -n 's/^[[:space:]]*major[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' 
 middle=$(sed -n 's/^[[:space:]]*middle[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
 minor=$(sed -n 's/^[[:space:]]*minor[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
 VERSION="$major.$middle.$minor"
-grep -q 'variety[[:space:]]*=[[:space:]]*B_APPV_DEVELOPMENT' $RDEF && VERSION="$VERSION~dev"
+# SEN_VERSION_SUFFIX replaces dev for a preview (SEN_VERSION_SUFFIX=preview1: 1.0.0~preview1)
+grep -q 'variety[[:space:]]*=[[:space:]]*B_APPV_DEVELOPMENT' $RDEF && VERSION="$VERSION~${SEN_VERSION_SUFFIX:-dev}"
 if grep -q 'variety[[:space:]]*=[[:space:]]*B_APPV_BETA' $RDEF; then
 	internal=$(sed -n 's/^[[:space:]]*internal[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
 	VERSION="$VERSION~beta${internal:-1}"
