@@ -561,6 +561,16 @@ TEST(RelationsEndOnlyAtTheTypesOfFilesThatTheyFit)
 	CHECK(OffersRelationBetween(anna, company, kEmployment));
 	CHECK(!OffersRelationBetween(anna, company, kFriend));
 
+	// the group of a relation is in its config, for the menus (a submenu for each group)
+	BMessage ask(sen::cmd::kRelationsGetCompatible);
+	ask.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	ask.AddBool(sen::key::kWithConfigs, true);
+	BMessage reply, configs, config;
+	BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+	CHECK(reply.FindMessage(sen::key::kRelationConfigMap, &configs) == B_OK);
+	CHECK(configs.FindMessage(kFriend, &config) == B_OK);
+	CHECK_STR(config.GetString(sen::conf::kGroup, ""), "Personal");
+
 	// the templates of "New related": the types that the relation ends at (a relation that is stored at both ends: those that it starts at)
 	auto targetTypesOf = [](const char* type) {
 		BMessage ask(sen::cmd::kRelationsGetCompatibleTypes);
