@@ -86,7 +86,10 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
         }
     }
     // the default context was called "global": its folder gets the new name, and the settings follow
-    if (MigrateDefaultContext(path, settingsMessage))
+    bool changed = MigrateDefaultContext(path, settingsMessage);
+    // (the paths are where the folders are: settings of an older version name them with other keys, or not at all)
+    changed = EnsurePaths(path, settingsMessage) || changed;
+    if (changed)
         SaveSettings(settingsMessage);
 
     spdlog::debug("successfully retrieved settings:");
@@ -131,6 +134,64 @@ bool SenConfigHandler::MigrateDefaultContext(const BPath& settingsPath, BMessage
         settings->RemoveName(sen::key::kCurrentContext);
         settings->AddString(sen::key::kCurrentContext, sen::config::kContextDefault);
         changed = true;
+    }
+    return changed;
+}
+
+/**
+ * The settings name the folders of the contexts and of the classifications of the default context by path and by ref. They follow from the settings folder, so
+ * they are made again when they are missing or differ (settings of an older version had other keys, the contexts could not be found then: nothing could be
+ * classified). The keys of those versions are removed. @return true if the settings changed.
+ */
+bool SenConfigHandler::EnsurePaths(const BPath& settingsPath, BMessage* settings)
+{
+    BPath contexts(settingsPath);
+    contexts.Append(sen::config::kContextsDir);
+    BPath defaultContext(contexts);
+    defaultContext.Append(sen::config::kContextDefault);
+    BPath classifications(defaultContext);
+    classifications.Append(sen::config::kClassificationsDir);
+
+    bool changed = false;
+    // (the folders are made if they are not there; the context is a folder with its own type)
+    if (!BEntry(contexts.Path()).Exists())
+        create_directory(contexts.Path(), 0755);
+    if (!BEntry(defaultContext.Path()).Exists()) {
+        create_directory(defaultContext.Path(), 0755);
+        BDirectory contextDir(defaultContext.Path());
+        BNodeInfo(&contextDir).SetType(sen::mime::kContext);
+    }
+    if (!BEntry(classifications.Path()).Exists())
+        create_directory(classifications.Path(), 0755);
+
+    const struct { const char* pathKey; const char* refKey; const BPath* path; } paths[] = {
+        {sen::key::kContextPath, sen::key::kContextPathRef, &contexts},
+        {sen::key::kClassificationPath, sen::key::kClassificationPathRef, &classifications},
+    };
+    for (const auto& each : paths) {
+        entry_ref ref;
+        if (BEntry(each.path->Path()).GetRef(&ref) != B_OK)
+            continue;
+        entry_ref current;
+        if (strcmp(settings->GetString(each.pathKey, ""), each.path->Path()) != 0
+                || settings->FindRef(each.refKey, &current) != B_OK || current != ref) {
+            settings->RemoveName(each.pathKey);
+            settings->AddString(each.pathKey, each.path->Path());
+            settings->RemoveName(each.refKey);
+            settings->AddRef(each.refKey, &ref);
+            changed = true;
+        }
+    }
+    if (strcmp(settings->GetString(sen::key::kConfigPath, ""), settingsPath.Path()) != 0) {
+        settings->RemoveName(sen::key::kConfigPath);
+        settings->AddString(sen::key::kConfigPath, settingsPath.Path());
+        changed = true;
+    }
+
+    // the keys of the versions before the prefix SEN:
+    for (const char* legacy : {"configPath", "contextPath", "contextPathRef", "classificationPath", "classificationPathRef"}) {
+        if (settings->RemoveName(legacy) == B_OK)
+            changed = true;
     }
     return changed;
 }
@@ -506,7 +567,9 @@ status_t SenConfigHandler::GetContextDir(const char* context, entry_ref* ref)
     if (status == B_OK && contextPath.InitCheck() == B_OK) {
         status = contextPath.Append(context);
     }
-    status = contextPath.InitCheck();
+    // (a missing setting is the error, not the empty path that follows from it)
+    if (status == B_OK)
+        status = contextPath.InitCheck();
     if (status == B_OK) {
         spdlog::debug("found context dir {} for context {}.", contextPath.Path(), context);
         status = BEntry(contextPath.Path()).GetRef(ref);
