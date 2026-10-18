@@ -167,6 +167,35 @@ TEST(AllOutgoingRelationsAreShownInOneFolder)
 	CHECK_STR(title.String(), "All relations of file0");
 }
 
+TEST(DroppingOnTheFolderOfAllRelationsShowsAGenericRelationThere)
+{
+	Fixture f("showalldrop", 3);
+	Relate(f.refs[0], f.refs[1]);
+	RelationFolders::Instance().Clear();
+
+	BString view;
+	TrackerSenRelations::NewViewId(&view);
+	entry_ref folder;
+	CHECK_EQ(TrackerSenRelations::MaterializeAll(f.refs[0], view.String(), &folder), (status_t) B_OK);
+
+	BMessage drop(B_SIMPLE_DATA);
+	drop.AddRef("refs", &f.refs[2]);
+	CHECK(RelationFolders::Instance().HandleDrop(drop, NodeOf(folder)));
+
+	// the relation is a generic one, and its file is in the folder that was dropped on (no folder of the type was made)
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[2])), 1);
+	BPath path(&folder);
+	entry_ref file = RefOf(path.Path(), "file2");
+	CHECK(Exists(file));
+	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(file)));
+	int32 folders = 0;
+	BDirectory directory(path.Path());
+	BEntry each;
+	while (directory.GetNextEntry(&each) == B_OK)
+		folders += each.IsDirectory() ? 1 : 0;
+	CHECK_EQ(folders, 0);
+}
+
 TEST(EveryViewHasItsOwnFolder)
 {
 	Fixture f("views", 2);
