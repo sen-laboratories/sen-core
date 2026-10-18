@@ -165,6 +165,10 @@ TEST(AllOutgoingRelationsAreShownInOneFolder)
 	BString title;
 	BNode(&folder).ReadAttrString(sen::attr::kFolderName, &title);
 	CHECK_STR(title.String(), "All relations of file0");
+	// (the folder is below the one where the views are made: what is dragged out of it is copied, as for the folders of one type)
+	CHECK(TrackerSenRelations::IsInRelationView(&folder));
+	CHECK(TrackerSenRelations::IsInRelationView(&one));
+	CHECK(!TrackerSenRelations::IsInRelationView(&f.refs[0]));
 }
 
 TEST(DroppingOnTheFolderOfAllRelationsShowsAGenericRelationThere)
