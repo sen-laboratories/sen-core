@@ -91,6 +91,7 @@ status_t SenConfigHandler::LoadSettings(BMessage* settingsMessage)
     changed = EnsurePaths(path, settingsMessage) || changed;
     if (changed)
         SaveSettings(settingsMessage);
+    MigrateLegacyTypes(path);
 
     spdlog::debug("successfully retrieved settings:");
     sen::DumpMessage(settingsMessage);
@@ -134,6 +135,58 @@ bool SenConfigHandler::MigrateDefaultContext(const BPath& settingsPath, BMessage
         settings->RemoveName(sen::key::kCurrentContext);
         settings->AddString(sen::key::kCurrentContext, sen::config::kContextDefault);
         changed = true;
+    }
+    return changed;
+}
+
+/**
+ * The contexts and the classifications that were made by a version before classifications were called so have the types "association/..." (which no ontology
+ * defines any more: no icon, no description). They get the types of the classifications. @return the number of types that were changed.
+ */
+int32 SenConfigHandler::MigrateLegacyTypes(const BPath& settingsPath)
+{
+    static const char kLegacyPrefix[] = "association/";
+    int32 changed = 0;
+
+    auto migrate = [&](const BPath& path) {
+        BNode node(path.Path());
+        char type[B_MIME_TYPE_LENGTH];
+        if (node.InitCheck() != B_OK || BNodeInfo(&node).GetType(type) != B_OK || strncmp(type, kLegacyPrefix, strlen(kLegacyPrefix)) != 0)
+            return;
+        BString migrated(sen::mime::kClassificationPrefix);
+        migrated << (type + strlen(kLegacyPrefix));
+        if (BNodeInfo(&node).SetType(migrated.String()) == B_OK) {
+            spdlog::info("the type of {} is now {} (it was {})", path.Path(), migrated.String(), type);
+            changed++;
+        }
+    };
+
+    BPath contexts(settingsPath);
+    if (contexts.Append(sen::config::kContextsDir) != B_OK)
+        return 0;
+    BDirectory contextsDir(contexts.Path());
+    BEntry context;
+    while (contextsDir.GetNextEntry(&context) == B_OK) {
+        BPath contextPath;
+        if (!context.IsDirectory() || context.GetPath(&contextPath) != B_OK)
+            continue;
+        migrate(contextPath);
+
+        // (the classifications of the context: a folder for each type, with a file for each classification)
+        BPath classifications(contextPath);
+        if (classifications.Append(sen::config::kClassificationsDir) != B_OK)
+            continue;
+        BDirectory typesDir(classifications.Path());
+        BEntry typeFolder;
+        while (typesDir.GetNextEntry(&typeFolder) == B_OK) {
+            BDirectory files(&typeFolder);
+            BEntry file;
+            while (typeFolder.IsDirectory() && files.GetNextEntry(&file) == B_OK) {
+                BPath filePath;
+                if (file.GetPath(&filePath) == B_OK)
+                    migrate(filePath);
+            }
+        }
     }
     return changed;
 }
