@@ -159,7 +159,7 @@ TEST(AllOutgoingRelationsAreShownInOneFolder)
 	entry_ref one = RefOf(path.Path(), "file1"), two = RefOf(path.Path(), "file2");
 	CHECK(Exists(one));
 	CHECK(Exists(two));
-	CHECK(RelationFolders::Instance().IsTopLevelFolder(NodeOf(folder)));
+	CHECK(RelationFolders::Instance().IsAllRelationsFolder(NodeOf(folder)));
 	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(one)));
 	CHECK(RelationFolders::Instance().IsRelationFile(NodeOf(two)));
 	BString title;
@@ -294,7 +294,7 @@ TEST(DeletingAFileWithRelationsToFilesThatAreGoneRemovesTheRelationsWithoutAskin
 	CHECK_EQ(Sets(f.refs[0], kReference, b), 0);
 }
 
-TEST(MovingAFileOutOfTheFolderRemovesTheRelation)
+TEST(MovingAFileToTheTrashRemovesTheRelation)
 {
 	Fixture f("trash", 2);
 	Relate(f.refs[0], f.refs[1]);
@@ -305,8 +305,27 @@ TEST(MovingAFileOutOfTheFolderRemovesTheRelation)
 	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
 
 	entry_ref file = RefOf(BPath(&typeDir).Path(), "file1");
-	Shell(BString("mv '") << BPath(&file).Path() << "' '" << f.dir << "/moved-away'");      // Trash or any other folder
+	Shell(BString("mv '") << BPath(&file).Path() << "' \"$(finddir B_TRASH_DIRECTORY)/\"");
 	CHECK(WaitFor([&]() { return Sets(f.refs[0], kReference, IdOf(f.refs[1])) == 0; }));
+}
+
+TEST(MovingAFileToAnotherFolderKeepsTheRelationAndMakesTheFileALink)
+{
+	Fixture f("moveout", 2);
+	Relate(f.refs[0], f.refs[1]);
+	RelationFolders::Instance().Clear();
+	BString view;
+	TrackerSenRelations::NewViewId(&view);
+	entry_ref typeDir;
+	TrackerSenRelations::MaterializeType(f.refs[0], view.String(), kReference, &typeDir);
+
+	entry_ref file = RefOf(BPath(&typeDir).Path(), "file1");
+	node_ref fileNode = NodeOf(file);
+	// (a folder on the volume of the relation folders, in the same one the move is a move; on another one it is a copy and a removal)
+	Shell(BString("D=\"$(finddir B_SYSTEM_TEMP_DIRECTORY)/sen-moved-away\"; mkdir -p \"$D\"; mv '") << BPath(&file).Path() << "' \"$D/\"; rm -rf \"$D\"");
+	// (the file is not one of the folder any more, the relation is still there)
+	CHECK(WaitFor([&]() { return !RelationFolders::Instance().IsRelationFile(fileNode); }));
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
 }
 
 TEST(RenamingAFileIsNotAnEditOfTheRelation)
