@@ -23,7 +23,7 @@ static const char* kQueryMimeType = "application/x-vnd.Be-query";
 
 
 status_t
-MakeQueryFile(const char* name, const char* predicate, entry_ref* ref)
+MakeQueryFile(const char* name, const char* predicate, entry_ref* ref, const char* columnsType)
 {
 	BPath path;
 	status_t result = find_directory(B_USER_SETTINGS_DIRECTORY, &path);
@@ -59,6 +59,10 @@ MakeQueryFile(const char* name, const char* predicate, entry_ref* ref)
 	int32 mode = 'Fbyq';
 	file.WriteAttr("_trk/qryinitmode", B_INT32_TYPE, 0, &mode, sizeof(int32));
 	BNodeInfo(&file).SetType(kQueryMimeType);
+	if (columnsType != NULL && columnsType[0] != '\0') {
+		BString columns(columnsType);
+		file.WriteAttrString(sen::attr::kColumnsType, &columns);
+	}
 
 	BEntry entry(&folder, fileName.String());
 	return entry.GetRef(ref);

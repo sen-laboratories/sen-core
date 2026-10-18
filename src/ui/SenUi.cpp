@@ -9,6 +9,7 @@
 #include "CheckWindow.h"
 #include "InfoWindow.h"
 #include "QueryFiles.h"
+#include "../stats/SenStats.h"
 #include "SettingsWindow.h"
 
 #include "../config/SenConfigHandler.h"
@@ -16,6 +17,7 @@
 #include "../relations/RelationHandler.h"
 
 #include <sen/Sen.h>
+#include <sen/Sensei.h>
 
 #include <Alert.h>
 #include <Application.h>
@@ -80,6 +82,9 @@ SenUi::Handle(BMessage* message)
 			return true;
 		case sen::cmd::kUiOpenClassified:
 			_OpenClassified(message);
+			return true;
+		case sen::cmd::kUiOpenPlugins:
+			_OpenPlugins(message);
 			return true;
 		case sen::cmd::kUiSetContext:
 			_SetContext(message);
@@ -203,6 +208,30 @@ SenUi::_OpenClassification(const BMessage* message)
 	if (result == B_OK)
 		result = OpenInTracker(query);
 	_Report("open the classification", result);
+}
+
+
+void
+SenUi::_OpenPlugins(const BMessage* message)
+{
+	// (the signature is what is indexed on every volume, also on those of packages; the plugin type is not: see QueryUtil.h)
+	const char* signature = message->GetString(sen::key::kPluginSignature, "");
+	BString predicate("BEOS:APP_SIG==\"");
+	predicate << (signature[0] != '\0' ? signature : sensei::kSignaturePattern) << "\"";
+
+	BString name("SEN Plugins");
+	if (signature[0] != '\0') {
+		// the name of the plugin is the title of its window
+		for (const stats::PluginInfo& plugin : stats::GatherPlugins()) {
+			if (plugin.signature == signature)
+				name = plugin.name;
+		}
+	}
+	entry_ref query;
+	status_t result = MakeQueryFile(name.String(), predicate.String(), &query, sen::mime::kPlugin);
+	if (result == B_OK)
+		result = OpenInTracker(query);
+	_Report("open the plugins", result);
 }
 
 

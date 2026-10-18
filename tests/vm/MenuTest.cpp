@@ -76,7 +76,10 @@ main()
 	int failed = 0;
 	auto check = [&](const char* what, bool ok) { printf("%s %s\n", ok ? "ok  " : "FAIL", what); if (!ok) failed++; };
 	int ontologies = Index(top, "Ontologies"), settings = Index(top, "Settings"), restart = Index(top, "Restart"), quit = Index(top, "Quit");
-	check("Ontologies is directly above Settings", ontologies >= 0 && settings == ontologies + 1);
+	int plugins = Index(top, "Plugins"), info = Index(top, "Info" B_UTF8_ELLIPSIS), check_ = Index(top, "Check" B_UTF8_ELLIPSIS);
+	// Plugins, Ontologies, a separator, then Info, Check and Settings
+	check("Plugins and Ontologies are next to each other, above the windows about SEN", plugins >= 0 && ontologies == plugins + 1
+		&& info == ontologies + 2 && check_ == info + 1 && settings == check_ + 1);
 	check("Restart is directly above Quit", restart >= 0 && quit == restart + 1);
 	BMenuItem* item = menu->ItemAt(ontologies);
 	// the menus are items that can be chosen themselves (no "Show all" in them)
@@ -98,6 +101,9 @@ main()
 	}
 	check("the ontologies show their types", types);
 	check("a type shows its attributes", attributes);
+	// the plugins: the menu itself opens the query with all of them, each plugin has an item (the result depends on what is installed)
+	BMenuItem* pluginItem = menu->ItemAt(plugins);
+	check("Plugins can be chosen itself", pluginItem != NULL && pluginItem->Message() != NULL && pluginItem->Submenu() != NULL);
 	// the contexts are listed, the global one first, each with a message that sets it
 	BMenuItem* context = menu->ItemAt(Index(top, "Context"));
 	check("the Context menu lists the contexts, the default one first",

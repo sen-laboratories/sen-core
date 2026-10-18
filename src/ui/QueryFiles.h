@@ -15,8 +15,9 @@ namespace ui {
  *
  * @param name the name of the file, which is the title of the window of the results
  * @param predicate the query, see BQuery::SetPredicate
+ * @param columnsType optional MIME type whose attributes are the columns of the results (the attribute SEN:columnsType of the file, read by Akita)
  */
-status_t MakeQueryFile(const char* name, const char* predicate, entry_ref* ref);
+status_t MakeQueryFile(const char* name, const char* predicate, entry_ref* ref, const char* columnsType = NULL);
 
 /** Ask Tracker to open the file (a query shows its results in a window). */
 status_t OpenInTracker(const entry_ref& ref);
