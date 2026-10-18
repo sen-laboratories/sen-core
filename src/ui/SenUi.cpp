@@ -84,7 +84,10 @@ SenUi::Handle(BMessage* message)
 			_OpenClassified(message);
 			return true;
 		case sen::cmd::kUiOpenPlugins:
-			_OpenPlugins(message);
+			_OpenPlugins();
+			return true;
+		case sen::cmd::kUiShowPluginAbout:
+			_ShowPluginAbout(message);
 			return true;
 		case sen::cmd::kUiSetContext:
 			_SetContext(message);
@@ -212,26 +215,30 @@ SenUi::_OpenClassification(const BMessage* message)
 
 
 void
-SenUi::_OpenPlugins(const BMessage* message)
+SenUi::_OpenPlugins()
 {
-	// (the signature is what is indexed on every volume, also on those of packages; the plugin type is not: see QueryUtil.h)
-	const char* signature = message->GetString(sen::key::kPluginSignature, "");
+	// (the signature is what is indexed on every volume, also on those of packages; the plugin type is not: see QueryUtil.h). The columns are
+	// those of the plugin type: the version and what the plugins do.
 	BString predicate("BEOS:APP_SIG==\"");
-	predicate << (signature[0] != '\0' ? signature : sensei::kSignaturePattern) << "\"";
-
-	BString name("SEN Plugins");
-	if (signature[0] != '\0') {
-		// the name of the plugin is the title of its window
-		for (const stats::PluginInfo& plugin : stats::GatherPlugins()) {
-			if (plugin.signature == signature)
-				name = plugin.name;
-		}
-	}
+	predicate << sensei::kSignaturePattern << "\"";
 	entry_ref query;
-	status_t result = MakeQueryFile(name.String(), predicate.String(), &query, sen::mime::kPlugin);
+	status_t result = MakeQueryFile("SEN Plugins", predicate.String(), &query, sen::mime::kPlugin);
 	if (result == B_OK)
 		result = OpenInTracker(query);
 	_Report("open the plugins", result);
+}
+
+
+void
+SenUi::_ShowPluginAbout(const BMessage* message)
+{
+	// a plugin is an application without a window: it is started with the usual message for the About window of an application
+	const char* signature = message->GetString(sen::key::kPluginSignature, "");
+	if (signature[0] == '\0')
+		return;
+	BMessage about(B_ABOUT_REQUESTED);
+	status_t result = be_roster->Launch(signature, &about);
+	_Report("show the About window of the plugin", result);
 }
 
 

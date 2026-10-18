@@ -196,6 +196,7 @@ DeskbarView::IsServerCommand(uint32 command)
 		case sen::cmd::kUiSetContext:
 		case sen::cmd::kUiOpenContexts:
 		case sen::cmd::kUiOpenPlugins:
+		case sen::cmd::kUiShowPluginAbout:
 			return true;
 	}
 	return false;
@@ -519,14 +520,15 @@ DeskbarView::_AddOntologyMenu(BMenu* menu)
 
 /**
  * The plugins that are installed: choosing the menu itself opens a query with all of them (with their attributes as columns: the version and what they
- * do), a plugin in it opens the query with this one. Plugins are not configuration of SEN but code, and the version tells what is installed.
+ * do), a plugin in it shows its About window. Plugins are not configuration of SEN but code, and the version tells what is installed.
  */
 void
 DeskbarView::_AddPluginMenu(BMenu* menu)
 {
 	BMenu* plugins = new BMenu("Plugins");
 	for (const stats::PluginInfo& plugin : stats::GatherPlugins()) {
-		BMessage* open = new BMessage(sen::cmd::kUiOpenPlugins);
+		// (choosing a plugin shows its About window)
+		BMessage* open = new BMessage(sen::cmd::kUiShowPluginAbout);
 		open->AddString(sen::key::kPluginSignature, plugin.signature.String());
 		BString label(plugin.name);
 		if (!plugin.version.IsEmpty())

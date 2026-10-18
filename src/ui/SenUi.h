@@ -41,7 +41,8 @@ private:
 	void			_OpenObjects();
 	void			_OpenClassification(const BMessage* message);
 	void			_OpenClassified(const BMessage* message);
-	void			_OpenPlugins(const BMessage* message);
+	void			_OpenPlugins();
+	void			_ShowPluginAbout(const BMessage* message);
 	void			_SetContext(const BMessage* message);
 	void			_AskToQuit();
 	void			_Quit();
