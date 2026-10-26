@@ -72,6 +72,20 @@ BString TypesSummary(const Overview& overview);
 /** "1 type" / "12 types", "1 file" / "2 files"... */
 BString Plural(int32 count, const char* singular, const char* plural);
 
+// ---- plugins
+
+/** A SEN plugin that is installed (an application with a signature of sensei::kSignaturePattern and the plugin type). */
+struct PluginInfo {
+	BString		name;			///< as people read it: the short info of its version resource, else the name of the file
+	BString		signature;
+	BString		version;		///< its attribute SEN:plugin:version, else the version of the application resource
+	BString		features;		///< "extract, identify"
+	entry_ref	ref;
+};
+
+/** The installed plugins of all volumes (also those of packages), sorted by name. */
+std::vector<PluginInfo> GatherPlugins();
+
 // ---- types
 
 struct TypeNode {

@@ -27,6 +27,7 @@ static const uint32 kActivate = 'IWac';
 struct GatherResult {
 	stats::Overview					overview;
 	std::vector<stats::TypeGroup>	groups;
+	std::vector<stats::PluginInfo>	plugins;
 	std::vector<BString>			notes;
 };
 
@@ -83,6 +84,7 @@ InfoWindow::_GatherEntry(void* data)
 	GatherResult* result = new GatherResult;
 	result->overview = stats::GatherOverview();
 	result->groups = stats::GatherTypes(&result->notes);
+	result->plugins = stats::GatherPlugins();
 
 	BMessage done(kGathered);
 	done.AddPointer("result", result);
@@ -167,14 +169,21 @@ InfoWindow::_Fill(BMessage* message)
 	_Clear();
 
 	const stats::Overview& overview = result->overview;
-	fList->AddItem(new StatItem(0, overview.version, BString(), BString(), true));
-	fList->AddItem(new StatItem(0, "Server", BString(), overview.serverRunning ? "running" : "not running"));
+	// SEN Core, with the server as a component (its version: what the first line was)
+	fList->AddItem(new StatItem(0, "SEN Core", BString(), BString(), true));
+	fList->AddItem(new StatItem(1, "Server", stats::VersionOnly(), overview.serverRunning ? "running" : "not running"));
 	fList->AddItem(new StatItem(0, "SEN objects", BString(), Number(overview.objects), true));
 	for (const stats::VolumeObjects& volume : overview.volumes) {
 		BString note;
 		if (!volume.indexed)
 			note = "not counted, no index for SEN:ID";
 		fList->AddItem(new StatItem(1, volume.name, note, volume.indexed ? Number(volume.objects) : BString()));
+	}
+	// the plugins that are installed: the version in the note, what they do as the value
+	fList->AddItem(new StatItem(0, "Plugins", BString(), Number((int32) result->plugins.size()), true));
+	for (const stats::PluginInfo& plugin : result->plugins) {
+		BString note(plugin.version);
+		fList->AddItem(new StatItem(1, plugin.name, note, plugin.features));
 	}
 	fList->AddItem(new StatItem(0, "Types", BString(), BString(), true));
 

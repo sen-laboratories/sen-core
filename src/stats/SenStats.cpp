@@ -6,6 +6,9 @@
 #include "SenStats.h"
 
 #include <sen/Sen.h>
+#include <sen/Sensei.h>
+
+#include "../relations/QueryUtil.h"
 
 #include <string.h>
 #include <time.h>
@@ -194,6 +197,62 @@ VersionOnly()
 	if (!ReadVersion(&version, &modified))
 		return BString("unknown version");
 	return VersionNumber(version);
+}
+
+
+// ---- plugins
+
+std::vector<PluginInfo>
+GatherPlugins()
+{
+	std::vector<PluginInfo> plugins;
+	BString predicate;
+	predicate << "BEOS:APP_SIG==" << sensei::kSignaturePattern;
+	std::vector<entry_ref> candidates;
+	if (sen::QueryAllVolumes(predicate.String(), &candidates) != B_OK)
+		return plugins;
+
+	std::set<std::string> seen;
+	for (const entry_ref& candidate : candidates) {
+		BNode node(&candidate);
+		BString type;
+		if (node.InitCheck() != B_OK || node.ReadAttrString(sen::attr::kType, &type) != B_OK || type != sen::mime::kPlugin)
+			continue;
+
+		PluginInfo plugin;
+		plugin.ref = candidate;
+		BFile file(&candidate, B_READ_ONLY);
+		BAppFileInfo appInfo(&file);
+		char signature[B_MIME_TYPE_LENGTH];
+		if (appInfo.InitCheck() != B_OK || appInfo.GetSignature(signature) != B_OK || !seen.insert(signature).second)
+			continue;
+		plugin.signature = signature;
+
+		version_info version;
+		bool hasVersion = appInfo.GetVersionInfo(&version, B_APP_VERSION_KIND) == B_OK;
+		plugin.name = hasVersion && version.short_info[0] != '\0' ? version.short_info : candidate.name;
+		node.ReadAttrString("SEN:plugin:version", &plugin.version);
+		if (plugin.version.IsEmpty() && hasVersion) {
+			plugin.version << (int)version.major << "." << (int)version.middle << "." << (int)version.minor;
+		}
+
+		for (const char* feature : {sensei::feature::kExtract, sensei::feature::kEnrich, sensei::feature::kIdentify, sensei::feature::kNavigate,
+				sensei::feature::kSearch}) {
+			BString attribute;
+			attribute << sensei::kFeatureAttrPrefix << ":" << feature;
+			int32 flag = 0;
+			attr_info info;
+			if (node.GetAttrInfo(attribute.String(), &info) == B_OK && info.size >= 1 && info.size <= (off_t) sizeof(flag)
+					&& node.ReadAttr(attribute.String(), info.type, 0, &flag, info.size) == info.size && flag != 0) {
+				if (!plugin.features.IsEmpty())
+					plugin.features << ", ";
+				plugin.features << feature;
+			}
+		}
+		plugins.push_back(plugin);
+	}
+	std::sort(plugins.begin(), plugins.end(), [](const PluginInfo& a, const PluginInfo& b) { return a.name.ICompare(b.name) < 0; });
+	return plugins;
 }
 
 

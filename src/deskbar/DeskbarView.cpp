@@ -11,6 +11,9 @@
 #include <sen/SenLookup.h>
 #include <sen/SenOntoCore.h>
 #include <sen/SenTypes.h>
+#include <sen/Sensei.h>
+
+#include "../stats/SenStats.h"
 
 #include <Bitmap.h>
 #include <Menu.h>
@@ -193,6 +196,8 @@ DeskbarView::IsServerCommand(uint32 command)
 		case sen::cmd::kUiOpenClassified:
 		case sen::cmd::kUiSetContext:
 		case sen::cmd::kUiOpenContexts:
+		case sen::cmd::kUiOpenPlugins:
+		case sen::cmd::kUiShowPluginAbout:
 			return true;
 	}
 	return false;
@@ -549,6 +554,29 @@ DeskbarView::_AddOntologyMenu(BMenu* menu)
 }
 
 
+/**
+ * The plugins that are installed: choosing the menu itself opens a query with all of them (with their attributes as columns: the version and what they
+ * do), a plugin in it shows its About window. Plugins are not configuration of SEN but code, and the version tells what is installed.
+ */
+void
+DeskbarView::_AddPluginMenu(BMenu* menu)
+{
+	BMenu* plugins = new BMenu("Plugins");
+	for (const stats::PluginInfo& plugin : stats::GatherPlugins()) {
+		// (choosing a plugin shows its About window)
+		BMessage* open = new BMessage(sen::cmd::kUiShowPluginAbout);
+		open->AddString(sen::key::kPluginSignature, plugin.signature.String());
+		BString label(plugin.name);
+		if (!plugin.version.IsEmpty())
+			label << "  " << plugin.version;
+		plugins->AddItem(new IconItem(label.String(), open, IconOfEntry(plugin.ref)));
+	}
+	plugins->SetTargetForItems(this);
+	// (choosing the menu itself opens the query with all plugins)
+	menu->AddItem(new BMenuItem(plugins, new BMessage(sen::cmd::kUiOpenPlugins)));
+}
+
+
 /** A menu for every type of classification (labels, topics, projects...): the first item opens a query with all of them, then the entities. */
 void
 DeskbarView::_AddClassificationMenus(BMenu* menu)
@@ -616,7 +644,8 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 			submenu->AddItem(item);
 		}
 		submenu->SetTargetForItems(this);
-		menu->AddItem(new BMenuItem(submenu, showAll));
+		// (with the icon of the type, as the Context menu has: the type of the entities that are in it)
+		menu->AddItem(new IconItem(submenu, showAll, IconOfType(classification.c_str())));
 	}
 }
 
@@ -635,11 +664,14 @@ DeskbarView::_BuildMenu()
 	if (menu->CountItems() > before)
 		menu->AddSeparatorItem();
 
+	// what SEN is made of and knows: the plugins and the ontologies (configuration, next to each other), then the windows about SEN
+	_AddPluginMenu(menu);
+	_AddOntologyMenu(menu);
+	menu->AddSeparatorItem();
+
 	BString ellipsis(B_UTF8_ELLIPSIS);
 	menu->AddItem(new BMenuItem((BString("Info") << ellipsis).String(), new BMessage(sen::cmd::kUiShowInfo)));
 	menu->AddItem(new BMenuItem((BString("Check") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
-	// (the ontologies are configuration, not what people work with: next to the settings)
-	_AddOntologyMenu(menu);
 	menu->AddItem(new BMenuItem((BString("Settings") << ellipsis).String(), new BMessage(sen::cmd::kUiShowSettings)));
 	menu->AddSeparatorItem();
 	menu->AddItem(new BMenuItem((BString("About") << ellipsis).String(), new BMessage(sen::cmd::kUiShowAbout)));
