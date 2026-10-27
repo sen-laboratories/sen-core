@@ -69,9 +69,10 @@ static bool FindOntologyInstaller(BPath* path)
 /** runs the installer, in a thread of its own (it talks to this server to relate the ontologies to their types) */
 static int32 RunOntologyUpdate(void*)
 {
-	int32 result = -1;
+	int32 result = 0;
 	BPath installer;
-	if (FindOntologyInstaller(&installer)) {
+	bool found = FindOntologyInstaller(&installer);
+	if (found) {
 		// the output goes to a log that helps when ontologies do not show up
 		BPath log;
 		BString command;
@@ -83,6 +84,7 @@ static int32 RunOntologyUpdate(void*)
 		spdlog::debug("no ontology installer (sen_oni) found, ontologies are not updated");
 	}
 	BMessage done(kOntologiesUpdated);
+	done.AddBool("installer", found);
 	done.AddInt32("result", result);
 	be_app_messenger.SendMessage(&done);
 	return 0;
@@ -299,7 +301,9 @@ void SenServer::MessageReceived(BMessage* message)
 	if (message->what == kOntologiesUpdated) {
 		fOntologyUpdating = false;
 		int32 result = message->GetInt32("result", -1);
-		if (result == 0)
+		if (!message->GetBool("installer", false))
+			spdlog::debug("ontology update skipped: no installer");	// (not an error, e.g. while developing)
+		else if (result == 0)
 			spdlog::debug("ontology update done");
 		else
 			spdlog::warn("the ontology update ended with {} (see sen/ontologies-update.log in the settings)", result);
