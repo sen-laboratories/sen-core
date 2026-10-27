@@ -1121,7 +1121,8 @@ status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cre
         }
     } else if (result != B_OK) {
         // (pipes and other nodes without attributes are no objects of SEN: not an error)
-        if (result == B_NOT_SUPPORTED)
+        // (a volume without attributes, e.g. the temporary files in RAMFS, says B_UNSUPPORTED, the pipes B_NOT_SUPPORTED: both are "Operation not supported")
+        if (result == B_NOT_SUPPORTED || result == B_UNSUPPORTED)
             spdlog::debug("no ID for {}: {}", ref->name, strerror(result));
         else
             spdlog::error("failed to read ID from path {}: {}", ref->name, strerror(result));
