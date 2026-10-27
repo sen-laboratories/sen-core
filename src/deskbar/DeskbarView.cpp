@@ -614,6 +614,23 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 }
 
 
+/**
+ * The target of every item of a menu and of its submenus. BMenu::SetTargetForItems() only does the items of the menu itself, not those of the submenus
+ * (BMenuItem has no hand in it): the items of a submenu that were not given a target go to the window of the menu, where nothing handles them (the attributes
+ * of a type, in the menu of an ontology, did nothing).
+ */
+static void
+SetTargetOfAllItems(BMenu* menu, BHandler* target)
+{
+	for (int32 index = 0; index < menu->CountItems(); index++) {
+		BMenuItem* item = menu->ItemAt(index);
+		item->SetTarget(target);
+		if (item->Submenu() != NULL)
+			SetTargetOfAllItems(item->Submenu(), target);
+	}
+}
+
+
 BPopUpMenu*
 DeskbarView::_BuildMenu()
 {
@@ -642,7 +659,7 @@ DeskbarView::_BuildMenu()
 	menu->AddItem(new BMenuItem("Restart", new BMessage(sen::cmd::kUiRequestRestart)));
 	menu->AddItem(new BMenuItem("Quit", new BMessage(sen::cmd::kUiRequestQuit)));
 
-	menu->SetTargetForItems(this);
+	SetTargetOfAllItems(menu, this);
 	return menu;
 }
 
