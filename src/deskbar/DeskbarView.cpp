@@ -649,10 +649,10 @@ DeskbarView::_BuildMenu()
 	// what SEN is made of and knows: the plugins and the ontologies (configuration, next to each other), then the windows about SEN
 	_AddPluginMenu(menu);
 	_AddOntologyMenu(menu);
-	menu->AddSeparatorItem();
-
 	BString ellipsis(B_UTF8_ELLIPSIS);
 	menu->AddItem(new BMenuItem((BString("Graph") << ellipsis).String(), new BMessage(sen::cmd::kUiOpenGraph)));
+	menu->AddSeparatorItem();
+
 	menu->AddItem(new BMenuItem((BString("Info") << ellipsis).String(), new BMessage(sen::cmd::kUiShowInfo)));
 	menu->AddItem(new BMenuItem((BString("Check") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
 	menu->AddItem(new BMenuItem((BString("Settings") << ellipsis).String(), new BMessage(sen::cmd::kUiShowSettings)));
