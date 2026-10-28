@@ -32,7 +32,7 @@ SRCS := src/relations/RelationHandler.cpp \
 
 RDEFS = src/resources/sen_server.rdef
 
-LIBS = be translation spdlog fmt $(STDCPPLIBS)
+LIBS = be tracker translation spdlog fmt $(STDCPPLIBS)
 #	Specify the level of optimization that you want. Specify either NONE (O0),
 #	SOME (O1), FULL (O2), or leave blank (for the default optimization level).
 
