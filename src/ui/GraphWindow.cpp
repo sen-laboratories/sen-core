@@ -392,12 +392,16 @@ GraphView::Draw(BRect)
 		StrokeEllipse(at, radius, radius);
 	}
 
-	// the names: of all the nodes when there are few or the view is zoomed in, else of the selected one, the ones it is connected to and the one under the mouse
+	// the names: of all the nodes when there are few or the view is zoomed in, of the nodes that have many relations (the hubs) when it is not, and
+	// always of the selected one, the ones it is connected to and the one under the mouse
 	for (size_t i = 0; i < nodes.size(); i++) {
-		const bool related = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover || (selecting && fNeighbors[i]);
-		if (!related && (selecting || (manyNodes && fScale < 1.0f) || fScale < 0.5f))
-			continue;
 		const Node& node = nodes[i];
+		const bool related = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover || (selecting && fNeighbors[i]);
+		bool shown = related;
+		if (!shown && !selecting)
+			shown = !manyNodes || fScale >= 1.0f || (node.degree >= 3 && fScale >= 0.4f);
+		if (!shown)
+			continue;
 		BString label(node.label.c_str());
 		if (label.CountChars() > 28)
 			label.TruncateChars(27).Append(B_UTF8_ELLIPSIS);
