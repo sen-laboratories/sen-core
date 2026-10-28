@@ -16,6 +16,7 @@ class BButton;
 class BCheckBox;
 class BFilePanel;
 class BStringView;
+class SenConfigHandler;
 
 namespace sen {
 namespace ui {
@@ -33,7 +34,7 @@ static const uint32 kGraphFocus = 'GWfo';
  */
 class GraphWindow : public BWindow {
 public:
-					GraphWindow();
+					GraphWindow(SenConfigHandler* config);
 	virtual			~GraphWindow();
 
 	virtual void	DispatchMessage(BMessage* message, BHandler* handler);
@@ -52,6 +53,9 @@ private:
 	BCheckBox*		fMeta;
 	BCheckBox*		fUnconnected;
 	BCheckBox*		fDark;
+	BButton*		fSaveSelection;
+	SenConfigHandler*	fConfig;
+	bool			fSelectionOnly;	///< what the file panel is for: the selection, not the view
 	BButton*		fRefresh;
 	BStringView*	fStatus;
 	BFilePanel*		fSavePanel;

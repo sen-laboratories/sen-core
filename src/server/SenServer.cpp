@@ -289,9 +289,12 @@ void SenServer::RemoveDeskbarItem()
 
 bool SenServer::QuitRequested()
 {
-    RemoveDeskbarItem();
     fUi->CloseWindows();
-    return BApplication::QuitRequested();
+    const bool quit = BApplication::QuitRequested();
+    // (the knot stays when the server does not quit: nobody must find a server without its knot)
+    if (quit)
+        RemoveDeskbarItem();
+    return quit;
 }
 
 void SenServer::MessageReceived(BMessage* message)

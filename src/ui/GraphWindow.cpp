@@ -5,6 +5,7 @@
 
 #include "GraphWindow.h"
 
+#include "../config/SenConfigHandler.h"
 #include "../graph/GraphData.h"
 
 #include <Alert.h>
@@ -38,6 +39,8 @@ using sen::graph::Node;
 static const uint32 kRefresh = 'GWrf';
 static const uint32 kFilter = 'GWfl';
 static const uint32 kSave = 'GWsv';
+static const uint32 kSaveSelection = 'GWss';
+static const uint32 kSelectionChanged = 'GWse';
 static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
 static const uint32 kOpenNode = 'GWop';
@@ -137,6 +140,7 @@ public:
 		fNeighbors.assign(fGraph.Nodes().size(), false);
 		fNeedFit = true;
 		fAutoFit = true;
+		_SelectionChanged();
 		Invalidate();
 	}
 
@@ -149,6 +153,61 @@ public:
 	const sen::graph::Graph& Graph() const { return fGraph; }
 
 	bool Dark() const { return fDark; }
+
+	bool HasSelection() const { return fSelected >= 0 || fSelectedEdge >= 0; }
+
+	/** a name for the file of the selection: the node, or the nodes of the line */
+	BString SelectionName() const
+	{
+		BString name;
+		if (fSelected >= 0)
+			name = fGraph.Nodes()[fSelected].label.c_str();
+		else if (fSelectedEdge >= 0) {
+			const Edge& edge = fGraph.Edges()[fSelectedEdge];
+			name << fGraph.Nodes()[edge.from].label.c_str() << "-" << fGraph.Nodes()[edge.to].label.c_str();
+		}
+		name.ReplaceAll("/", "-");
+		return name;
+	}
+
+	/**
+	 * The graph as SVG. The view as it is seen (its size, zoom and place, what is selected and dimmed, the names that are there), or, if only the
+	 * selection is wanted, the selected node with the nodes it is connected to and its own lines (a selected line: its two nodes), as they are placed here
+	 * and fitted into the picture. Empty if there is nothing to save.
+	 */
+	std::string Svg(bool selectionOnly) const
+	{
+		sen::graph::SvgOptions options;
+		options.dark = fDark;
+		options.fontSize = be_plain_font->Size();
+		if (selectionOnly) {
+			if (fSelected >= 0) {
+				sen::graph::Graph part = fGraph.Neighborhood(fSelected);
+				options.selectedNode = part.IndexOf(fGraph.Nodes()[fSelected].id);
+				return part.ToSvg(options);
+			}
+			if (fSelectedEdge >= 0) {
+				sen::graph::Graph part = fGraph.Subgraph(std::vector<int>(), std::vector<int>(1, fSelectedEdge));
+				options.selectedEdge = 0;
+				return part.ToSvg(options);
+			}
+			return std::string();
+		}
+		if (fGraph.Nodes().empty())
+			return std::string();
+		options.width = Bounds().Width();
+		options.height = Bounds().Height();
+		options.scale = fScale;
+		options.offsetX = fOffset.x;
+		options.offsetY = fOffset.y;
+		options.selectedNode = fSelected;
+		options.selectedEdge = fSelectedEdge;
+		if (fNodeLabelShown.size() == fGraph.Nodes().size() && fEdgeLabelShown.size() == fGraph.Edges().size()) {
+			options.nodeLabelShown = &fNodeLabelShown;
+			options.edgeLabelShown = &fEdgeLabelShown;
+		}
+		return fGraph.ToSvg(options);
+	}
 
 	/** Select the node of an id and put it in the middle of the view, zoomed in a little. */
 	void Focus(const char* id)
@@ -323,7 +382,7 @@ private:
 	/** the size of a node on the screen: the zoom does not make the nodes as big as the distances */
 	float _Radius(const Node& node) const
 	{
-		return sen::graph::NodeRadius(node.degree) * std::min(std::max(fScale, 0.7f), 1.6f);
+		return sen::graph::NodeRadiusAt(node.degree, fScale);
 	}
 
 	int32 _NodeAt(BPoint where) const
@@ -370,6 +429,7 @@ private:
 			fNeighbors[fGraph.Edges()[edge].from] = true;
 			fNeighbors[fGraph.Edges()[edge].to] = true;
 		}
+		_SelectionChanged();
 		Invalidate();
 	}
 
@@ -386,7 +446,14 @@ private:
 					fNeighbors[edge.from] = true;
 			}
 		}
+		_SelectionChanged();
 		Invalidate();
+	}
+
+	void _SelectionChanged()
+	{
+		if (Window() != NULL)
+			Window()->PostMessage(kSelectionChanged);
 	}
 
 	void _Zoom(BPoint where, float factor)
@@ -431,6 +498,8 @@ private:
 	BPoint				fLast;
 	bool				fDragging;
 	bool				fDark;
+	std::vector<bool>	fNodeLabelShown;	///< what the last drawing showed (the SVG has the same)
+	std::vector<bool>	fEdgeLabelShown;
 };
 
 
@@ -576,6 +645,9 @@ GraphView::Draw(BRect)
 		}
 	}
 
+	fNodeLabelShown = nodeLabelShown;
+	fEdgeLabelShown = edgeLabelShown;
+
 	// the labels of the edges
 	for (size_t index = 0; index < edges.size(); index++) {
 		if (!edgeLabelShown[index])
@@ -692,10 +764,12 @@ struct WorkResult {
 };
 
 
-GraphWindow::GraphWindow()
+GraphWindow::GraphWindow(SenConfigHandler* config)
 	:
 	BWindow(BRect(100, 100, 1060, 740), "SEN Graph", B_DOCUMENT_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
 	fSavePanel(NULL),
+	fConfig(config),
+	fSelectionOnly(false),
 	fWorking(false),
 	fTruncated(false),
 	fObjects(0),
@@ -705,9 +779,16 @@ GraphWindow::GraphWindow()
 	fMeta = new BCheckBox("meta", "Classifications and contexts", new BMessage(kFilter));
 	fUnconnected = new BCheckBox("unconnected", "Objects without relations", new BMessage(kFilter));
 	fDark = new BCheckBox("dark", "Dark", new BMessage(kDark));
+	// dark or light as it was chosen last time (a field of the settings), else as the colours of the system are
+	bool dark = false;
+	BMessage settings;
+	if (fConfig != NULL && fConfig->GetConfig(&settings) == B_OK && settings.FindBool(sen::key::kGraphDark, &dark) == B_OK)
+		fView->SetDark(dark);
 	fDark->SetValue(fView->Dark() ? B_CONTROL_ON : B_CONTROL_OFF);
 	fRefresh = new BButton("refresh", "Refresh", new BMessage(kRefresh));
 	BButton* save = new BButton("save", "Save as SVG" B_UTF8_ELLIPSIS, new BMessage(kSave));
+	fSaveSelection = new BButton("saveSelection", "Save selection" B_UTF8_ELLIPSIS, new BMessage(kSaveSelection));
+	fSaveSelection->SetEnabled(false);
 	fStatus = new BStringView("status", "");
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_SMALL_SPACING)
@@ -717,6 +798,7 @@ GraphWindow::GraphWindow()
 			.Add(fUnconnected)
 			.Add(fDark)
 			.AddGlue()
+			.Add(fSaveSelection)
 			.Add(save)
 			.Add(fRefresh)
 		.End()
@@ -765,7 +847,18 @@ GraphWindow::MessageReceived(BMessage* message)
 			_Start(false);
 			break;
 		case kDark:
-			fView->SetDark(fDark->Value() == B_CONTROL_ON);
+		{
+			const bool dark = fDark->Value() == B_CONTROL_ON;
+			fView->SetDark(dark);
+			if (fConfig != NULL) {
+				BMessage change;
+				change.AddBool(sen::key::kGraphDark, dark);
+				fConfig->UpdateSettings(&change);	// (remembered: the next window is as this one)
+			}
+			break;
+		}
+		case kSelectionChanged:
+			fSaveSelection->SetEnabled(fView->HasSelection());
 			break;
 		case kWorkDone:
 			_Done(message);
@@ -786,6 +879,7 @@ GraphWindow::MessageReceived(BMessage* message)
 			}
 			break;
 		case kSave:
+		case kSaveSelection:
 		case B_SAVE_REQUESTED:
 			_Save(message);
 			break;
@@ -974,12 +1068,17 @@ GraphWindow::_OpenRelations(const BMessage* message)
 void
 GraphWindow::_Save(const BMessage* message)
 {
-	if (message->what == kSave) {
+	if (message->what == kSave || message->what == kSaveSelection) {
+		fSelectionOnly = message->what == kSaveSelection;
 		if (fSavePanel == NULL) {
 			BMessenger target(this);
 			fSavePanel = new BFilePanel(B_SAVE_PANEL, &target, NULL, B_FILE_NODE, false);
 		}
-		fSavePanel->SetSaveText("sen-graph.svg");
+		BString name("sen-graph");
+		if (fSelectionOnly)
+			name << "-" << fView->SelectionName();
+		name << ".svg";
+		fSavePanel->SetSaveText(name.String());
 		fSavePanel->Show();
 		return;
 	}
@@ -989,9 +1088,14 @@ GraphWindow::_Save(const BMessage* message)
 	if (message->FindRef("directory", &directory) != B_OK || message->FindString("name", &name) != B_OK)
 		return;
 
-	sen::graph::SvgOptions options;
-	options.dark = fView->Dark();	// as it is seen
-	const std::string svg = fView->Graph().ToSvg(options);
+	// the picture of the view as it is seen, or of the selection (a node with its direct connections)
+	const std::string svg = fView->Svg(fSelectionOnly);
+	if (svg.empty()) {
+		BAlert* alert = new BAlert("SEN Graph", "There is nothing to save.", "OK", NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+		alert->Go(NULL);
+		return;
+	}
 	BDirectory folder(&directory);
 	BFile file(&folder, name, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
 	status_t result = file.InitCheck();

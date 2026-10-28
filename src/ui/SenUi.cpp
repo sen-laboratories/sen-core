@@ -148,6 +148,9 @@ SenUi::_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate)
 		return;
 
 	BWindow* created = (this->*make)();
+	// The shortcut Alt+Q of any window quits the application: for this one it would take the server and the knot with it, so it closes the window (as Alt+W does)
+	created->RemoveShortcut('Q', B_COMMAND_KEY);
+	created->AddShortcut('Q', B_COMMAND_KEY, new BMessage(B_QUIT_REQUESTED));
 	*window = BMessenger(created);
 	created->Show();
 }
@@ -157,7 +160,7 @@ BWindow* SenUi::_MakeInfo() { return new InfoWindow(); }
 BWindow* SenUi::_MakeCheck() { return new CheckWindow(); }
 BWindow* SenUi::_MakeSettings() { return new SettingsWindow(fConfig); }
 BWindow* SenUi::_MakeAbout() { return new AboutWindow(); }
-BWindow* SenUi::_MakeGraph() { return new GraphWindow(); }
+BWindow* SenUi::_MakeGraph() { return new GraphWindow(fConfig); }
 
 
 // ---- queries
