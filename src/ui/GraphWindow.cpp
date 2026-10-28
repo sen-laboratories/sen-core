@@ -35,6 +35,7 @@ using sen::graph::Node;
 static const uint32 kRefresh = 'GWrf';
 static const uint32 kFilter = 'GWfl';
 static const uint32 kSave = 'GWsv';
+static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
 static const uint32 kOpenNode = 'GWop';
 static const uint32 kActivate = 'GWac';
@@ -46,11 +47,19 @@ static const char* const kTrackerSignature = "application/x-vnd.Be-TRAK";
 
 
 static rgb_color
-ColorOf(const std::string& group)
+Color(const sen::graph::Rgb& color, uint8 alpha = 255)
 {
-	sen::graph::Rgb color = sen::graph::GroupColor(group);
-	rgb_color result = {color.r, color.g, color.b, 255};
+	rgb_color result = {color.r, color.g, color.b, alpha};
 	return result;
+}
+
+
+/** whether the colours of the system are dark (the background of documents) */
+static bool
+SystemIsDark()
+{
+	const rgb_color background = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
+	return (background.red * 299 + background.green * 587 + background.blue * 114) / 1000 < 128;
 }
 
 
@@ -80,7 +89,8 @@ public:
 		fNeedFit(true),
 		fHover(-1),
 		fSelected(-1),
-		fDragging(false)
+		fDragging(false),
+		fDark(SystemIsDark())
 	{
 		SetViewColor(B_TRANSPARENT_COLOR);
 		SetExplicitMinSize(BSize(400, 300));
@@ -102,6 +112,14 @@ public:
 	}
 
 	const sen::graph::Graph& Graph() const { return fGraph; }
+
+	bool Dark() const { return fDark; }
+
+	void SetDark(bool dark)
+	{
+		fDark = dark;
+		Invalidate();
+	}
 
 	virtual void AttachedToWindow()
 	{
@@ -269,14 +287,16 @@ private:
 	BPoint				fMouse;
 	BPoint				fLast;
 	bool				fDragging;
+	bool				fDark;
 };
 
 
 void
 GraphView::Draw(BRect)
 {
-	const rgb_color background = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
-	const rgb_color textColor = ui_color(B_DOCUMENT_TEXT_COLOR);
+	const sen::graph::Palette palette = sen::graph::PaletteFor(fDark);
+	const rgb_color background = Color(palette.background);
+	const rgb_color textColor = Color(palette.text);
 	SetLowColor(background);
 	FillRect(Bounds(), B_SOLID_LOW);
 
@@ -288,7 +308,7 @@ GraphView::Draw(BRect)
 
 	const std::vector<Node>& nodes = fGraph.Nodes();
 	if (nodes.empty()) {
-		SetHighColor(tint_color(textColor, B_LIGHTEN_1_TINT));
+		SetHighColor(Color(palette.edgeText));
 		BRect bounds(Bounds());
 		BString text(fMessage.IsEmpty() ? "No objects with relations" : fMessage.String());
 		DrawString(text.String(), BPoint((bounds.Width() - font.StringWidth(text.String())) / 2, bounds.Height() / 2));
@@ -318,9 +338,9 @@ GraphView::Draw(BRect)
 		const float startRadius = _Radius(from), endRadius = _Radius(to) + (edge.reciprocal ? 0 : 1);
 		BPoint start(a.x + dx * startRadius, a.y + dy * startRadius), end(b.x - dx * endRadius, b.y - dy * endRadius);
 
-		rgb_color color = tint_color(background, edge.meta ? B_DARKEN_1_TINT : B_DARKEN_3_TINT);
+		rgb_color color = Color(edge.meta ? palette.metaEdge : palette.edge);
 		if (selecting && active)
-			color = tint_color(textColor, B_LIGHTEN_2_TINT);
+			color = Color(palette.emphasis);
 		color.alpha = active ? 255 : 50;
 		SetHighColor(color);
 		SetPenSize(selecting && active ? 2.0f : 1.2f);
@@ -349,7 +369,7 @@ GraphView::Draw(BRect)
 		halo.alpha = 200;
 		SetHighColor(halo);
 		FillRect(BRect(at.x - 2, at.y - height.ascent, at.x + width + 2, at.y + height.descent));
-		SetHighColor(tint_color(textColor, emphasised ? B_NO_TINT : B_LIGHTEN_2_TINT));
+		SetHighColor(emphasised ? textColor : Color(palette.edgeText));
 		DrawString(label.String(), at);
 	}
 
@@ -361,11 +381,11 @@ GraphView::Draw(BRect)
 		BPoint at = _ToView(node);
 		float radius = _Radius(node) + (emphasised ? 2 : 0);
 
-		rgb_color color = ColorOf(node.group);
+		rgb_color color = Color(sen::graph::GroupColor(node.group, fDark));
 		color.alpha = dimmed ? 70 : 255;
 		SetHighColor(color);
 		FillEllipse(at, radius, radius);
-		rgb_color ring = emphasised ? textColor : background;
+		rgb_color ring = emphasised ? Color(palette.emphasis) : background;
 		ring.alpha = dimmed ? 70 : 255;
 		SetHighColor(ring);
 		SetPenSize(emphasised ? 2.0f : 1.2f);
@@ -408,11 +428,11 @@ GraphView::Draw(BRect)
 			box.OffsetBy(Bounds().right - box.right - 4, 0);
 		if (box.bottom > Bounds().bottom)
 			box.OffsetBy(0, Bounds().bottom - box.bottom - 4);
-		SetHighColor(ui_color(B_TOOL_TIP_BACKGROUND_COLOR));
+		SetHighColor(fDark ? Color({0x2a, 0x2d, 0x35}) : ui_color(B_TOOL_TIP_BACKGROUND_COLOR));
 		FillRoundRect(box, 3, 3);
-		SetHighColor(tint_color(ui_color(B_TOOL_TIP_BACKGROUND_COLOR), B_DARKEN_3_TINT));
+		SetHighColor(fDark ? Color({0x55, 0x5b, 0x66}) : tint_color(ui_color(B_TOOL_TIP_BACKGROUND_COLOR), B_DARKEN_3_TINT));
 		StrokeRoundRect(box, 3, 3);
-		SetHighColor(ui_color(B_TOOL_TIP_TEXT_COLOR));
+		SetHighColor(fDark ? textColor : ui_color(B_TOOL_TIP_TEXT_COLOR));
 		for (int line = 0; line < 3; line++)
 			DrawString(lines[line], BPoint(box.left + 6, box.top + 4 + height.ascent + line * lineHeight));
 	}
@@ -454,6 +474,8 @@ GraphWindow::GraphWindow()
 	fView = new GraphView();
 	fMeta = new BCheckBox("meta", "Classifications and contexts", new BMessage(kFilter));
 	fUnconnected = new BCheckBox("unconnected", "Objects without relations", new BMessage(kFilter));
+	fDark = new BCheckBox("dark", "Dark", new BMessage(kDark));
+	fDark->SetValue(fView->Dark() ? B_CONTROL_ON : B_CONTROL_OFF);
 	fRefresh = new BButton("refresh", "Refresh", new BMessage(kRefresh));
 	BButton* save = new BButton("save", "Save as SVG" B_UTF8_ELLIPSIS, new BMessage(kSave));
 	fStatus = new BStringView("status", "");
@@ -463,6 +485,7 @@ GraphWindow::GraphWindow()
 		.AddGroup(B_HORIZONTAL)
 			.Add(fMeta)
 			.Add(fUnconnected)
+			.Add(fDark)
 			.AddGlue()
 			.Add(save)
 			.Add(fRefresh)
@@ -491,6 +514,9 @@ GraphWindow::MessageReceived(BMessage* message)
 			break;
 		case kFilter:
 			_Start(false);
+			break;
+		case kDark:
+			fView->SetDark(fDark->Value() == B_CONTROL_ON);
 			break;
 		case kWorkDone:
 			_Done(message);
@@ -648,7 +674,9 @@ GraphWindow::_Save(const BMessage* message)
 	if (message->FindRef("directory", &directory) != B_OK || message->FindString("name", &name) != B_OK)
 		return;
 
-	const std::string svg = fView->Graph().ToSvg();
+	sen::graph::SvgOptions options;
+	options.dark = fView->Dark();	// as it is seen
+	const std::string svg = fView->Graph().ToSvg(options);
 	BDirectory folder(&directory);
 	BFile file(&folder, name, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
 	status_t result = file.InitCheck();

@@ -45,6 +45,7 @@ private:
 	GraphView*		fView;
 	BCheckBox*		fMeta;
 	BCheckBox*		fUnconnected;
+	BCheckBox*		fDark;
 	BButton*		fRefresh;
 	BStringView*	fStatus;
 	BFilePanel*		fSavePanel;
