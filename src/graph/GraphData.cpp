@@ -8,6 +8,7 @@
 #include "../relations/IdListAttr.h"
 #include "../relations/QueryUtil.h"
 
+#include <FindDirectory.h>
 #include <Message.h>
 #include <MimeType.h>
 #include <Node.h>
@@ -48,27 +49,32 @@ TypeOf(BNode& node)
 	return "";
 }
 
-static const char kMetaMimeType[] = "application/x-vnd.Be-meta-mime";
-
 /**
  * What a file in the MIME database (the file of a type: the entities, relations... that the ontologies define) is called: the type that it stands for, in words
- * ("Music album", not "x-vnd.sen-labs.entity.music.album"), and what kind of type it is as the group.
+ * ("Music album", not "x-vnd.sen-labs.entity.music.album"), and what kind of type it is as the group. The files of the types have no type of their own
+ * (the semantic type that a file stands for is its META:TYPE): they are known by where they are, as the navigator of SENSEI knows them.
  */
 bool
-NameOfTypeFile(const entry_ref& ref, BNode& node, std::string* label, std::string* group)
+NameOfTypeFile(const entry_ref& ref, std::string* label, std::string* group)
 {
-	// (the file of a type has the semantic type that it stands for as META:TYPE: its own type is the one of the MIME database)
-	char fileType[B_MIME_TYPE_LENGTH];
-	if (BNodeInfo(&node).GetType(fileType) != B_OK || strcmp(fileType, kMetaMimeType) != 0)
+	BPath settings, path(&ref);
+	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settings) != B_OK || settings.Append("mime_db") != B_OK || path.InitCheck() != B_OK)
 		return false;
-	BPath path(&ref), parent;
-	if (path.InitCheck() != B_OK || path.GetParent(&parent) != B_OK || parent.Leaf() == NULL)
+
+	const std::string database = std::string(settings.Path()) + "/";
+	const std::string location = path.Path();
+	if (location.compare(0, database.length(), database) != 0)
 		return false;
-	const std::string supertype = parent.Leaf();
+
+	const std::string type = location.substr(database.length());	// "entity/x-vnd.sen-labs.entity.music.album"
+	const size_t slash = type.find('/');
+	if (slash == std::string::npos)
+		return false;
+
 	char shortName[B_MIME_TYPE_LENGTH];
-	if (BMimeType((supertype + "/" + ref.name).c_str()).GetShortDescription(shortName) == B_OK && shortName[0] != '\0')
+	if (BMimeType(type.c_str()).GetShortDescription(shortName) == B_OK && shortName[0] != '\0')
 		*label = shortName;
-	*group = "type: " + supertype;
+	*group = "type: " + type.substr(0, slash);
 	return true;
 }
 
@@ -147,7 +153,7 @@ Collect(Collected* collected, size_t maxObjects)
 		if (collected->refs.count(id.String()) != 0)
 			continue;	// (two files with one id: the first is the object)
 		std::string type = TypeOf(node), label = ref.name, group = type;
-		NameOfTypeFile(ref, node, &label, &group);
+		NameOfTypeFile(ref, &label, &group);
 		collected->graph.AddNode(id.String(), label, group);
 		collected->refs[id.String()] = ref;
 	}
