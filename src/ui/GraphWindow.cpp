@@ -26,6 +26,8 @@
 #include <algorithm>
 #include <vector>
 
+#include <sen/Sen.h>
+
 namespace sen {
 namespace ui {
 
@@ -38,6 +40,7 @@ static const uint32 kSave = 'GWsv';
 static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
 static const uint32 kOpenNode = 'GWop';
+static const uint32 kOpenRelations = 'GWor';
 static const uint32 kActivate = 'GWac';
 
 /** the most objects that are shown (the layout and the drawing are made for some thousands, not more) */
@@ -76,6 +79,31 @@ EdgeLabel(const Edge& edge)
 }
 
 
+/** the distance of a point from the line between two points (not beyond its ends) */
+static float
+DistanceToSegment(BPoint point, BPoint a, BPoint b)
+{
+	const float dx = b.x - a.x, dy = b.y - a.y;
+	const float length2 = dx * dx + dy * dy;
+	if (length2 < 0.0001f)
+		return hypotf(point.x - a.x, point.y - a.y);
+	float t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / length2;
+	t = std::min(std::max(t, 0.0f), 1.0f);
+	return hypotf(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+
+/** the name of a relation type for people, as far as it is in the name: "relation/x-vnd.sen-labs.relation.person.knows" is "person.knows" */
+static BString
+ShortTypeName(const std::string& type)
+{
+	BString name(type.c_str());
+	name.RemoveFirst("relation/");
+	name.RemoveFirst("x-vnd.sen-labs.relation.");
+	return name;
+}
+
+
 // ---- the view
 
 /** The graph, drawn: moved by dragging, zoomed with the wheel, a click selects a node, a double click asks to open it. */
@@ -89,6 +117,8 @@ public:
 		fNeedFit(true),
 		fHover(-1),
 		fSelected(-1),
+		fHoverEdge(-1),
+		fSelectedEdge(-1),
 		fDragging(false),
 		fDark(SystemIsDark())
 	{
@@ -99,7 +129,7 @@ public:
 	void SetGraph(const sen::graph::Graph& graph)
 	{
 		fGraph = graph;
-		fHover = fSelected = -1;
+		fHover = fSelected = fHoverEdge = fSelectedEdge = -1;
 		fNeighbors.assign(fGraph.Nodes().size(), false);
 		fNeedFit = true;
 		Invalidate();
@@ -138,13 +168,29 @@ public:
 		if ((buttons & B_PRIMARY_MOUSE_BUTTON) == 0)
 			return;
 
+		const bool doubleClick = current->GetInt32("clicks", 1) >= 2;
 		int32 node = _NodeAt(where);
-		_Select(node);
-		if (node >= 0 && current->GetInt32("clicks", 1) >= 2) {
-			BMessage open(kOpenNode);
-			open.AddString("id", fGraph.Nodes()[node].id.c_str());
-			Window()->PostMessage(&open);
-		}
+		bool nearFrom = true;
+		int32 edge = node < 0 ? _EdgeAt(where, &nearFrom) : -1;
+		if (node >= 0) {
+			_Select(node);
+			if (doubleClick) {
+				BMessage open(kOpenNode);
+				open.AddString("id", fGraph.Nodes()[node].id.c_str());
+				Window()->PostMessage(&open);
+			}
+		} else if (edge >= 0) {
+			_SelectEdge(edge);
+			if (doubleClick) {
+				// a relation is in both nodes (reciprocal): the relations of its type of the node that is nearer to the click
+				const Edge& selected = fGraph.Edges()[edge];
+				BMessage open(kOpenRelations);
+				open.AddString("id", fGraph.Nodes()[nearFrom ? selected.from : selected.to].id.c_str());
+				open.AddString("type", selected.type.c_str());
+				Window()->PostMessage(&open);
+			}
+		} else
+			_Select(-1);
 		fDragging = true;
 		fLast = where;
 		SetMouseEventMask(B_POINTER_EVENTS, B_NO_POINTER_HISTORY);
@@ -165,8 +211,11 @@ public:
 			return;
 		}
 		int32 node = _NodeAt(where);
-		if (node != fHover || node >= 0) {
+		bool nearFrom;
+		int32 edge = node < 0 ? _EdgeAt(where, &nearFrom) : -1;
+		if (node != fHover || edge != fHoverEdge || node >= 0 || edge >= 0) {
 			fHover = node;
+			fHoverEdge = edge;
 			fMouse = where;
 			Invalidate();
 		}
@@ -237,8 +286,40 @@ private:
 		return found;
 	}
 
+	/** the line under a point (not at a node), and whether the point is nearer to the first of its nodes */
+	int32 _EdgeAt(BPoint where, bool* nearFrom) const
+	{
+		const std::vector<Node>& nodes = fGraph.Nodes();
+		const std::vector<Edge>& edges = fGraph.Edges();
+		int32 found = -1;
+		float best = 6.0f;	// the pixels around a line that are the line
+		for (size_t i = 0; i < edges.size(); i++) {
+			const BPoint a = _ToView(nodes[edges[i].from]), b = _ToView(nodes[edges[i].to]);
+			const float distance = DistanceToSegment(where, a, b);
+			if (distance < best) {
+				best = distance;
+				found = static_cast<int32>(i);
+				*nearFrom = hypotf(where.x - a.x, where.y - a.y) <= hypotf(where.x - b.x, where.y - b.y);
+			}
+		}
+		return found;
+	}
+
+	void _SelectEdge(int32 edge)
+	{
+		fSelected = -1;
+		fSelectedEdge = edge;
+		fNeighbors.assign(fGraph.Nodes().size(), false);
+		if (edge >= 0) {
+			fNeighbors[fGraph.Edges()[edge].from] = true;
+			fNeighbors[fGraph.Edges()[edge].to] = true;
+		}
+		Invalidate();
+	}
+
 	void _Select(int32 node)
 	{
+		fSelectedEdge = -1;
 		fSelected = node;
 		fNeighbors.assign(fGraph.Nodes().size(), false);
 		if (node >= 0) {
@@ -284,6 +365,8 @@ private:
 	bool				fNeedFit;
 	int32				fHover;
 	int32				fSelected;
+	int32				fHoverEdge;
+	int32				fSelectedEdge;
 	BPoint				fMouse;
 	BPoint				fLast;
 	bool				fDragging;
@@ -301,7 +384,6 @@ GraphView::Draw(BRect)
 	FillRect(Bounds(), B_SOLID_LOW);
 
 	BFont font(be_plain_font);
-	font.SetSize(10);
 	SetFont(&font);
 	font_height height;
 	font.GetHeight(&height);
@@ -321,13 +403,23 @@ GraphView::Draw(BRect)
 	SetDrawingMode(B_OP_ALPHA);
 	SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
 
-	const bool selecting = fSelected >= 0;
+	const bool selectingNode = fSelected >= 0, selectingEdge = fSelectedEdge >= 0;
+	const bool selecting = selectingNode || selectingEdge;
 	const bool manyNodes = nodes.size() > 60;
 	const std::vector<Edge>& edges = fGraph.Edges();
 
+	// is a line one of those that are emphasised: the ones of the selected node, the selected line, the one under the mouse
+	auto emphasised = [&](size_t index) {
+		const Edge& edge = edges[index];
+		return (selectingNode && (edge.from == fSelected || edge.to == fSelected)) || static_cast<int32>(index) == fSelectedEdge
+			|| static_cast<int32>(index) == fHoverEdge;
+	};
+
 	// the edges: a line to the rim of the node, an arrow if the relation is in one direction only
-	for (const Edge& edge : edges) {
-		const bool active = !selecting || edge.from == fSelected || edge.to == fSelected;
+	for (size_t index = 0; index < edges.size(); index++) {
+		const Edge& edge = edges[index];
+		const bool strong = emphasised(index);
+		const bool active = !selecting || strong;
 		const Node& from = nodes[edge.from];
 		const Node& to = nodes[edge.to];
 		BPoint a = _ToView(from), b = _ToView(to);
@@ -339,11 +431,11 @@ GraphView::Draw(BRect)
 		BPoint start(a.x + dx * startRadius, a.y + dy * startRadius), end(b.x - dx * endRadius, b.y - dy * endRadius);
 
 		rgb_color color = Color(edge.meta ? palette.metaEdge : palette.edge);
-		if (selecting && active)
+		if (strong)
 			color = Color(palette.emphasis);
 		color.alpha = active ? 255 : 50;
 		SetHighColor(color);
-		SetPenSize(selecting && active ? 2.0f : 1.2f);
+		SetPenSize(strong ? 2.4f : 1.2f);
 		StrokeLine(start, end);
 
 		if (!edge.reciprocal && length > startRadius + endRadius + 8) {
@@ -354,10 +446,11 @@ GraphView::Draw(BRect)
 		}
 	}
 
-	// the labels of the edges: all of them when there is room, else those of the selected node
-	for (const Edge& edge : edges) {
-		const bool emphasised = selecting && (edge.from == fSelected || edge.to == fSelected);
-		if (!emphasised && (selecting || (manyNodes && fScale < 1.2f) || fScale < 0.7f))
+	// the labels of the edges: all of them when there is room, else those of the emphasised lines
+	for (size_t index = 0; index < edges.size(); index++) {
+		const Edge& edge = edges[index];
+		const bool strong = selecting ? emphasised(index) : static_cast<int32>(index) == fHoverEdge;
+		if (!strong && (selecting || (manyNodes && fScale < 1.2f) || fScale < 0.7f))
 			continue;
 		BString label = EdgeLabel(edge);
 		if (label.IsEmpty())
@@ -369,7 +462,7 @@ GraphView::Draw(BRect)
 		halo.alpha = 200;
 		SetHighColor(halo);
 		FillRect(BRect(at.x - 2, at.y - height.ascent, at.x + width + 2, at.y + height.descent));
-		SetHighColor(emphasised ? textColor : Color(palette.edgeText));
+		SetHighColor(strong ? textColor : Color(palette.edgeText));
 		DrawString(label.String(), at);
 	}
 
@@ -377,18 +470,18 @@ GraphView::Draw(BRect)
 	for (size_t i = 0; i < nodes.size(); i++) {
 		const Node& node = nodes[i];
 		const bool dimmed = selecting && static_cast<int32>(i) != fSelected && !fNeighbors[i];
-		const bool emphasised = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover;
+		const bool strong = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover;
 		BPoint at = _ToView(node);
-		float radius = _Radius(node) + (emphasised ? 2 : 0);
+		float radius = _Radius(node) + (strong ? 2 : 0);
 
 		rgb_color color = Color(sen::graph::GroupColor(node.group, fDark));
 		color.alpha = dimmed ? 70 : 255;
 		SetHighColor(color);
 		FillEllipse(at, radius, radius);
-		rgb_color ring = emphasised ? Color(palette.emphasis) : background;
+		rgb_color ring = strong ? Color(palette.emphasis) : background;
 		ring.alpha = dimmed ? 70 : 255;
 		SetHighColor(ring);
-		SetPenSize(emphasised ? 2.0f : 1.2f);
+		SetPenSize(strong ? 2.0f : 1.2f);
 		StrokeEllipse(at, radius, radius);
 	}
 
@@ -416,18 +509,31 @@ GraphView::Draw(BRect)
 		DrawString(label.String(), where);
 	}
 
-	// what is under the mouse
+	// what is under the mouse: a node, or a line
+	BString lines[3];
+	int lineCount = 0;
 	if (fHover >= 0) {
 		const Node& node = nodes[fHover];
-		BString name(node.label.c_str()), type(node.group.c_str());
-		BString count;
-		count << node.degree << (node.degree == 1 ? " relation" : " relations");
-		const char* lines[] = {name.String(), type.String(), count.String()};
+		lines[0] = node.label.c_str();
+		lines[1] = node.group.c_str();
+		lines[2] << node.degree << (node.degree == 1 ? " relation" : " relations");
+		lineCount = 3;
+	} else if (fHoverEdge >= 0) {
+		const Edge& edge = edges[fHoverEdge];
+		lines[0] = nodes[edge.from].label.c_str();
+		lines[0] << (edge.reciprocal ? "  <->  " : "  ->  ") << nodes[edge.to].label.c_str();
+		lines[1] = EdgeLabel(edge);
+		if (!edge.type.empty())
+			lines[1] << (lines[1].IsEmpty() ? "" : "  ") << "(" << ShortTypeName(edge.type) << ")";
+		lines[2] = "Double click: its relations";
+		lineCount = 3;
+	}
+	if (lineCount > 0) {
 		float width = 0;
-		for (const char* line : lines)
-			width = std::max(width, font.StringWidth(line));
+		for (int line = 0; line < lineCount; line++)
+			width = std::max(width, font.StringWidth(lines[line].String()));
 		float lineHeight = height.ascent + height.descent + height.leading + 1;
-		BRect box(fMouse.x + 14, fMouse.y + 14, fMouse.x + 14 + width + 12, fMouse.y + 14 + lineHeight * 3 + 8);
+		BRect box(fMouse.x + 14, fMouse.y + 14, fMouse.x + 14 + width + 12, fMouse.y + 14 + lineHeight * lineCount + 8);
 		if (box.right > Bounds().right)
 			box.OffsetBy(Bounds().right - box.right - 4, 0);
 		if (box.bottom > Bounds().bottom)
@@ -437,8 +543,8 @@ GraphView::Draw(BRect)
 		SetHighColor(fDark ? Color({0x55, 0x5b, 0x66}) : tint_color(ui_color(B_TOOL_TIP_BACKGROUND_COLOR), B_DARKEN_3_TINT));
 		StrokeRoundRect(box, 3, 3);
 		SetHighColor(fDark ? textColor : ui_color(B_TOOL_TIP_TEXT_COLOR));
-		for (int line = 0; line < 3; line++)
-			DrawString(lines[line], BPoint(box.left + 6, box.top + 4 + height.ascent + line * lineHeight));
+		for (int line = 0; line < lineCount; line++)
+			DrawString(lines[line].String(), BPoint(box.left + 6, box.top + 4 + height.ascent + line * lineHeight));
 	}
 }
 
@@ -527,6 +633,9 @@ GraphWindow::MessageReceived(BMessage* message)
 			break;
 		case kOpenNode:
 			_Open(message);
+			break;
+		case kOpenRelations:
+			_OpenRelations(message);
 			break;
 		case kSave:
 		case B_SAVE_REQUESTED:
@@ -641,7 +750,7 @@ GraphWindow::_Done(BMessage* message)
 		<< static_cast<int32>(result->shown.Edges().size()) << " relations";
 	if (fTruncated)
 		status << " (the first " << static_cast<int32>(kMaxObjects) << " of " << fObjects << " objects were read)";
-	status << ".  Click: select, double click: open, wheel: zoom, F: fit.";
+	status << ".  Click: select, double click: open (a line: its relations), wheel: zoom, F: fit.";
 	fStatus->SetText(status.String());
 	delete result;
 }
@@ -656,6 +765,22 @@ GraphWindow::_Open(const BMessage* message)
 	// as a double click in Tracker does (what Akita shows for an ontology or an entity is what it does then)
 	BMessage open(B_REFS_RECEIVED);
 	open.AddRef("refs", &found->second);
+	BMessenger(kTrackerSignature).SendMessage(&open);
+}
+
+
+void
+GraphWindow::_OpenRelations(const BMessage* message)
+{
+	auto found = fRefs.find(message->GetString("id", ""));
+	if (found == fRefs.end())
+		return;
+	// Akita shows the folder of the relations of that type of the file (as the menu Open related... does), or all of them if the type is not known
+	const char* type = message->GetString("type", "");
+	BMessage open(type[0] != '\0' ? sen::cmd::kOpenRelationsOfType : sen::cmd::kOpenAllRelationsView);
+	open.AddRef(sen::key::kSourceRef, &found->second);
+	if (type[0] != '\0')
+		open.AddString(sen::key::kRelationType, type);
 	BMessenger(kTrackerSignature).SendMessage(&open);
 }
 

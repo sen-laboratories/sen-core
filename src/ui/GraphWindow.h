@@ -39,6 +39,7 @@ private:
 	void			_Start(bool collect);
 	void			_Done(BMessage* message);
 	void			_Open(const BMessage* message);
+	void			_OpenRelations(const BMessage* message);
 	void			_Save(const BMessage* message);
 	static int32	_WorkEntry(void* data);
 
