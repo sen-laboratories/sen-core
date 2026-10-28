@@ -16,8 +16,10 @@ SRCS := src/relations/RelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \
 	src/server/Cli.cpp \
 	src/deskbar/DeskbarView.cpp \
+	src/graph/GraphData.cpp \
 	src/ui/AboutWindow.cpp \
 	src/ui/CheckWindow.cpp \
+	src/ui/GraphWindow.cpp \
 	src/ui/FileTypesLink.cpp \
 	src/ui/InfoWindow.cpp \
 	src/ui/Knot.cpp \

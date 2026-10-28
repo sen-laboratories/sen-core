@@ -7,6 +7,7 @@
 
 #include "AboutWindow.h"
 #include "CheckWindow.h"
+#include "GraphWindow.h"
 #include "InfoWindow.h"
 #include "QueryFiles.h"
 #include "../stats/SenStats.h"
@@ -77,6 +78,9 @@ SenUi::Handle(BMessage* message)
 		case sen::cmd::kUiOpenObjects:
 			_OpenObjects();
 			return true;
+		case sen::cmd::kUiOpenGraph:
+			_Show(&fGraph, &SenUi::_MakeGraph, 'GWac');
+			return true;
 		case sen::cmd::kUiOpenClassification:
 			_OpenClassification(message);
 			return true;
@@ -126,7 +130,7 @@ SenUi::Handle(BMessage* message)
 void
 SenUi::CloseWindows()
 {
-	BMessenger* windows[] = {&fInfo, &fCheck, &fSettings, &fAbout};
+	BMessenger* windows[] = {&fInfo, &fCheck, &fSettings, &fAbout, &fGraph};
 	for (BMessenger* window : windows) {
 		if (window->IsValid())
 			window->SendMessage(B_QUIT_REQUESTED);
@@ -153,6 +157,7 @@ BWindow* SenUi::_MakeInfo() { return new InfoWindow(); }
 BWindow* SenUi::_MakeCheck() { return new CheckWindow(); }
 BWindow* SenUi::_MakeSettings() { return new SettingsWindow(fConfig); }
 BWindow* SenUi::_MakeAbout() { return new AboutWindow(); }
+BWindow* SenUi::_MakeGraph() { return new GraphWindow(); }
 
 
 // ---- queries

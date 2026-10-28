@@ -1,0 +1,674 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 SEN Labs e.U.
+ */
+
+#include "GraphWindow.h"
+
+#include "../graph/GraphData.h"
+
+#include <Alert.h>
+#include <Button.h>
+#include <CheckBox.h>
+#include <Directory.h>
+#include <File.h>
+#include <FilePanel.h>
+#include <Font.h>
+#include <LayoutBuilder.h>
+#include <Messenger.h>
+#include <NodeInfo.h>
+#include <StringView.h>
+#include <View.h>
+
+#include <math.h>
+#include <string.h>
+
+#include <algorithm>
+#include <vector>
+
+namespace sen {
+namespace ui {
+
+using sen::graph::Edge;
+using sen::graph::Node;
+
+static const uint32 kRefresh = 'GWrf';
+static const uint32 kFilter = 'GWfl';
+static const uint32 kSave = 'GWsv';
+static const uint32 kWorkDone = 'GWdn';
+static const uint32 kOpenNode = 'GWop';
+static const uint32 kActivate = 'GWac';
+
+/** the most objects that are shown (the layout and the drawing are made for some thousands, not more) */
+static const size_t kMaxObjects = 2000;
+
+static const char* const kTrackerSignature = "application/x-vnd.Be-TRAK";
+
+
+static rgb_color
+ColorOf(const std::string& group)
+{
+	sen::graph::Rgb color = sen::graph::GroupColor(group);
+	rgb_color result = {color.r, color.g, color.b, 255};
+	return result;
+}
+
+
+static BString
+EdgeLabel(const Edge& edge)
+{
+	BString label(edge.label.c_str());
+	if (edge.reciprocal && !edge.inverseLabel.empty() && edge.inverseLabel != edge.label) {
+		if (!label.IsEmpty())
+			label << " / ";
+		label << edge.inverseLabel.c_str();
+	}
+	return label;
+}
+
+
+// ---- the view
+
+/** The graph, drawn: moved by dragging, zoomed with the wheel, a click selects a node, a double click asks to open it. */
+class GraphView : public BView {
+public:
+	GraphView()
+		:
+		BView("graph", B_WILL_DRAW | B_FRAME_EVENTS | B_FULL_UPDATE_ON_RESIZE | B_NAVIGABLE),
+		fScale(1),
+		fOffset(0, 0),
+		fNeedFit(true),
+		fHover(-1),
+		fSelected(-1),
+		fDragging(false)
+	{
+		SetViewColor(B_TRANSPARENT_COLOR);
+		SetExplicitMinSize(BSize(400, 300));
+	}
+
+	void SetGraph(const sen::graph::Graph& graph)
+	{
+		fGraph = graph;
+		fHover = fSelected = -1;
+		fNeighbors.assign(fGraph.Nodes().size(), false);
+		fNeedFit = true;
+		Invalidate();
+	}
+
+	void SetMessage(const char* text)
+	{
+		fMessage = text;
+		Invalidate();
+	}
+
+	const sen::graph::Graph& Graph() const { return fGraph; }
+
+	virtual void AttachedToWindow()
+	{
+		BView::AttachedToWindow();
+		SetFlags(Flags() | B_SUBPIXEL_PRECISE);
+		MakeFocus(true);
+	}
+
+	virtual void Draw(BRect updateRect);
+
+	virtual void MouseDown(BPoint where)
+	{
+		MakeFocus(true);
+		BMessage* current = Window()->CurrentMessage();
+		uint32 buttons = current->GetInt32("buttons", 0);
+		if ((buttons & B_PRIMARY_MOUSE_BUTTON) == 0)
+			return;
+
+		int32 node = _NodeAt(where);
+		_Select(node);
+		if (node >= 0 && current->GetInt32("clicks", 1) >= 2) {
+			BMessage open(kOpenNode);
+			open.AddString("id", fGraph.Nodes()[node].id.c_str());
+			Window()->PostMessage(&open);
+		}
+		fDragging = true;
+		fLast = where;
+		SetMouseEventMask(B_POINTER_EVENTS, B_NO_POINTER_HISTORY);
+	}
+
+	virtual void MouseUp(BPoint)
+	{
+		fDragging = false;
+	}
+
+	virtual void MouseMoved(BPoint where, uint32, const BMessage*)
+	{
+		if (fDragging) {
+			fOffset.x += where.x - fLast.x;
+			fOffset.y += where.y - fLast.y;
+			fLast = where;
+			Invalidate();
+			return;
+		}
+		int32 node = _NodeAt(where);
+		if (node != fHover || node >= 0) {
+			fHover = node;
+			fMouse = where;
+			Invalidate();
+		}
+	}
+
+	virtual void MessageReceived(BMessage* message)
+	{
+		float delta;
+		if (message->what == B_MOUSE_WHEEL_CHANGED && message->FindFloat("be:wheel_delta_y", &delta) == B_OK) {
+			BPoint where;
+			uint32 buttons;
+			GetMouse(&where, &buttons, false);
+			_Zoom(where, powf(1.15f, -delta));
+			return;
+		}
+		BView::MessageReceived(message);
+	}
+
+	virtual void KeyDown(const char* bytes, int32 count)
+	{
+		if (count != 1) {
+			BView::KeyDown(bytes, count);
+			return;
+		}
+		switch (bytes[0]) {
+			case 'f':
+			case 'F':
+				fNeedFit = true;
+				Invalidate();
+				break;
+			case '+':
+			case '=':
+				_Zoom(BPoint(Bounds().Width() / 2, Bounds().Height() / 2), 1.25f);
+				break;
+			case '-':
+				_Zoom(BPoint(Bounds().Width() / 2, Bounds().Height() / 2), 0.8f);
+				break;
+			default:
+				BView::KeyDown(bytes, count);
+		}
+	}
+
+private:
+	BPoint _ToView(const Node& node) const
+	{
+		return BPoint(node.x * fScale + fOffset.x, node.y * fScale + fOffset.y);
+	}
+
+	/** the size of a node on the screen: the zoom does not make the nodes as big as the distances */
+	float _Radius(const Node& node) const
+	{
+		return sen::graph::NodeRadius(node.degree) * std::min(std::max(fScale, 0.7f), 1.6f);
+	}
+
+	int32 _NodeAt(BPoint where) const
+	{
+		const std::vector<Node>& nodes = fGraph.Nodes();
+		int32 found = -1;
+		float best = 1e9f;
+		for (size_t i = 0; i < nodes.size(); i++) {
+			BPoint at = _ToView(nodes[i]);
+			float distance = hypotf(at.x - where.x, at.y - where.y);
+			if (distance <= _Radius(nodes[i]) + 3 && distance < best) {
+				best = distance;
+				found = static_cast<int32>(i);
+			}
+		}
+		return found;
+	}
+
+	void _Select(int32 node)
+	{
+		fSelected = node;
+		fNeighbors.assign(fGraph.Nodes().size(), false);
+		if (node >= 0) {
+			for (const Edge& edge : fGraph.Edges()) {
+				if (edge.from == node)
+					fNeighbors[edge.to] = true;
+				else if (edge.to == node)
+					fNeighbors[edge.from] = true;
+			}
+		}
+		Invalidate();
+	}
+
+	void _Zoom(BPoint where, float factor)
+	{
+		float scale = std::min(std::max(fScale * factor, 0.05f), 6.0f);
+		factor = scale / fScale;
+		fOffset.x = where.x - (where.x - fOffset.x) * factor;
+		fOffset.y = where.y - (where.y - fOffset.y) * factor;
+		fScale = scale;
+		Invalidate();
+	}
+
+	void _Fit()
+	{
+		float left, top, right, bottom;
+		fGraph.Bounds(&left, &top, &right, &bottom);
+		const float margin = 50;
+		BRect bounds(Bounds());
+		float width = std::max(right - left, 1.0f), height = std::max(bottom - top, 1.0f);
+		fScale = std::min(std::max(bounds.Width() - 2 * margin, 50.0f) / width, std::max(bounds.Height() - 2 * margin, 50.0f) / height);
+		fScale = std::min(fScale, 2.5f);
+		fOffset.x = bounds.Width() / 2 - (left + width / 2) * fScale;
+		fOffset.y = bounds.Height() / 2 - (top + height / 2) * fScale;
+		fNeedFit = false;
+	}
+
+	sen::graph::Graph	fGraph;
+	std::vector<bool>	fNeighbors;		///< the nodes that the selected one is connected to
+	BString				fMessage;
+	float				fScale;
+	BPoint				fOffset;
+	bool				fNeedFit;
+	int32				fHover;
+	int32				fSelected;
+	BPoint				fMouse;
+	BPoint				fLast;
+	bool				fDragging;
+};
+
+
+void
+GraphView::Draw(BRect)
+{
+	const rgb_color background = ui_color(B_DOCUMENT_BACKGROUND_COLOR);
+	const rgb_color textColor = ui_color(B_DOCUMENT_TEXT_COLOR);
+	SetLowColor(background);
+	FillRect(Bounds(), B_SOLID_LOW);
+
+	BFont font(be_plain_font);
+	font.SetSize(10);
+	SetFont(&font);
+	font_height height;
+	font.GetHeight(&height);
+
+	const std::vector<Node>& nodes = fGraph.Nodes();
+	if (nodes.empty()) {
+		SetHighColor(tint_color(textColor, B_LIGHTEN_1_TINT));
+		BRect bounds(Bounds());
+		BString text(fMessage.IsEmpty() ? "No objects with relations" : fMessage.String());
+		DrawString(text.String(), BPoint((bounds.Width() - font.StringWidth(text.String())) / 2, bounds.Height() / 2));
+		return;
+	}
+
+	if (fNeedFit)
+		_Fit();
+
+	SetDrawingMode(B_OP_ALPHA);
+	SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
+
+	const bool selecting = fSelected >= 0;
+	const bool manyNodes = nodes.size() > 60;
+	const std::vector<Edge>& edges = fGraph.Edges();
+
+	// the edges: a line to the rim of the node, an arrow if the relation is in one direction only
+	for (const Edge& edge : edges) {
+		const bool active = !selecting || edge.from == fSelected || edge.to == fSelected;
+		const Node& from = nodes[edge.from];
+		const Node& to = nodes[edge.to];
+		BPoint a = _ToView(from), b = _ToView(to);
+		float dx = b.x - a.x, dy = b.y - a.y;
+		float length = std::max(hypotf(dx, dy), 0.01f);
+		dx /= length;
+		dy /= length;
+		const float startRadius = _Radius(from), endRadius = _Radius(to) + (edge.reciprocal ? 0 : 1);
+		BPoint start(a.x + dx * startRadius, a.y + dy * startRadius), end(b.x - dx * endRadius, b.y - dy * endRadius);
+
+		rgb_color color = tint_color(background, edge.meta ? B_DARKEN_1_TINT : B_DARKEN_3_TINT);
+		if (selecting && active)
+			color = tint_color(textColor, B_LIGHTEN_2_TINT);
+		color.alpha = active ? 255 : 50;
+		SetHighColor(color);
+		SetPenSize(selecting && active ? 2.0f : 1.2f);
+		StrokeLine(start, end);
+
+		if (!edge.reciprocal && length > startRadius + endRadius + 8) {
+			const float size = 7;
+			BPoint left(end.x - dx * size - dy * size / 2.5f, end.y - dy * size + dx * size / 2.5f);
+			BPoint right(end.x - dx * size + dy * size / 2.5f, end.y - dy * size - dx * size / 2.5f);
+			FillTriangle(end, left, right);
+		}
+	}
+
+	// the labels of the edges: all of them when there is room, else those of the selected node
+	for (const Edge& edge : edges) {
+		const bool emphasised = selecting && (edge.from == fSelected || edge.to == fSelected);
+		if (!emphasised && (selecting || (manyNodes && fScale < 1.2f) || fScale < 0.7f))
+			continue;
+		BString label = EdgeLabel(edge);
+		if (label.IsEmpty())
+			continue;
+		BPoint a = _ToView(nodes[edge.from]), b = _ToView(nodes[edge.to]);
+		float width = font.StringWidth(label.String());
+		BPoint at((a.x + b.x) / 2 - width / 2, (a.y + b.y) / 2 + height.ascent / 2 - 1);
+		rgb_color halo = background;
+		halo.alpha = 200;
+		SetHighColor(halo);
+		FillRect(BRect(at.x - 2, at.y - height.ascent, at.x + width + 2, at.y + height.descent));
+		SetHighColor(tint_color(textColor, emphasised ? B_NO_TINT : B_LIGHTEN_2_TINT));
+		DrawString(label.String(), at);
+	}
+
+	// the nodes
+	for (size_t i = 0; i < nodes.size(); i++) {
+		const Node& node = nodes[i];
+		const bool dimmed = selecting && static_cast<int32>(i) != fSelected && !fNeighbors[i];
+		const bool emphasised = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover;
+		BPoint at = _ToView(node);
+		float radius = _Radius(node) + (emphasised ? 2 : 0);
+
+		rgb_color color = ColorOf(node.group);
+		color.alpha = dimmed ? 70 : 255;
+		SetHighColor(color);
+		FillEllipse(at, radius, radius);
+		rgb_color ring = emphasised ? textColor : background;
+		ring.alpha = dimmed ? 70 : 255;
+		SetHighColor(ring);
+		SetPenSize(emphasised ? 2.0f : 1.2f);
+		StrokeEllipse(at, radius, radius);
+	}
+
+	// the names: of all the nodes when there are few or the view is zoomed in, else of the selected one, the ones it is connected to and the one under the mouse
+	for (size_t i = 0; i < nodes.size(); i++) {
+		const bool related = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover || (selecting && fNeighbors[i]);
+		if (!related && (selecting || (manyNodes && fScale < 1.0f) || fScale < 0.5f))
+			continue;
+		const Node& node = nodes[i];
+		BString label(node.label.c_str());
+		if (label.CountChars() > 28)
+			label.TruncateChars(27).Append(B_UTF8_ELLIPSIS);
+		BPoint at = _ToView(node);
+		float width = font.StringWidth(label.String());
+		BPoint where(at.x - width / 2, at.y + _Radius(node) + height.ascent + 2);
+		rgb_color halo = background;
+		halo.alpha = 210;
+		SetHighColor(halo);
+		FillRect(BRect(where.x - 2, where.y - height.ascent, where.x + width + 2, where.y + height.descent));
+		SetHighColor(textColor);
+		DrawString(label.String(), where);
+	}
+
+	// what is under the mouse
+	if (fHover >= 0) {
+		const Node& node = nodes[fHover];
+		BString name(node.label.c_str()), type(node.group.c_str());
+		BString count;
+		count << node.degree << (node.degree == 1 ? " relation" : " relations");
+		const char* lines[] = {name.String(), type.String(), count.String()};
+		float width = 0;
+		for (const char* line : lines)
+			width = std::max(width, font.StringWidth(line));
+		float lineHeight = height.ascent + height.descent + height.leading + 1;
+		BRect box(fMouse.x + 14, fMouse.y + 14, fMouse.x + 14 + width + 12, fMouse.y + 14 + lineHeight * 3 + 8);
+		if (box.right > Bounds().right)
+			box.OffsetBy(Bounds().right - box.right - 4, 0);
+		if (box.bottom > Bounds().bottom)
+			box.OffsetBy(0, Bounds().bottom - box.bottom - 4);
+		SetHighColor(ui_color(B_TOOL_TIP_BACKGROUND_COLOR));
+		FillRoundRect(box, 3, 3);
+		SetHighColor(tint_color(ui_color(B_TOOL_TIP_BACKGROUND_COLOR), B_DARKEN_3_TINT));
+		StrokeRoundRect(box, 3, 3);
+		SetHighColor(ui_color(B_TOOL_TIP_TEXT_COLOR));
+		for (int line = 0; line < 3; line++)
+			DrawString(lines[line], BPoint(box.left + 6, box.top + 4 + height.ascent + line * lineHeight));
+	}
+}
+
+
+// ---- the window
+
+struct WorkRequest {
+	BMessenger							target;
+	bool								collect;
+	bool								withMeta;
+	bool								withUnconnected;
+	sen::graph::Graph					all;
+	std::map<std::string, entry_ref>	refs;
+	bool								truncated;
+	int32								objects;
+};
+
+
+struct WorkResult {
+	sen::graph::Graph					shown;
+	sen::graph::Graph					all;
+	std::map<std::string, entry_ref>	refs;
+	bool								truncated;
+	int32								objects;
+	status_t							error;
+};
+
+
+GraphWindow::GraphWindow()
+	:
+	BWindow(BRect(100, 100, 1060, 740), "SEN Graph", B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
+	fSavePanel(NULL),
+	fWorking(false),
+	fTruncated(false),
+	fObjects(0)
+{
+	fView = new GraphView();
+	fMeta = new BCheckBox("meta", "Classifications and contexts", new BMessage(kFilter));
+	fUnconnected = new BCheckBox("unconnected", "Objects without relations", new BMessage(kFilter));
+	fRefresh = new BButton("refresh", "Refresh", new BMessage(kRefresh));
+	BButton* save = new BButton("save", "Save as SVG" B_UTF8_ELLIPSIS, new BMessage(kSave));
+	fStatus = new BStringView("status", "");
+
+	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_SMALL_SPACING)
+		.SetInsets(B_USE_WINDOW_INSETS)
+		.AddGroup(B_HORIZONTAL)
+			.Add(fMeta)
+			.Add(fUnconnected)
+			.AddGlue()
+			.Add(save)
+			.Add(fRefresh)
+		.End()
+		.Add(fView, 10.0f)
+		.Add(fStatus)
+	.End();
+
+	fView->SetMessage("Reading the objects" B_UTF8_ELLIPSIS);
+	_Start(true);
+}
+
+
+GraphWindow::~GraphWindow()
+{
+	delete fSavePanel;
+}
+
+
+void
+GraphWindow::MessageReceived(BMessage* message)
+{
+	switch (message->what) {
+		case kRefresh:
+			_Start(true);
+			break;
+		case kFilter:
+			_Start(false);
+			break;
+		case kWorkDone:
+			_Done(message);
+			break;
+		case kOpenNode:
+			_Open(message);
+			break;
+		case kSave:
+		case B_SAVE_REQUESTED:
+			_Save(message);
+			break;
+		case kActivate:
+			Activate();
+			break;
+		default:
+			BWindow::MessageReceived(message);
+	}
+}
+
+
+int32
+GraphWindow::_WorkEntry(void* data)
+{
+	WorkRequest* request = (WorkRequest*)data;
+	WorkResult* result = new WorkResult;
+	result->error = B_OK;
+	result->truncated = request->truncated;
+	result->objects = request->objects;
+
+	if (request->collect) {
+		sen::graph::Collected collected;
+		result->error = sen::graph::Collect(&collected, kMaxObjects);
+		result->all = collected.graph;
+		result->refs = collected.refs;
+		result->truncated = collected.truncated;
+		result->objects = collected.objects;
+	} else {
+		result->all = request->all;
+		result->refs = request->refs;
+	}
+
+	result->shown = result->all.Filtered(request->withMeta, request->withUnconnected);
+	result->shown.Layout();
+
+	BMessage done(kWorkDone);
+	done.AddPointer("result", result);
+	if (request->target.SendMessage(&done) != B_OK)
+		delete result;	// (the window is gone)
+	delete request;
+	return 0;
+}
+
+
+void
+GraphWindow::_Start(bool collect)
+{
+	if (fWorking)
+		return;
+	fWorking = true;
+	fRefresh->SetEnabled(false);
+	fStatus->SetText(collect ? "Reading the objects" B_UTF8_ELLIPSIS : "Laying out" B_UTF8_ELLIPSIS);
+
+	WorkRequest* request = new WorkRequest;
+	request->target = BMessenger(this);
+	request->collect = collect;
+	request->withMeta = fMeta->Value() == B_CONTROL_ON;
+	request->withUnconnected = fUnconnected->Value() == B_CONTROL_ON;
+	request->truncated = fTruncated;
+	request->objects = fObjects;
+	if (!collect) {
+		request->all = fAll;
+		request->refs = fRefs;
+	}
+
+	thread_id thread = spawn_thread(_WorkEntry, "SEN graph", B_LOW_PRIORITY, request);
+	if (thread >= 0)
+		resume_thread(thread);
+	else {
+		delete request;
+		fWorking = false;
+		fRefresh->SetEnabled(true);
+		fStatus->SetText("Could not start the thread");
+	}
+}
+
+
+void
+GraphWindow::_Done(BMessage* message)
+{
+	WorkResult* result = NULL;
+	if (message->FindPointer("result", (void**)&result) != B_OK || result == NULL)
+		return;
+	fWorking = false;
+	fRefresh->SetEnabled(true);
+
+	if (result->error != B_OK && result->all.Nodes().empty()) {
+		fView->SetGraph(sen::graph::Graph());
+		fView->SetMessage("The objects could not be read");
+		BString status("Could not read the objects: ");
+		status << strerror(result->error);
+		fStatus->SetText(status.String());
+		delete result;
+		return;
+	}
+
+	fAll = result->all;
+	fRefs = result->refs;
+	fTruncated = result->truncated;
+	fObjects = result->objects;
+
+	if (result->shown.Nodes().empty()) {
+		fView->SetMessage(result->all.Nodes().empty() ? "There are no objects yet" : "No object has a relation yet (see the choices above)");
+	}
+	fView->SetGraph(result->shown);
+
+	BString status;
+	status << static_cast<int32>(result->shown.Nodes().size()) << " of " << static_cast<int32>(fAll.Nodes().size()) << " objects, "
+		<< static_cast<int32>(result->shown.Edges().size()) << " relations";
+	if (fTruncated)
+		status << " (the first " << static_cast<int32>(kMaxObjects) << " of " << fObjects << " objects were read)";
+	status << ".  Click: select, double click: open, wheel: zoom, F: fit.";
+	fStatus->SetText(status.String());
+	delete result;
+}
+
+
+void
+GraphWindow::_Open(const BMessage* message)
+{
+	auto found = fRefs.find(message->GetString("id", ""));
+	if (found == fRefs.end())
+		return;
+	// as a double click in Tracker does (what Akita shows for an ontology or an entity is what it does then)
+	BMessage open(B_REFS_RECEIVED);
+	open.AddRef("refs", &found->second);
+	BMessenger(kTrackerSignature).SendMessage(&open);
+}
+
+
+void
+GraphWindow::_Save(const BMessage* message)
+{
+	if (message->what == kSave) {
+		if (fSavePanel == NULL) {
+			BMessenger target(this);
+			fSavePanel = new BFilePanel(B_SAVE_PANEL, &target, NULL, B_FILE_NODE, false);
+		}
+		fSavePanel->SetSaveText("sen-graph.svg");
+		fSavePanel->Show();
+		return;
+	}
+
+	entry_ref directory;
+	const char* name;
+	if (message->FindRef("directory", &directory) != B_OK || message->FindString("name", &name) != B_OK)
+		return;
+
+	const std::string svg = fView->Graph().ToSvg();
+	BDirectory folder(&directory);
+	BFile file(&folder, name, B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	status_t result = file.InitCheck();
+	if (result == B_OK) {
+		ssize_t written = file.Write(svg.data(), svg.size());
+		result = written == static_cast<ssize_t>(svg.size()) ? B_OK : (written < 0 ? written : B_ERROR);
+	}
+	if (result == B_OK) {
+		BNodeInfo(&file).SetType("image/svg+xml");
+		BString status("Saved as ");
+		status << name;
+		fStatus->SetText(status.String());
+	} else {
+		BString text("The graph could not be saved: ");
+		text << strerror(result);
+		BAlert* alert = new BAlert("SEN Graph", text.String(), "OK", NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+		alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+		alert->Go(NULL);
+	}
+}
+
+}	// namespace ui
+}	// namespace sen
