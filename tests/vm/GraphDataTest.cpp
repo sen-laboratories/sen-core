@@ -11,6 +11,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <FindDirectory.h>
+#include <Path.h>
+
+#include <sen/SenLookup.h>
+
 #include "../../src/graph/GraphData.h"
 
 static int failed = 0;
@@ -25,9 +30,37 @@ static int failed = 0;
 		} \
 	} while (0)
 
+/** the file of a type in the MIME database and an ordinary file are told apart by the SEN API (SenLookup.h) */
+static void
+CheckTypeFunctions()
+{
+	BPath settings;
+	find_directory(B_USER_SETTINGS_DIRECTORY, &settings);
+
+	BPath typeFile(settings.Path(), "mime_db/entity/x-vnd.sen-labs.entity.book");
+	entry_ref ref;
+	if (get_ref_for_path(typeFile.Path(), &ref) == B_OK) {
+		CHECK(sen::lookup::TypeOfDatabaseEntry(ref) == "entity/x-vnd.sen-labs.entity.book", "the file of a type stands for the type");
+		BNode node(&ref);
+		CHECK(sen::lookup::TypeOf(node) == "entity/x-vnd.sen-labs.entity.book", "the type of the file is its META:TYPE");
+	} else
+		printf("     (no entity/x-vnd.sen-labs.entity.book in the MIME database: not checked)\n");
+
+	BPath ontology(settings.Path(), "sen/ontologies/core");
+	if (get_ref_for_path(ontology.Path(), &ref) == B_OK) {
+		CHECK(sen::lookup::TypeOfDatabaseEntry(ref).empty(), "an ontology stands for no type (it has the type of ontologies)");
+		BNode node(&ref);
+		CHECK(sen::lookup::TypeOf(node) == "application/x-vnd.sen-labs.ontology", "the type of an ontology");
+	}
+
+	CHECK(sen::lookup::NameOfType("entity/x-vnd.sen-labs.entity.book") == "Book", "the name of a type is its short description");
+	CHECK(sen::lookup::NameOfType("application/x-vnd.no.such.type") == "application/x-vnd.no.such.type", "a type without a description is its own name");
+}
+
 int
 main(int argc, char**)
 {
+	CheckTypeFunctions();
 	sen::graph::Collected collected;
 	status_t result = sen::graph::Collect(&collected, 5000);
 	CHECK(result == B_OK, "the objects can be read");
