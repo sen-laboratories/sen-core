@@ -41,6 +41,7 @@ static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
 static const uint32 kOpenNode = 'GWop';
 static const uint32 kOpenRelations = 'GWor';
+static const uint32 kSelectNode = 'GWsl';
 static const uint32 kActivate = 'GWac';
 
 /** the most objects that are shown (the layout and the drawing are made for some thousands, not more) */
@@ -144,6 +145,12 @@ public:
 	const sen::graph::Graph& Graph() const { return fGraph; }
 
 	bool Dark() const { return fDark; }
+
+	/** select the node of an id (what a click does) */
+	void SelectId(const char* id)
+	{
+		_Select(fGraph.IndexOf(id));
+	}
 
 	void SetDark(bool dark)
 	{
@@ -446,24 +453,91 @@ GraphView::Draw(BRect)
 		}
 	}
 
-	// the labels of the edges: all of them when there is room, else those of the emphasised lines
+	// Which labels are drawn. The wanted ones are placed by their importance, and one that would lie on another that is placed is left out: the node that is
+	// selected or under the mouse, the nodes it is connected to, the selected line, then the lines of the selected node (if it has not many), the hubs,
+	// the rest.
+	std::vector<bool> edgeLabelShown(edges.size(), false), nodeLabelShown(nodes.size(), false);
+	std::vector<BString> nodeTexts(nodes.size()), edgeTexts(edges.size());
+	{
+		struct Candidate {
+			bool	isNode;
+			size_t	index;
+			int		priority;
+			BRect	rect;
+		};
+		std::vector<Candidate> candidates;
+		const int selectedDegree = selectingNode ? nodes[fSelected].degree : 0;
+
+		for (size_t i = 0; i < nodes.size(); i++) {
+			const Node& node = nodes[i];
+			const bool chosen = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover;
+			const bool related = selecting && fNeighbors[i];
+			bool wanted = chosen || related;
+			if (!wanted && !selecting)
+				wanted = !manyNodes || fScale >= 1.0f || (node.degree >= 3 && fScale >= 0.4f);
+			if (!wanted)
+				continue;
+			BString label(node.label.c_str());
+			if (label.CountChars() > 28)
+				label.TruncateChars(27).Append(B_UTF8_ELLIPSIS);
+			nodeTexts[i] = label;
+			const BPoint at = _ToView(node);
+			const float width = font.StringWidth(label.String());
+			const BPoint where(at.x - width / 2, at.y + _Radius(node) + height.ascent + 2);
+			Candidate candidate = {true, i, chosen ? 0 : (related ? 1 : (node.degree >= 3 ? 4 : 6)),
+				BRect(where.x - 2, where.y - height.ascent, where.x + width + 2, where.y + height.descent)};
+			candidates.push_back(candidate);
+		}
+
+		for (size_t index = 0; index < edges.size(); index++) {
+			const Edge& edge = edges[index];
+			const bool direct = static_cast<int32>(index) == fSelectedEdge || static_cast<int32>(index) == fHoverEdge;
+			const bool ofSelected = selectingNode && (edge.from == fSelected || edge.to == fSelected) && selectedDegree <= 8;
+			bool wanted = direct || ofSelected;
+			if (!wanted && !selecting)
+				wanted = !((manyNodes && fScale < 1.2f) || fScale < 0.7f);
+			if (!wanted)
+				continue;
+			BString label = EdgeLabel(edge);
+			if (label.IsEmpty())
+				continue;
+			edgeTexts[index] = label;
+			const BPoint a = _ToView(nodes[edge.from]), b = _ToView(nodes[edge.to]);
+			const float width = font.StringWidth(label.String());
+			const BPoint at((a.x + b.x) / 2 - width / 2, (a.y + b.y) / 2 + height.ascent / 2 - 1);
+			Candidate candidate = {false, index, direct ? 0 : (ofSelected ? 2 : 5),
+				BRect(at.x - 2, at.y - height.ascent, at.x + width + 2, at.y + height.descent)};
+			candidates.push_back(candidate);
+		}
+
+		std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.priority < b.priority; });
+		std::vector<BRect> placed;
+		for (const Candidate& candidate : candidates) {
+			bool free = Bounds().Intersects(candidate.rect);
+			for (size_t i = 0; free && i < placed.size(); i++)
+				free = !placed[i].Intersects(candidate.rect);
+			if (!free)
+				continue;
+			placed.push_back(candidate.rect);
+			(candidate.isNode ? nodeLabelShown : edgeLabelShown)[candidate.index] = true;
+		}
+	}
+
+	// the labels of the edges
 	for (size_t index = 0; index < edges.size(); index++) {
+		if (!edgeLabelShown[index])
+			continue;
 		const Edge& edge = edges[index];
 		const bool strong = selecting ? emphasised(index) : static_cast<int32>(index) == fHoverEdge;
-		if (!strong && (selecting || (manyNodes && fScale < 1.2f) || fScale < 0.7f))
-			continue;
-		BString label = EdgeLabel(edge);
-		if (label.IsEmpty())
-			continue;
 		BPoint a = _ToView(nodes[edge.from]), b = _ToView(nodes[edge.to]);
-		float width = font.StringWidth(label.String());
+		float width = font.StringWidth(edgeTexts[index].String());
 		BPoint at((a.x + b.x) / 2 - width / 2, (a.y + b.y) / 2 + height.ascent / 2 - 1);
 		rgb_color halo = background;
 		halo.alpha = 200;
 		SetHighColor(halo);
 		FillRect(BRect(at.x - 2, at.y - height.ascent, at.x + width + 2, at.y + height.descent));
 		SetHighColor(strong ? textColor : Color(palette.edgeText));
-		DrawString(label.String(), at);
+		DrawString(edgeTexts[index].String(), at);
 	}
 
 	// the nodes
@@ -475,38 +549,30 @@ GraphView::Draw(BRect)
 		float radius = _Radius(node) + (strong ? 2 : 0);
 
 		rgb_color color = Color(sen::graph::GroupColor(node.group, fDark));
-		color.alpha = dimmed ? 70 : 255;
+		color.alpha = dimmed ? 90 : 255;
 		SetHighColor(color);
 		FillEllipse(at, radius, radius);
 		rgb_color ring = strong ? Color(palette.emphasis) : background;
-		ring.alpha = dimmed ? 70 : 255;
+		ring.alpha = dimmed ? 90 : 255;
 		SetHighColor(ring);
 		SetPenSize(strong ? 2.0f : 1.2f);
 		StrokeEllipse(at, radius, radius);
 	}
 
-	// the names: of all the nodes when there are few or the view is zoomed in, of the nodes that have many relations (the hubs) when it is not, and
-	// always of the selected one, the ones it is connected to and the one under the mouse
+	// the names
 	for (size_t i = 0; i < nodes.size(); i++) {
-		const Node& node = nodes[i];
-		const bool related = static_cast<int32>(i) == fSelected || static_cast<int32>(i) == fHover || (selecting && fNeighbors[i]);
-		bool shown = related;
-		if (!shown && !selecting)
-			shown = !manyNodes || fScale >= 1.0f || (node.degree >= 3 && fScale >= 0.4f);
-		if (!shown)
+		if (!nodeLabelShown[i])
 			continue;
-		BString label(node.label.c_str());
-		if (label.CountChars() > 28)
-			label.TruncateChars(27).Append(B_UTF8_ELLIPSIS);
+		const Node& node = nodes[i];
 		BPoint at = _ToView(node);
-		float width = font.StringWidth(label.String());
+		float width = font.StringWidth(nodeTexts[i].String());
 		BPoint where(at.x - width / 2, at.y + _Radius(node) + height.ascent + 2);
 		rgb_color halo = background;
 		halo.alpha = 210;
 		SetHighColor(halo);
 		FillRect(BRect(where.x - 2, where.y - height.ascent, where.x + width + 2, where.y + height.descent));
 		SetHighColor(textColor);
-		DrawString(label.String(), where);
+		DrawString(nodeTexts[i].String(), where);
 	}
 
 	// what is under the mouse: a node, or a line
@@ -636,6 +702,9 @@ GraphWindow::MessageReceived(BMessage* message)
 			break;
 		case kOpenRelations:
 			_OpenRelations(message);
+			break;
+		case kSelectNode:
+			fView->SelectId(message->GetString("id", ""));
 			break;
 		case kSave:
 		case B_SAVE_REQUESTED:

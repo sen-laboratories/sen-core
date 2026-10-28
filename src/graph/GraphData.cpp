@@ -12,6 +12,7 @@
 #include <MimeType.h>
 #include <Node.h>
 #include <NodeInfo.h>
+#include <Path.h>
 #include <String.h>
 #include <fs_attr.h>
 
@@ -45,6 +46,30 @@ TypeOf(BNode& node)
 	if (BNodeInfo(&node).GetType(mime) == B_OK)
 		return mime;
 	return "";
+}
+
+static const char kMetaMimeType[] = "application/x-vnd.Be-meta-mime";
+
+/**
+ * What a file in the MIME database (the file of a type: the entities, relations... that the ontologies define) is called: the type that it stands for, in words
+ * ("Music album", not "x-vnd.sen-labs.entity.music.album"), and what kind of type it is as the group.
+ */
+bool
+NameOfTypeFile(const entry_ref& ref, BNode& node, std::string* label, std::string* group)
+{
+	// (the file of a type has the semantic type that it stands for as META:TYPE: its own type is the one of the MIME database)
+	char fileType[B_MIME_TYPE_LENGTH];
+	if (BNodeInfo(&node).GetType(fileType) != B_OK || strcmp(fileType, kMetaMimeType) != 0)
+		return false;
+	BPath path(&ref), parent;
+	if (path.InitCheck() != B_OK || path.GetParent(&parent) != B_OK || parent.Leaf() == NULL)
+		return false;
+	const std::string supertype = parent.Leaf();
+	char shortName[B_MIME_TYPE_LENGTH];
+	if (BMimeType((supertype + "/" + ref.name).c_str()).GetShortDescription(shortName) == B_OK && shortName[0] != '\0')
+		*label = shortName;
+	*group = "type: " + supertype;
+	return true;
 }
 
 /** The relations in SEN:REL:* of a file: for each target (a field named by its SEN:ID) the type and the label of the first relation. */
@@ -121,7 +146,9 @@ Collect(Collected* collected, size_t maxObjects)
 			continue;
 		if (collected->refs.count(id.String()) != 0)
 			continue;	// (two files with one id: the first is the object)
-		collected->graph.AddNode(id.String(), ref.name, TypeOf(node));
+		std::string type = TypeOf(node), label = ref.name, group = type;
+		NameOfTypeFile(ref, node, &label, &group);
+		collected->graph.AddNode(id.String(), label, group);
 		collected->refs[id.String()] = ref;
 	}
 
