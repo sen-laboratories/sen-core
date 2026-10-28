@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <sen/Sen.h>
+#include <sen/SenLookup.h>
 
 #include <spdlog/spdlog.h>
 
@@ -36,46 +37,24 @@ struct RelationInfo {
 	std::string	label;	// the label of the relation itself, if it has one
 };
 
-/** the type of a file for its colour: the semantic type if it has one, else its MIME type */
-std::string
-TypeOf(BNode& node)
-{
-	BString type;
-	if (node.ReadAttrString("META:TYPE", &type) == B_OK && !type.IsEmpty())
-		return type.String();
-	char mime[B_MIME_TYPE_LENGTH];
-	if (BNodeInfo(&node).GetType(mime) == B_OK)
-		return mime;
-	return "";
-}
-
 /**
- * What a file in the MIME database (the file of a type: the entities, relations... that the ontologies define) is called: the type that it stands for, in words
- * ("Music album", not "x-vnd.sen-labs.entity.music.album"), and what kind of type it is as the group. The files of the types have no type of their own
- * (the semantic type that a file stands for is its META:TYPE): they are known by where they are, as the navigator of SENSEI knows them.
+ * The label and the group of the node of a file. A file of the MIME database stands for a type (the entities, relations... that the ontologies define): it
+ * is named as the type is ("Music album", not "x-vnd.sen-labs.entity.music.album") and its group is what kind of type it is. Any other file is named
+ * like the file and grouped by its type.
  */
-bool
-NameOfTypeFile(const entry_ref& ref, std::string* label, std::string* group)
+void
+NameOfNode(const entry_ref& ref, BNode& node, std::string* label, std::string* group)
 {
-	BPath settings, path(&ref);
-	if (find_directory(B_USER_SETTINGS_DIRECTORY, &settings) != B_OK || settings.Append("mime_db") != B_OK || path.InitCheck() != B_OK)
-		return false;
-
-	const std::string database = std::string(settings.Path()) + "/";
-	const std::string location = path.Path();
-	if (location.compare(0, database.length(), database) != 0)
-		return false;
-
-	const std::string type = location.substr(database.length());	// "entity/x-vnd.sen-labs.entity.music.album"
-	const size_t slash = type.find('/');
-	if (slash == std::string::npos)
-		return false;
-
-	char shortName[B_MIME_TYPE_LENGTH];
-	if (BMimeType(type.c_str()).GetShortDescription(shortName) == B_OK && shortName[0] != '\0')
-		*label = shortName;
-	*group = "type: " + type.substr(0, slash);
-	return true;
+	const std::string stands = sen::lookup::TypeOfDatabaseEntry(ref);
+	if (!stands.empty()) {
+		*label = sen::lookup::NameOfType(stands.c_str());
+		if (*label == stands)
+			*label = ref.name;	// (a type without a description)
+		*group = "type: " + stands.substr(0, stands.find('/'));
+		return;
+	}
+	*label = ref.name;
+	*group = sen::lookup::TypeOf(node);
 }
 
 /** The relations in SEN:REL:* of a file: for each target (a field named by its SEN:ID) the type and the label of the first relation. */
@@ -152,8 +131,8 @@ Collect(Collected* collected, size_t maxObjects)
 			continue;
 		if (collected->refs.count(id.String()) != 0)
 			continue;	// (two files with one id: the first is the object)
-		std::string type = TypeOf(node), label = ref.name, group = type;
-		NameOfTypeFile(ref, &label, &group);
+		std::string label, group;
+		NameOfNode(ref, node, &label, &group);
 		collected->graph.AddNode(id.String(), label, group);
 		collected->refs[id.String()] = ref;
 	}
