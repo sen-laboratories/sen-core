@@ -17,6 +17,7 @@
 #include <LayoutBuilder.h>
 #include <Messenger.h>
 #include <NodeInfo.h>
+#include <ScrollBar.h>
 #include <StringView.h>
 #include <View.h>
 
