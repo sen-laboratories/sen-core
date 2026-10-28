@@ -641,7 +641,7 @@ struct WorkResult {
 
 GraphWindow::GraphWindow()
 	:
-	BWindow(BRect(100, 100, 1060, 740), "SEN Graph", B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
+	BWindow(BRect(100, 100, 1060, 740), "SEN Graph", B_DOCUMENT_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
 	fSavePanel(NULL),
 	fWorking(false),
 	fTruncated(false),
@@ -667,7 +667,11 @@ GraphWindow::GraphWindow()
 			.Add(fRefresh)
 		.End()
 		.Add(fView, 10.0f)
-		.Add(fStatus)
+		.AddGroup(B_HORIZONTAL, 0)
+			.Add(fStatus)
+			.AddGlue()
+			.AddStrut(B_V_SCROLL_BAR_WIDTH)	// (the resize handle of a document window is in the corner)
+		.End()
 	.End();
 
 	fView->SetMessage("Reading the objects" B_UTF8_ELLIPSIS);
