@@ -117,6 +117,8 @@ public:
 		fScale(1),
 		fOffset(0, 0),
 		fNeedFit(true),
+		fAutoFit(true),
+		fSize(0, 0),
 		fHover(-1),
 		fSelected(-1),
 		fHoverEdge(-1),
@@ -134,6 +136,7 @@ public:
 		fHover = fSelected = fHoverEdge = fSelectedEdge = -1;
 		fNeighbors.assign(fGraph.Nodes().size(), false);
 		fNeedFit = true;
+		fAutoFit = true;
 		Invalidate();
 	}
 
@@ -164,6 +167,7 @@ public:
 		BView::AttachedToWindow();
 		SetFlags(Flags() | B_SUBPIXEL_PRECISE);
 		MakeFocus(true);
+		fSize = BSize(Bounds().Width(), Bounds().Height());
 	}
 
 	virtual void Draw(BRect updateRect);
@@ -209,9 +213,12 @@ public:
 		fDragging = false;
 	}
 
-	virtual void MouseMoved(BPoint where, uint32, const BMessage*)
+	virtual void MouseMoved(BPoint where, uint32 transit, const BMessage*)
 	{
+		if (transit == B_ENTERED_VIEW && !IsFocus())
+			MakeFocus(true);	// (the keys, +, - and F, are for the graph when the mouse is over it)
 		if (fDragging) {
+			fAutoFit = false;
 			fOffset.x += where.x - fLast.x;
 			fOffset.y += where.y - fLast.y;
 			fLast = where;
@@ -231,15 +238,40 @@ public:
 
 	virtual void MessageReceived(BMessage* message)
 	{
-		float delta;
-		if (message->what == B_MOUSE_WHEEL_CHANGED && message->FindFloat("be:wheel_delta_y", &delta) == B_OK) {
-			BPoint where;
-			uint32 buttons;
-			GetMouse(&where, &buttons, false);
-			_Zoom(where, powf(1.15f, -delta));
+		if (message->what == B_MOUSE_WHEEL_CHANGED && Wheel(message))
 			return;
-		}
 		BView::MessageReceived(message);
+	}
+
+	/** The wheel zooms (around the mouse); false if the message turns nothing. */
+	bool Wheel(const BMessage* message)
+	{
+		float delta = 0;
+		int32 steps;
+		if (message->FindFloat("be:wheel_delta_y", &delta) != B_OK && message->FindInt32("be:wheel_delta_y", &steps) == B_OK)
+			delta = steps;
+		if (delta == 0)
+			return false;
+		BPoint where;
+		uint32 buttons;
+		GetMouse(&where, &buttons, false);
+		if (!Bounds().Contains(where))
+			where = BPoint(Bounds().Width() / 2, Bounds().Height() / 2);
+		_Zoom(where, powf(1.15f, -delta));
+		return true;
+	}
+
+	/** A view that has been resized shows what it showed: the whole graph again if it was fitted, else around the same middle. */
+	virtual void FrameResized(float width, float height)
+	{
+		BView::FrameResized(width, height);
+		if (fSize.width > 0 && !fAutoFit) {
+			fOffset.x += (width - fSize.width) / 2;
+			fOffset.y += (height - fSize.height) / 2;
+		} else if (fAutoFit)
+			fNeedFit = true;
+		fSize = BSize(width, height);
+		Invalidate();
 	}
 
 	virtual void KeyDown(const char* bytes, int32 count)
@@ -345,6 +377,7 @@ private:
 	{
 		float scale = std::min(std::max(fScale * factor, 0.05f), 6.0f);
 		factor = scale / fScale;
+		fAutoFit = false;
 		fOffset.x = where.x - (where.x - fOffset.x) * factor;
 		fOffset.y = where.y - (where.y - fOffset.y) * factor;
 		fScale = scale;
@@ -363,6 +396,7 @@ private:
 		fOffset.x = bounds.Width() / 2 - (left + width / 2) * fScale;
 		fOffset.y = bounds.Height() / 2 - (top + height / 2) * fScale;
 		fNeedFit = false;
+		fAutoFit = true;
 	}
 
 	sen::graph::Graph	fGraph;
@@ -371,6 +405,8 @@ private:
 	float				fScale;
 	BPoint				fOffset;
 	bool				fNeedFit;
+	bool				fAutoFit;		///< the graph is fitted into the view, and stays so when the view is resized (until it is zoomed or moved)
+	BSize				fSize;
 	int32				fHover;
 	int32				fSelected;
 	int32				fHoverEdge;
@@ -683,6 +719,21 @@ GraphWindow::GraphWindow()
 GraphWindow::~GraphWindow()
 {
 	delete fSavePanel;
+}
+
+
+void
+GraphWindow::DispatchMessage(BMessage* message, BHandler* handler)
+{
+	// the wheel goes to the view that has the focus (a checkbox at first), not to the one under the mouse: it zooms the graph when the mouse is over it
+	if (message->what == B_MOUSE_WHEEL_CHANGED && fView != NULL) {
+		BPoint where;
+		uint32 buttons;
+		fView->GetMouse(&where, &buttons, false);
+		if (fView->Bounds().Contains(where) && fView->Wheel(message))
+			return;
+	}
+	BWindow::DispatchMessage(message, handler);
 }
 
 

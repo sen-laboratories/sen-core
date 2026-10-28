@@ -33,6 +33,7 @@ public:
 					GraphWindow();
 	virtual			~GraphWindow();
 
+	virtual void	DispatchMessage(BMessage* message, BHandler* handler);
 	virtual void	MessageReceived(BMessage* message);
 
 private:
