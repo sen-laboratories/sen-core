@@ -184,6 +184,7 @@ public:
 			if (fSelected >= 0) {
 				sen::graph::Graph part = fGraph.Neighborhood(fSelected);
 				options.selectedNode = part.IndexOf(fGraph.Nodes()[fSelected].id);
+				options.edgeLabels = part.Edges().size() <= 8;	// (as in the view: the labels of many lines lie on each other, the names of the nodes tell more)
 				return part.ToSvg(options);
 			}
 			if (fSelectedEdge >= 0) {
@@ -782,7 +783,7 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 	// dark or light as it was chosen last time (a field of the settings), else as the colours of the system are
 	bool dark = false;
 	BMessage settings;
-	if (fConfig != NULL && fConfig->GetConfig(&settings) == B_OK && settings.FindBool(sen::key::kGraphDark, &dark) == B_OK)
+	if (fConfig != NULL && fConfig->GetConfig(&settings) == B_OK && settings.FindBool(sen::key::kDarkMode, &dark) == B_OK)
 		fView->SetDark(dark);
 	fDark->SetValue(fView->Dark() ? B_CONTROL_ON : B_CONTROL_OFF);
 	fRefresh = new BButton("refresh", "Refresh", new BMessage(kRefresh));
@@ -852,7 +853,7 @@ GraphWindow::MessageReceived(BMessage* message)
 			fView->SetDark(dark);
 			if (fConfig != NULL) {
 				BMessage change;
-				change.AddBool(sen::key::kGraphDark, dark);
+				change.AddBool(sen::key::kDarkMode, dark);
 				fConfig->UpdateSettings(&change);	// (remembered: the next window is as this one)
 			}
 			break;
