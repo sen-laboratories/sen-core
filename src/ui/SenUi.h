@@ -40,6 +40,7 @@ private:
 	BWindow*		_MakeGraph();
 
 	void			_OpenObjects();
+	void			_OpenGraph(const BMessage* message);
 	void			_OpenClassification(const BMessage* message);
 	void			_OpenClassified(const BMessage* message);
 	void			_OpenPlugins();

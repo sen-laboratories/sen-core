@@ -22,6 +22,9 @@ namespace ui {
 
 class GraphView;
 
+/** to the window: centre the graph on a file (refs) */
+static const uint32 kGraphFocus = 'GWfo';
+
 /**
  * The window of the Graph item of the Deskbar menu (also the Knot with the SEN key): the objects of SEN as the nodes of a graph and their relations as its
  * edges, laid out by SenGraph.h. The objects are read in a thread of their own (see graph::Collect()). A click selects an object (its relations are
@@ -40,6 +43,7 @@ private:
 	void			_Start(bool collect);
 	void			_Done(BMessage* message);
 	void			_Open(const BMessage* message);
+	void			_ApplyFocus();
 	void			_OpenRelations(const BMessage* message);
 	void			_Save(const BMessage* message);
 	static int32	_WorkEntry(void* data);
@@ -57,6 +61,8 @@ private:
 	std::map<std::string, entry_ref>	fRefs;
 	bool							fTruncated;
 	int32							fObjects;
+	bool							fHasFocus;	///< a file to centre the graph on, as soon as the graph is there
+	entry_ref						fFocusRef;
 };
 
 }	// namespace ui

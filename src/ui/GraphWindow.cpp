@@ -150,6 +150,22 @@ public:
 
 	bool Dark() const { return fDark; }
 
+	/** Select the node of an id and put it in the middle of the view, zoomed in a little. */
+	void Focus(const char* id)
+	{
+		const int32 node = fGraph.IndexOf(id);
+		if (node < 0)
+			return;
+		_Select(node);
+		fScale = std::max(fScale, 1.4f);
+		fAutoFit = false;
+		fNeedFit = false;
+		const BRect bounds(Bounds());
+		fOffset.x = bounds.Width() / 2 - fGraph.Nodes()[node].x * fScale;
+		fOffset.y = bounds.Height() / 2 - fGraph.Nodes()[node].y * fScale;
+		Invalidate();
+	}
+
 	/** select the node of an id (what a click does) */
 	void SelectId(const char* id)
 	{
@@ -682,7 +698,8 @@ GraphWindow::GraphWindow()
 	fSavePanel(NULL),
 	fWorking(false),
 	fTruncated(false),
-	fObjects(0)
+	fObjects(0),
+	fHasFocus(false)
 {
 	fView = new GraphView();
 	fMeta = new BCheckBox("meta", "Classifications and contexts", new BMessage(kFilter));
@@ -761,6 +778,12 @@ GraphWindow::MessageReceived(BMessage* message)
 			break;
 		case kSelectNode:
 			fView->SelectId(message->GetString("id", ""));
+			break;
+		case kGraphFocus:
+			if (message->FindRef("refs", &fFocusRef) == B_OK) {
+				fHasFocus = true;
+				_ApplyFocus();	// (at once if the graph is there, else when it is)
+			}
 			break;
 		case kSave:
 		case B_SAVE_REQUESTED:
@@ -878,6 +901,44 @@ GraphWindow::_Done(BMessage* message)
 	status << ".  Click: select, double click: open (a line: its relations), wheel: zoom, F: fit.";
 	fStatus->SetText(status.String());
 	delete result;
+	_ApplyFocus();
+}
+
+
+void
+GraphWindow::_ApplyFocus()
+{
+	if (!fHasFocus || fWorking)
+		return;
+
+	std::string id;
+	for (const auto& object : fRefs) {
+		if (object.second == fFocusRef) {
+			id = object.first;
+			break;
+		}
+	}
+	if (id.empty()) {
+		// not an object of SEN (it has no SEN:ID), or not read
+		fHasFocus = false;
+		BString status(fFocusRef.name);
+		status << " is no object of SEN: it has no relations.";
+		fStatus->SetText(status.String());
+		return;
+	}
+	if (fView->Graph().IndexOf(id) < 0) {
+		// it is in the graph but not shown (no relations, or only the classifications and contexts): show everything, then centre on it
+		if (fAll.IndexOf(id) >= 0 && (fMeta->Value() != B_CONTROL_ON || fUnconnected->Value() != B_CONTROL_ON)) {
+			fMeta->SetValue(B_CONTROL_ON);
+			fUnconnected->SetValue(B_CONTROL_ON);
+			_Start(false);
+			return;
+		}
+		fHasFocus = false;
+		return;
+	}
+	fHasFocus = false;
+	fView->Focus(id.c_str());
 }
 
 

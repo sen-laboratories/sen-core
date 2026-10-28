@@ -79,7 +79,7 @@ SenUi::Handle(BMessage* message)
 			_OpenObjects();
 			return true;
 		case sen::cmd::kUiOpenGraph:
-			_Show(&fGraph, &SenUi::_MakeGraph, 'GWac');
+			_OpenGraph(message);
 			return true;
 		case sen::cmd::kUiOpenClassification:
 			_OpenClassification(message);
@@ -183,6 +183,31 @@ SenUi::_OpenObjects()
 	if (result == B_OK)
 		result = OpenInTracker(query);
 	_Report("open the SEN objects", result);
+}
+
+
+/**
+ * The graph of the objects and relations, centred on a file: the one that comes with the message (the SEN key and a double click in Akita), else the one
+ * that is selected in the window of Tracker that is active, if there is one (the answer of Akita; a Tracker without SEN does not know the message).
+ */
+void
+SenUi::_OpenGraph(const BMessage* message)
+{
+	entry_ref focus;
+	bool hasFocus = message->FindRef("refs", &focus) == B_OK;
+	if (!hasFocus) {
+		BMessenger tracker("application/x-vnd.Be-TRAK");
+		BMessage ask(sen::cmd::kGetSelection), reply;
+		if (tracker.IsValid() && tracker.SendMessage(&ask, &reply, 500000, 500000) == B_OK && reply.what == B_REPLY)
+			hasFocus = reply.FindRef("refs", &focus) == B_OK;
+	}
+
+	_Show(&fGraph, &SenUi::_MakeGraph, 'GWac');
+	if (hasFocus) {
+		BMessage centre(kGraphFocus);
+		centre.AddRef("refs", &focus);
+		fGraph.SendMessage(&centre);
+	}
 }
 
 
