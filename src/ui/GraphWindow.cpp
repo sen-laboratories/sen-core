@@ -181,7 +181,7 @@ public:
 		options.dark = fDark;
 		options.fontSize = be_plain_font->Size();
 		if (selectionOnly) {
-			options.fontSize = be_plain_font->Size() * 0.8f;	// (the part is fitted at the size that it has here: smaller names than in the view)
+			options.fontSize = 10;	// (a part is a picture of its own, fitted at the size that its nodes have: not the font of the system, which is for the view)
 			if (fSelected >= 0) {
 				sen::graph::Graph part = fGraph.Neighborhood(fSelected);
 				options.selectedNode = part.IndexOf(fGraph.Nodes()[fSelected].id);
