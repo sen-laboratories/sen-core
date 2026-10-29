@@ -755,6 +755,7 @@ struct WorkRequest {
 	bool								collect;
 	bool								withMeta;
 	bool								withUnconnected;
+	bool								withOntologies;
 	sen::graph::Graph					all;
 	std::map<std::string, entry_ref>	refs;
 	bool								truncated;
@@ -786,6 +787,7 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 	fView = new GraphView();
 	fMeta = new BCheckBox("meta", "Classifications and contexts", new BMessage(kFilter));
 	fUnconnected = new BCheckBox("unconnected", "Objects without relations", new BMessage(kFilter));
+	fOntologies = new BCheckBox("ontologies", "Ontologies", new BMessage(kFilter));
 	fDark = new BCheckBox("dark", "Dark", new BMessage(kDark));
 	// dark or light as it was chosen last time (a field of the settings), else as the colours of the system are
 	bool dark = false;
@@ -804,6 +806,7 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 		.AddGroup(B_HORIZONTAL)
 			.Add(fMeta)
 			.Add(fUnconnected)
+			.Add(fOntologies)
 			.Add(fDark)
 			.AddGlue()
 			.Add(fSaveSelection)
@@ -921,7 +924,7 @@ GraphWindow::_WorkEntry(void* data)
 		result->refs = request->refs;
 	}
 
-	result->shown = result->all.Filtered(request->withMeta, request->withUnconnected);
+	result->shown = result->all.Filtered(request->withMeta, request->withUnconnected, request->withOntologies);
 	result->shown.Layout();
 
 	BMessage done(kWorkDone);
@@ -947,6 +950,7 @@ GraphWindow::_Start(bool collect)
 	request->collect = collect;
 	request->withMeta = fMeta->Value() == B_CONTROL_ON;
 	request->withUnconnected = fUnconnected->Value() == B_CONTROL_ON;
+	request->withOntologies = fOntologies->Value() == B_CONTROL_ON;
 	request->truncated = fTruncated;
 	request->objects = fObjects;
 	if (!collect) {
@@ -1029,10 +1033,12 @@ GraphWindow::_ApplyFocus()
 		return;
 	}
 	if (fView->Graph().IndexOf(id) < 0) {
-		// it is in the graph but not shown (no relations, or only the classifications and contexts): show everything, then centre on it
-		if (fAll.IndexOf(id) >= 0 && (fMeta->Value() != B_CONTROL_ON || fUnconnected->Value() != B_CONTROL_ON)) {
+		// it is in the graph but not shown (no relations, only the classifications and contexts, or it is an ontology): show everything, then centre on it
+		if (fAll.IndexOf(id) >= 0 && (fMeta->Value() != B_CONTROL_ON || fUnconnected->Value() != B_CONTROL_ON
+				|| fOntologies->Value() != B_CONTROL_ON)) {
 			fMeta->SetValue(B_CONTROL_ON);
 			fUnconnected->SetValue(B_CONTROL_ON);
+			fOntologies->SetValue(B_CONTROL_ON);
 			_Start(false);
 			return;
 		}

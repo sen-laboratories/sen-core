@@ -4,13 +4,16 @@
  */
 #pragma once
 
-#include <Window.h>
+#include <sen/SenStripeDialog.h>
 
 namespace sen {
 namespace ui {
 
-/** The window of the About item of the Deskbar menu: the knot, the name and version, the copyright. */
-class AboutWindow : public BWindow {
+/**
+ * The window of the About item of the Deskbar menu: the dialog with the stripe that all About windows of SEN have (sento: SenStripeDialog.h), with the logo, the
+ * name and the full version, the copyright, a link to the website and a button for support.
+ */
+class AboutWindow : public AboutDialog {
 public:
 					AboutWindow();
 

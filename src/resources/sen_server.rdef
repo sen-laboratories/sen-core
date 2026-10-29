@@ -9,6 +9,8 @@ resource app_version {
 	 major = 2,
 	 middle = 0,
 	 minor = 0,
+	 // the version is kept here and read from here (About, Info, `sen --version`, the version of the package): the stage of the release and, for a beta,
+	 // its number in `internal` (on the release branch 1.0 beta 3 is 1.0.0-beta.3 and the package 1.0.0~beta3); a development build has none
 	 variety = B_APPV_DEVELOPMENT,
 	 internal = 0,
 	 short_info = "SEN Server",

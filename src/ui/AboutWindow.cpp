@@ -14,12 +14,9 @@
 #include <Button.h>
 #include <Cursor.h>
 #include <Entry.h>
-#include <Font.h>
 #include <FindDirectory.h>
-#include <LayoutBuilder.h>
 #include <Path.h>
 #include <Roster.h>
-#include <StringView.h>
 #include <TranslationUtils.h>
 #include <Url.h>
 #include <View.h>
@@ -29,7 +26,9 @@ namespace ui {
 
 static const uint32 kActivate = 'ABac';
 static const uint32 kSupport = 'ABsp';
-static const float kLogoSize = 144;
+static const float kLogoSize = 128;
+// the text of the dialog starts a little inside its view (BTextView): the link is aligned with it
+static const float kTextInset = 4;
 
 static const char* const kWebsite = "https://sen-labs.org";
 // the page for donations: a page of the documentation (the button of Liberapay is a script, which needs a page), else the page of Liberapay
@@ -100,7 +99,7 @@ public:
 		font_height fontHeight;
 		GetFontHeight(&fontHeight);
 		if (width != NULL)
-			*width = StringWidth(fText.String());
+			*width = kTextInset + StringWidth(fText.String());
 		if (height != NULL)
 			*height = ceilf(fontHeight.ascent + fontHeight.descent + fontHeight.leading) + 2;
 	}
@@ -113,10 +112,10 @@ public:
 	{
 		font_height fontHeight;
 		GetFontHeight(&fontHeight);
-		BPoint start(0, ceilf(fontHeight.ascent));
+		BPoint start(kTextInset, ceilf(fontHeight.ascent));
 		DrawString(fText.String(), start);
 		float width = StringWidth(fText.String());
-		StrokeLine(BPoint(0, start.y + 2), BPoint(width, start.y + 2));
+		StrokeLine(BPoint(start.x, start.y + 2), BPoint(start.x + width, start.y + 2));
 	}
 
 	virtual void MouseMoved(BPoint, uint32 transit, const BMessage*)
@@ -139,76 +138,25 @@ private:
 };
 
 
-/** Draws a bitmap in a fixed size; it is not the logo that decides how large the window is. */
-class LogoView : public BView {
-public:
-	LogoView(const char* name, BBitmap* bitmap, float size)
-		:
-		BView(name, B_WILL_DRAW),
-		fBitmap(bitmap)
-	{
-		SetExplicitMinSize(BSize(size, size));
-		SetExplicitMaxSize(BSize(size, size));
-		SetExplicitPreferredSize(BSize(size, size));
-	}
-
-	virtual ~LogoView() { delete fBitmap; }
-
-	virtual void AttachedToWindow() { AdoptParentColors(); }
-
-	virtual void Draw(BRect)
-	{
-		if (fBitmap == NULL)
-			return;
-		SetDrawingMode(B_OP_ALPHA);
-		SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-		DrawBitmap(fBitmap, fBitmap->Bounds(), Bounds(), B_FILTER_BITMAP_BILINEAR);
-		SetDrawingMode(B_OP_COPY);
-	}
-
-private:
-	BBitmap*	fBitmap;
-};
+/** The logo of sen-core (a resource of the program), scaled to the height that the stripe shows it in; NULL if there is none. */
+static BBitmap*
+_Logo()
+{
+	BBitmap* logo = BTranslationUtils::GetBitmap("about-logo");
+	BBitmap* scaled = ScaleDown(logo, kLogoSize);
+	delete logo;
+	return scaled;
+}
 
 
 AboutWindow::AboutWindow()
 	:
-	BWindow(BRect(180, 180, 560, 400), "About SEN", B_TITLED_WINDOW,
-		B_NOT_ZOOMABLE | B_NOT_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE)
+	AboutDialog("SEN", stats::VersionOnly().String(), "Semantic Extensions Native",
+		"Copyright " B_UTF8_COPYRIGHT " 2020-2026 SEN Labs e.U.\nMIT License", _Logo())
 {
-	BStringView* name = new BStringView("name", "SEN");
-	BFont big(be_bold_font);
-	big.SetSize(big.Size() * 1.8f);
-	name->SetFont(&big);
-
-	BString version("Server ");
-	version << stats::VersionOnly();
-
-	// the logo (a resource of the program) next to the middle block of the text, the two centred on the same line; the copyright below
-	BBitmap* logo = BTranslationUtils::GetBitmap("about-logo");
-
-	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_BIG_SPACING)
-		.SetInsets(B_USE_WINDOW_INSETS)
-		.AddGroup(B_HORIZONTAL, B_USE_BIG_SPACING)
-			.Add(new LogoView("logo", logo, kLogoSize))
-			.AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
-				.AddGlue()
-				.Add(name)
-				.Add(new BStringView("tagline", "Semantic Extensions Native"))
-				.Add(new BStringView("version", version.String()))
-				.AddGlue()
-			.End()
-		.End()
-		.AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
-			.Add(new BStringView("copyright", "\xc2\xa9 2020-2026 SEN Labs e.U."))
-			.Add(new BStringView("license", "MIT License"))
-			.Add(new LinkView("web", "sen-labs.org", kWebsite))
-		.End()
-		.AddGroup(B_HORIZONTAL)
-			.AddGlue()
-			.Add(new BButton("support", "Support this project", new BMessage(kSupport)))
-		.End()
-	.End();
+	AddContent(new LinkView("web", "sen-labs.org", kWebsite));
+	AddButton("Support this project", new BMessage(kSupport));
+	CenterOnScreen();	// (the window is shown by SenUi, which does not centre it)
 }
 
 
@@ -230,7 +178,7 @@ AboutWindow::MessageReceived(BMessage* message)
 			break;
 		}
 		default:
-			BWindow::MessageReceived(message);
+			AboutDialog::MessageReceived(message);
 	}
 }
 

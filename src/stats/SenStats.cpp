@@ -127,11 +127,11 @@ static const char*
 VarietyName(uint32 variety)
 {
 	switch (variety) {
-		case 0:	return "development";
+		case 0:	return "dev";
 		case 1:	return "alpha";
 		case 2:	return "beta";
 		case 3:	return "gamma";
-		case 4:	return "golden master";
+		case 4:	return "gm";	// golden master
 		default:	return "";	// final
 	}
 }
@@ -154,14 +154,21 @@ ReadVersion(version_info* version, time_t* modified)
 }
 
 
+/**
+ * The full version as the releases are named: 1.0.0-beta.4. The variety is the part after the dash, for the stages before the final one the internal
+ * number of the resource counts them (beta 4); a development build has none, its internal number is its build.
+ */
 static BString
 VersionNumber(const version_info& version)
 {
 	BString text;
 	text << (int)version.major << "." << (int)version.middle << "." << (int)version.minor;
 	const char* variety = VarietyName(version.variety);
-	if (variety[0] != '\0')
-		text << " " << variety;
+	if (variety[0] != '\0') {
+		text << "-" << variety;
+		if (version.variety != 0 && version.internal > 0)
+			text << "." << (int)version.internal;
+	}
 	return text;
 }
 
@@ -184,7 +191,10 @@ VersionLine()
 	line << " (";
 	if (date[0] != '\0')
 		line << date << ", ";
-	line << "build " << (int)version.internal << ")";
+	if (version.variety == 0 || version.variety > 4)
+		line << "build " << (int)version.internal << ")";
+	else
+		line.Truncate(line.Length() - 2).Append(")");	// (the internal number is part of the version)
 	return line;
 }
 
