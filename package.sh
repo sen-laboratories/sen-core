@@ -16,10 +16,15 @@ major=$(sed -n 's/^[[:space:]]*major[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' 
 middle=$(sed -n 's/^[[:space:]]*middle[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
 minor=$(sed -n 's/^[[:space:]]*minor[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
 VERSION="$major.$middle.$minor"
-# SEN_VERSION_SUFFIX replaces dev for a preview (SEN_VERSION_SUFFIX=preview1: 1.0.0~preview1)
-grep -q 'variety[[:space:]]*=[[:space:]]*B_APPV_DEVELOPMENT' $RDEF && VERSION="$VERSION~${SEN_VERSION_SUFFIX:-dev}"
+internal=$(sed -n 's/^[[:space:]]*internal[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
+# the stage and its count come from the resource (About shows 1.0.0-beta.3 for the package 1.0.0~beta3, 2.0.0-develop.1 for 2.0.0~develop.1);
+# SEN_VERSION_SUFFIX replaces the suffix of a development version (SEN_VERSION_SUFFIX=preview1: 1.0.0~preview1)
+if grep -q 'variety[[:space:]]*=[[:space:]]*B_APPV_DEVELOPMENT' $RDEF; then
+	suffix=develop
+	[ "${internal:-0}" -gt 0 ] && suffix=develop.$internal
+	VERSION="$VERSION~${SEN_VERSION_SUFFIX:-$suffix}"
+fi
 if grep -q 'variety[[:space:]]*=[[:space:]]*B_APPV_BETA' $RDEF; then
-	internal=$(sed -n 's/^[[:space:]]*internal[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
 	VERSION="$VERSION~beta${internal:-1}"
 fi
 VERSION="$VERSION-${REVISION:-1}"
