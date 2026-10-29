@@ -16,8 +16,10 @@ SRCS := src/relations/RelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \
 	src/server/Cli.cpp \
 	src/deskbar/DeskbarView.cpp \
+	src/graph/GraphData.cpp \
 	src/ui/AboutWindow.cpp \
 	src/ui/CheckWindow.cpp \
+	src/ui/GraphWindow.cpp \
 	src/ui/FileTypesLink.cpp \
 	src/ui/InfoWindow.cpp \
 	src/ui/Knot.cpp \
@@ -30,7 +32,7 @@ SRCS := src/relations/RelationHandler.cpp \
 
 RDEFS = src/resources/sen_server.rdef
 
-LIBS = be translation spdlog fmt $(STDCPPLIBS)
+LIBS = be tracker translation spdlog fmt $(STDCPPLIBS)
 #	Specify the level of optimization that you want. Specify either NONE (O0),
 #	SOME (O1), FULL (O2), or leave blank (for the default optimization level).
 

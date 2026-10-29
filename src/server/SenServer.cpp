@@ -226,6 +226,11 @@ void SenServer::UpdateFileTypesLink()
 
 void SenServer::InstallDeskbarItem()
 {
+    // (for tests: a server that is started next to the Deskbar of a system that has another version of it must not load a second image of its views into
+    // the Deskbar)
+    if (getenv("SEN_NO_DESKBAR") != NULL)
+        return;
+
     BDeskbar deskbar;
     if (!deskbar.IsRunning()) {
         // the server can be started before the Deskbar (the launch daemon starts both): try again for a while
@@ -274,6 +279,9 @@ void SenServer::StartOntologyUpdate()
 
 void SenServer::RemoveDeskbarItem()
 {
+    if (getenv("SEN_NO_DESKBAR") != NULL)
+        return;
+
     BDeskbar deskbar;
     if (deskbar.IsRunning() && deskbar.HasItem(sen::deskbar::kItemName))
         deskbar.RemoveItem(sen::deskbar::kItemName);
@@ -281,9 +289,12 @@ void SenServer::RemoveDeskbarItem()
 
 bool SenServer::QuitRequested()
 {
-    RemoveDeskbarItem();
     fUi->CloseWindows();
-    return BApplication::QuitRequested();
+    const bool quit = BApplication::QuitRequested();
+    // (the knot stays when the server does not quit: nobody must find a server without its knot)
+    if (quit)
+        RemoveDeskbarItem();
+    return quit;
 }
 
 void SenServer::MessageReceived(BMessage* message)

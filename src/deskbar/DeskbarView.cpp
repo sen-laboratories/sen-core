@@ -169,9 +169,9 @@ DeskbarView::MouseDown(BPoint where)
 void
 DeskbarView::MouseUp(BPoint)
 {
-	// the knot opens the knowledge graph as a list: the query with all the files that have a SEN:ID
+	// the knot opens the knowledge graph as a list: the query with all the files that have a SEN:ID; with the SEN key (Command) as a graph
 	if ((fLastButtons & B_PRIMARY_MOUSE_BUTTON) != 0)
-		_Send(sen::cmd::kUiOpenObjects);
+		_Send((modifiers() & B_COMMAND_KEY) != 0 ? sen::cmd::kUiOpenGraph : sen::cmd::kUiOpenObjects);
 	fLastButtons = 0;
 }
 
@@ -191,6 +191,7 @@ DeskbarView::IsServerCommand(uint32 command)
 		case sen::cmd::kUiOpenType:
 		case sen::cmd::kUiUpdateOntologies:
 		case sen::cmd::kUiOpenObjects:
+		case sen::cmd::kUiOpenGraph:
 		case sen::cmd::kUiOpenClassification:
 		case sen::cmd::kUiOpenClassified:
 		case sen::cmd::kUiSetContext:
@@ -648,9 +649,10 @@ DeskbarView::_BuildMenu()
 	// what SEN is made of and knows: the plugins and the ontologies (configuration, next to each other), then the windows about SEN
 	_AddPluginMenu(menu);
 	_AddOntologyMenu(menu);
+	BString ellipsis(B_UTF8_ELLIPSIS);
+	menu->AddItem(new BMenuItem((BString("Graph") << ellipsis).String(), new BMessage(sen::cmd::kUiOpenGraph)));
 	menu->AddSeparatorItem();
 
-	BString ellipsis(B_UTF8_ELLIPSIS);
 	menu->AddItem(new BMenuItem((BString("Info") << ellipsis).String(), new BMessage(sen::cmd::kUiShowInfo)));
 	menu->AddItem(new BMenuItem((BString("Check") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
 	menu->AddItem(new BMenuItem((BString("Settings") << ellipsis).String(), new BMessage(sen::cmd::kUiShowSettings)));

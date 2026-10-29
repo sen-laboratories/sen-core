@@ -7,6 +7,7 @@
 
 #include "AboutWindow.h"
 #include "CheckWindow.h"
+#include "GraphWindow.h"
 #include "InfoWindow.h"
 #include "QueryFiles.h"
 #include "../stats/SenStats.h"
@@ -77,6 +78,9 @@ SenUi::Handle(BMessage* message)
 		case sen::cmd::kUiOpenObjects:
 			_OpenObjects();
 			return true;
+		case sen::cmd::kUiOpenGraph:
+			_OpenGraph(message);
+			return true;
 		case sen::cmd::kUiOpenClassification:
 			_OpenClassification(message);
 			return true;
@@ -126,7 +130,7 @@ SenUi::Handle(BMessage* message)
 void
 SenUi::CloseWindows()
 {
-	BMessenger* windows[] = {&fInfo, &fCheck, &fSettings, &fAbout};
+	BMessenger* windows[] = {&fInfo, &fCheck, &fSettings, &fAbout, &fGraph};
 	for (BMessenger* window : windows) {
 		if (window->IsValid())
 			window->SendMessage(B_QUIT_REQUESTED);
@@ -144,6 +148,9 @@ SenUi::_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate)
 		return;
 
 	BWindow* created = (this->*make)();
+	// The shortcut Alt+Q of any window quits the application: for this one it would take the server and the knot with it, so it closes the window (as Alt+W does)
+	created->RemoveShortcut('Q', B_COMMAND_KEY);
+	created->AddShortcut('Q', B_COMMAND_KEY, new BMessage(B_QUIT_REQUESTED));
 	*window = BMessenger(created);
 	created->Show();
 }
@@ -153,6 +160,7 @@ BWindow* SenUi::_MakeInfo() { return new InfoWindow(); }
 BWindow* SenUi::_MakeCheck() { return new CheckWindow(); }
 BWindow* SenUi::_MakeSettings() { return new SettingsWindow(fConfig); }
 BWindow* SenUi::_MakeAbout() { return new AboutWindow(); }
+BWindow* SenUi::_MakeGraph() { return new GraphWindow(fConfig); }
 
 
 // ---- queries
@@ -178,6 +186,31 @@ SenUi::_OpenObjects()
 	if (result == B_OK)
 		result = OpenInTracker(query);
 	_Report("open the SEN objects", result);
+}
+
+
+/**
+ * The graph of the objects and relations, centred on a file: the one that comes with the message (the SEN key and a double click in Akita), else the one
+ * that is selected in the window of Tracker that is active, if there is one (the answer of Akita; a Tracker without SEN does not know the message).
+ */
+void
+SenUi::_OpenGraph(const BMessage* message)
+{
+	entry_ref focus;
+	bool hasFocus = message->FindRef("refs", &focus) == B_OK;
+	if (!hasFocus) {
+		BMessenger tracker("application/x-vnd.Be-TRAK");
+		BMessage ask(sen::cmd::kGetSelection), reply;
+		if (tracker.IsValid() && tracker.SendMessage(&ask, &reply, 500000, 500000) == B_OK && reply.what == B_REPLY)
+			hasFocus = reply.FindRef("refs", &focus) == B_OK;
+	}
+
+	_Show(&fGraph, &SenUi::_MakeGraph, 'GWac');
+	if (hasFocus) {
+		BMessage centre(kGraphFocus);
+		centre.AddRef("refs", &focus);
+		fGraph.SendMessage(&centre);
+	}
 }
 
 
