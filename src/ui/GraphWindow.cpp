@@ -181,6 +181,7 @@ public:
 		options.dark = fDark;
 		options.fontSize = be_plain_font->Size();
 		if (selectionOnly) {
+			options.emphasiseLines = false;	// (all its lines are those of the node: they are plain, the node stands out)
 			options.fontSize = 10;	// (a part is a picture of its own, fitted at the size that its nodes have: not the font of the system, which is for the view)
 			if (fSelected >= 0) {
 				sen::graph::Graph part = fGraph.Neighborhood(fSelected);
@@ -566,7 +567,7 @@ GraphView::Draw(BRect)
 			color = Color(palette.emphasis);
 		color.alpha = active ? 255 : 50;
 		SetHighColor(color);
-		SetPenSize(strong ? 2.4f : 1.2f);
+		SetPenSize(strong ? sen::graph::kStrongLineWidth : sen::graph::kLineWidth);
 		StrokeLine(start, end);
 
 		if (!edge.reciprocal && length > startRadius + endRadius + 8) {
