@@ -44,13 +44,22 @@ them on every volume at start and when a volume is mounted. `create-sen-indices.
 
 ### The Deskbar item
 
-The server adds an item with the SEN knot to the Deskbar, like the mail server does (`src/deskbar`): a click opens the query with all SEN objects, the
-menu gives access to contexts, classifications, the Info and Check windows, the ontologies and the Settings (`src/ui`), and has Restart and Quit. The windows are shown by the
+The server adds an item with the SEN knot to the Deskbar, like the mail server does (`src/deskbar`): a click opens the query with all SEN objects (with the SEN key, Command: the graph of the objects and relations, see below), the
+menu gives access to contexts, classifications, the Info and Check windows, the ontologies, the graph and the Settings (`src/ui`), and has Restart and Quit. The windows are shown by the
 server (the item only sends messages), the statistics are shared with the command line (`src/stats`). The Context menu lists the contexts (the folders in `~/config/settings/sen/contexts`, with their icon, the current one marked; choosing one makes it the current one), the
 Ontologies menu the installed ones with their icon, each opening down to its types and their attributes.
 
 Quit stops the server as a service of the launch daemon (`launch_roster stop`: the daemon starts a service again when it just quits); `sen start` or the next login starts it.
 Restart quits it and lets the daemon start it again, or, for a server that was started by hand, a command of its own.
+
+### The graph
+
+*Graph...* in the menu, or Command+click on the knot, opens the graph of the objects and their relations (`src/graph/GraphData` reads it from the attributes, `src/ui/GraphWindow` shows it, the layout and the SVG are in `SenGraph.h` of
+sento): dots and lines, zoom, selection, export of the view and of a selection as SVG, a dark look that is remembered (`SEN:darkMode` in the settings). It opens centred on a file when one is given (Akita: Command+double click) or
+selected in Akita. See the [user guide](https://github.com/sen-laboratories/sento/blob/main/docs/user-guide.md#the-graph).
+
+The environment variable `SEN_NO_DESKBAR=1` keeps a server that is started for a test out of the Deskbar (the knot is loaded from the file of the server: a second version of it would put a second image of the same classes
+into the Deskbar).
 
 ### The `sen` command
 
@@ -98,4 +107,5 @@ abstract entities and ideas as files. How it works inside, and the message proto
 ## Tests
 
 The tests run on a Haiku (a VM is fine), see [tests/vm](tests/vm): `run.sh relations.sh` sends the relation commands to a live server and checks the attributes on disk,
-`run.sh e2e.sh` and `run.sh live.sh` test the server with the plugins and next to the Tracker, `run.sh perf.sh` times the lookup of ids. CI runs the relation tests.
+`run.sh e2e.sh` and `run.sh live.sh` test the server with the plugins and next to the Tracker, `run.sh perf.sh` times the lookup of ids. CI runs the relation tests. `sh tests/vm/graph.sh` (on the Haiku, no server needed; `GRAPH_DUMP=1` prints the nodes and relations) reads the graph like the
+graph window does and checks that the files of the types have names in words and that the relations have labels.
