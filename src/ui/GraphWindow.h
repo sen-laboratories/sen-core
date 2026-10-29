@@ -47,12 +47,15 @@ private:
 	void			_ApplyFocus();
 	void			_OpenRelations(const BMessage* message);
 	void			_Save(const BMessage* message);
+	/** the card of the selected object over the graph, or none */
+	void			_UpdatePreview();
 	static int32	_WorkEntry(void* data);
 
 	GraphView*		fView;
 	BCheckBox*		fMeta;
 	BCheckBox*		fUnconnected;
 	BCheckBox*		fOntologies;
+	BCheckBox*		fPreview;
 	BCheckBox*		fDark;
 	BButton*		fSaveSelection;
 	SenConfigHandler*	fConfig;
