@@ -37,8 +37,10 @@ private:
 	BWindow*		_MakeCheck();
 	BWindow*		_MakeSettings();
 	BWindow*		_MakeAbout();
+	BWindow*		_MakeGraph();
 
 	void			_OpenObjects();
+	void			_OpenGraph(const BMessage* message);
 	void			_OpenClassification(const BMessage* message);
 	void			_OpenClassified(const BMessage* message);
 	void			_OpenPlugins();
@@ -59,6 +61,7 @@ private:
 	BMessenger			fCheck;
 	BMessenger			fSettings;
 	BMessenger			fAbout;
+	BMessenger			fGraph;
 	/** @brief When the server was asked to stop but is no service of the launch daemon, it quits by itself after a moment. */
 	BMessageRunner*		fQuitFallback;
 };
