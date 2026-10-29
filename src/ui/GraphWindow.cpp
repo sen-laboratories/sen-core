@@ -29,6 +29,7 @@
 #include <vector>
 
 #include <sen/Sen.h>
+#include <sen/SenEntityCard.h>
 
 namespace sen {
 namespace ui {
@@ -41,6 +42,7 @@ static const uint32 kFilter = 'GWfl';
 static const uint32 kSave = 'GWsv';
 static const uint32 kSaveSelection = 'GWss';
 static const uint32 kSelectionChanged = 'GWse';
+static const uint32 kPreviewToggled = 'GWpv';
 static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
 static const uint32 kOpenNode = 'GWop';
@@ -124,6 +126,8 @@ public:
 		fSize(0, 0),
 		fHover(-1),
 		fSelected(-1),
+		fCard(NULL),
+		fCardNode(-1),
 		fHoverEdge(-1),
 		fSelectedEdge(-1),
 		fDragging(false),
@@ -155,6 +159,19 @@ public:
 	bool Dark() const { return fDark; }
 
 	bool HasSelection() const { return fSelected >= 0 || fSelectedEdge >= 0; }
+	/** the selected object (not a relation), -1 if there is none */
+	int32 SelectedNode() const { return fSelected; }
+
+	virtual ~GraphView() { delete fCard; }
+
+	/** the card of an object, shown over the graph next to its node as long as that is the selected one (taken over); none for NULL */
+	void SetCard(sen::EntityCard* card, int32 node = -1)
+	{
+		delete fCard;
+		fCard = card;
+		fCardNode = node;
+		Invalidate();
+	}
 
 	/** a name for the file of the selection: the node, or the nodes of the line */
 	BString SelectionName() const
@@ -500,6 +517,8 @@ private:
 	BSize				fSize;
 	int32				fHover;
 	int32				fSelected;
+	sen::EntityCard*	fCard;		///< what is known about an object, drawn next to it with a translucent background
+	int32				fCardNode;	///< the object that the card is of
 	int32				fHoverEdge;
 	int32				fSelectedEdge;
 	BPoint				fMouse;
@@ -708,6 +727,10 @@ GraphView::Draw(BRect)
 		DrawString(nodeTexts[i].String(), where);
 	}
 
+	// the card of the selected object: over everything but the tooltip, and the graph shows through
+	if (fCard != NULL && fSelected >= 0 && fSelected == fCardNode)
+		fCard->Draw(this, Bounds(), _ToView(nodes[fSelected]), _Radius(nodes[fSelected]) + 10, fDark);
+
 	// what is under the mouse: a node, or a line
 	BString lines[3];
 	int lineCount = 0;
@@ -789,6 +812,8 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 	fUnconnected = new BCheckBox("unconnected", "Objects without relations", new BMessage(kFilter));
 	fOntologies = new BCheckBox("ontologies", "Ontologies", new BMessage(kFilter));
 	fDark = new BCheckBox("dark", "Dark", new BMessage(kDark));
+	fPreview = new BCheckBox("preview", "Preview", new BMessage(kPreviewToggled));
+	fPreview->SetValue(B_CONTROL_ON);
 	// dark or light as it was chosen last time (a field of the settings), else as the colours of the system are
 	bool dark = false;
 	BMessage settings;
@@ -807,6 +832,7 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 			.Add(fMeta)
 			.Add(fUnconnected)
 			.Add(fOntologies)
+			.Add(fPreview)
 			.Add(fDark)
 			.AddGlue()
 			.Add(fSaveSelection)
@@ -829,6 +855,27 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 GraphWindow::~GraphWindow()
 {
 	delete fSavePanel;
+}
+
+
+/** The card of the selected object is shown over the graph next to its node (what Shoji would show of it, a line each, read-only); none if no object is selected,
+ *  it is not a file that is known, or the preview is off. */
+void
+GraphWindow::_UpdatePreview()
+{
+	const int32 node = fPreview->Value() == B_CONTROL_ON ? fView->SelectedNode() : -1;
+	auto found = node >= 0 ? fRefs.find(fView->Graph().Nodes()[node].id) : fRefs.end();
+	if (found == fRefs.end()) {
+		fView->SetCard(NULL);
+		return;
+	}
+
+	sen::EntityCard* card = new sen::EntityCard();
+	if (card->Load(found->second) != B_OK) {
+		delete card;
+		card = NULL;
+	}
+	fView->SetCard(card, node);
 }
 
 
@@ -870,6 +917,10 @@ GraphWindow::MessageReceived(BMessage* message)
 		}
 		case kSelectionChanged:
 			fSaveSelection->SetEnabled(fView->HasSelection());
+			_UpdatePreview();
+			break;
+		case kPreviewToggled:
+			_UpdatePreview();
 			break;
 		case kWorkDone:
 			_Done(message);
