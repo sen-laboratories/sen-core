@@ -7,6 +7,7 @@
 
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
+#include <sen/SenVersion.h>
 
 #include "../relations/QueryUtil.h"
 
@@ -122,21 +123,6 @@ ExecutablePath(BPath* path)
 }
 
 
-// (the values of B_APPV_DEVELOPMENT... of the resource compiler, they are not in a header)
-static const char*
-VarietyName(uint32 variety)
-{
-	switch (variety) {
-		case 0:	return "develop";
-		case 1:	return "alpha";
-		case 2:	return "beta";
-		case 3:	return "gamma";
-		case 4:	return "gm";	// golden master
-		default:	return "";	// final
-	}
-}
-
-
 static bool
 ReadVersion(version_info* version, time_t* modified)
 {
@@ -154,22 +140,10 @@ ReadVersion(version_info* version, time_t* modified)
 }
 
 
-/**
- * The full version as the releases are named: 1.0.0-beta.4, 2.0.0-develop.1. The variety is the part after the dash, for the stages before the final one the
- * internal number of the resource counts them (beta 4, develop 1); a final version has none.
- */
 static BString
 VersionNumber(const version_info& version)
 {
-	BString text;
-	text << (int)version.major << "." << (int)version.middle << "." << (int)version.minor;
-	const char* variety = VarietyName(version.variety);
-	if (variety[0] != '\0') {
-		text << "-" << variety;
-		if (version.internal > 0)
-			text << "." << (int)version.internal;
-	}
-	return text;
+	return sen::VersionText(version);	// 1.0.0-beta.4, as the About windows of the plugins show it
 }
 
 
