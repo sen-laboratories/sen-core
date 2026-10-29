@@ -166,7 +166,10 @@ public:
 			const Edge& edge = fGraph.Edges()[fSelectedEdge];
 			name << fGraph.Nodes()[edge.from].label.c_str() << "-" << fGraph.Nodes()[edge.to].label.c_str();
 		}
+		// a name for a file that every program can open: no folder separator, and no spaces (a viewer that makes a page with the file in it by its URL, as a browser
+		// does for an image, has trouble with them)
 		name.ReplaceAll("/", "-");
+		name.ReplaceAll(" ", "-");
 		return name;
 	}
 
