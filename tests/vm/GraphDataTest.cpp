@@ -69,6 +69,30 @@ main(int argc, char**)
 	CHECK(!graph.Nodes().empty(), "there are nodes");
 	CHECK(!graph.Edges().empty(), "there are relations");
 
+	// the ontologies (files of the ontology type) are marked, and only those; the filter leaves them and their relations out
+	int ontologies = 0, wrongMark = 0, ontologyEdges = 0;
+	for (const sen::graph::Node& node : graph.Nodes()) {
+		const bool hasType = node.group == "application/x-vnd.sen-labs.ontology";
+		if (node.ontology)
+			ontologies++;
+		if (node.ontology != hasType)
+			wrongMark++;
+	}
+	for (const sen::graph::Edge& edge : graph.Edges()) {
+		if (graph.Nodes()[edge.from].ontology || graph.Nodes()[edge.to].ontology)
+			ontologyEdges++;
+	}
+	printf("     %d ontologies, %d relations at them\n", ontologies, ontologyEdges);
+	CHECK(wrongMark == 0, "a node is an ontology exactly when its file has the type of the ontologies");
+	const sen::graph::Graph without = graph.Filtered(true, true, false);
+	CHECK(without.Nodes().size() == graph.Nodes().size() - ontologies, "without the ontologies only they are gone");
+	CHECK(without.Edges().size() == graph.Edges().size() - ontologyEdges, "without the ontologies their relations are gone");
+	bool left = false;
+	for (const sen::graph::Node& node : without.Nodes())
+		left = left || node.ontology;
+	CHECK(!left, "no ontology is left");
+	CHECK(graph.Filtered(true, true).Nodes().size() == graph.Nodes().size(), "with the ontologies (the default) all nodes are there");
+
 	int typeNodes = 0, technical = 0;
 	for (const sen::graph::Node& node : graph.Nodes()) {
 		if (node.group.compare(0, 6, "type: ") != 0)

@@ -52,6 +52,7 @@ private:
 	GraphView*		fView;
 	BCheckBox*		fMeta;
 	BCheckBox*		fUnconnected;
+	BCheckBox*		fOntologies;
 	BCheckBox*		fDark;
 	BButton*		fSaveSelection;
 	SenConfigHandler*	fConfig;

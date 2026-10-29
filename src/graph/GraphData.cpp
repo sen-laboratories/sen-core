@@ -57,6 +57,14 @@ NameOfNode(const entry_ref& ref, BNode& node, std::string* label, std::string* g
 	*group = sen::lookup::TypeOf(node);
 }
 
+/** Is it the file of an ontology: of the type of the ontologies (as Akita shows it as a folder)? */
+bool
+IsOntology(BNode& node)
+{
+	char type[B_MIME_TYPE_LENGTH];
+	return BNodeInfo(&node).GetType(type) == B_OK && strcasecmp(type, sen::mime::kOntology) == 0;
+}
+
 /** The relations in SEN:REL:* of a file: for each target (a field named by its SEN:ID) the type and the label of the first relation. */
 void
 ReadRelations(BNode& node, std::map<std::string, RelationInfo>* relations)
@@ -133,7 +141,7 @@ Collect(Collected* collected, size_t maxObjects)
 			continue;	// (two files with one id: the first is the object)
 		std::string label, group;
 		NameOfNode(ref, node, &label, &group);
-		collected->graph.AddNode(id.String(), label, group);
+		collected->graph.AddNode(id.String(), label, group, IsOntology(node));
 		collected->refs[id.String()] = ref;
 	}
 
