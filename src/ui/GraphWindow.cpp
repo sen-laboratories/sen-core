@@ -30,6 +30,11 @@
 
 #include <sen/Sen.h>
 #include <sen/SenEntityCard.h>
+#include <sen/SenOntoCore.h>
+
+#include <Bitmap.h>
+#include <MimeType.h>
+#include <functional>
 
 namespace sen {
 namespace ui {
@@ -43,6 +48,9 @@ static const uint32 kSave = 'GWsv';
 static const uint32 kSaveSelection = 'GWss';
 static const uint32 kSelectionChanged = 'GWse';
 static const uint32 kPreviewToggled = 'GWpv';
+#ifdef SEN_TESTING
+static const uint32 kTestMouse = 'GWtm';	///< the mouse of a test: "screen_where", "down" (compiled only into a test build)
+#endif
 static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
 static const uint32 kOpenNode = 'GWop';
@@ -127,7 +135,13 @@ public:
 		fHover(-1),
 		fSelected(-1),
 		fCard(NULL),
-		fCardNode(-1),
+		fCardKind(kNoCard),
+		fCardIndex(-1),
+		fCardNearFrom(true),
+		fCardDistance(0),
+		fCardAlign(sen::EntityCard::kCentred),
+		fCardHot(false),
+		fOverlays(true),
 		fHoverEdge(-1),
 		fSelectedEdge(-1),
 		fDragging(false),
@@ -140,6 +154,7 @@ public:
 	void SetGraph(const sen::graph::Graph& graph)
 	{
 		fGraph = graph;
+		_ClearCard();
 		fHover = fSelected = fHoverEdge = fSelectedEdge = -1;
 		fNeighbors.assign(fGraph.Nodes().size(), false);
 		fNeedFit = true;
@@ -159,19 +174,29 @@ public:
 	bool Dark() const { return fDark; }
 
 	bool HasSelection() const { return fSelected >= 0 || fSelectedEdge >= 0; }
-	/** the selected object (not a relation), -1 if there is none */
-	int32 SelectedNode() const { return fSelected; }
-
 	virtual ~GraphView() { delete fCard; }
 
-	/** the card of an object, shown over the graph next to its node as long as that is the selected one (taken over); none for NULL */
-	void SetCard(sen::EntityCard* card, int32 node = -1)
+#ifdef SEN_TESTING
+	/** a move of the mouse, or a click, from a test (the real ones come from the app_server with the view that is under the mouse) */
+	void TestMouse(BPoint where, bool down)
 	{
-		delete fCard;
-		fCard = card;
-		fCardNode = node;
-		Invalidate();
+		if (down)
+			MouseDown(where);
+		else
+			MouseMoved(where, B_INSIDE_VIEW, NULL);
 	}
+#endif
+
+	/** whether what is under the mouse gets a card (its attributes, or the relation) next to it */
+	void SetOverlays(bool on)
+	{
+		fOverlays = on;
+		if (!on)
+			_ClearCard();
+	}
+
+	/** how the card of an object is made (the window knows the files of the nodes): by the id of the node, NULL if there is no file */
+	void SetCardLoader(std::function<sen::EntityCard*(const std::string&)> loader) { fLoadCard = loader; }
 
 	/** a name for the file of the selection: the node, or the nodes of the line */
 	BString SelectionName() const
@@ -280,6 +305,12 @@ public:
 		if ((buttons & B_PRIMARY_MOUSE_BUTTON) == 0)
 			return;
 
+		// a click on the card does what a double click on the object does: it opens the file, or the relations of its type
+		if (fCard != NULL && _CardFrame().Contains(where)) {
+			_OpenCard();
+			return;
+		}
+
 		const bool doubleClick = current->GetInt32("clicks", 1) >= 2;
 		int32 node = _NodeAt(where);
 		bool nearFrom = true;
@@ -322,16 +353,45 @@ public:
 			fOffset.x += where.x - fLast.x;
 			fOffset.y += where.y - fLast.y;
 			fLast = where;
+			_ClearCard();
 			Invalidate();
 			return;
 		}
+		if (transit == B_EXITED_VIEW) {
+			fHover = fHoverEdge = -1;
+			_ClearCard();
+			Invalidate();
+			return;
+		}
+
+		// the card stays while the mouse is on its way to it (the gap between the object and the card) and on it, where it lights up
+		if (fCard != NULL && _InCardZone(where)) {
+			const bool hot = _CardFrame().Contains(where);
+			if (hot != fCardHot) {
+				fCardHot = hot;
+				Invalidate();
+			}
+			return;
+		}
+
 		int32 node = _NodeAt(where);
-		bool nearFrom;
+		bool nearFrom = true;
 		int32 edge = node < 0 ? _EdgeAt(where, &nearFrom) : -1;
 		if (node != fHover || edge != fHoverEdge || node >= 0 || edge >= 0) {
 			fHover = node;
 			fHoverEdge = edge;
 			fMouse = where;
+			if (!fOverlays) {
+				Invalidate();
+				return;
+			}
+			if (node >= 0) {
+				if (fCardKind != kNodeCard || fCardIndex != node)
+					_ShowNodeCard(node);
+			} else if (edge >= 0) {
+				_ShowEdgeCard(edge, nearFrom, where);
+			} else
+				_ClearCard();
 			Invalidate();
 		}
 	}
@@ -410,6 +470,146 @@ private:
 		return sen::graph::NodeRadiusAt(node.degree, fScale);
 	}
 
+	// ---- the card of what is under the mouse
+
+	void _ClearCard()
+	{
+		delete fCard;
+		fCard = NULL;
+		fCardKind = kNoCard;
+		fCardIndex = -1;
+		fCardHot = false;
+	}
+
+	BRect _CardFrame() const
+	{
+		return fCard != NULL ? fCard->Frame(const_cast<GraphView*>(this), Bounds(), fCardAnchor, fCardDistance, fCardAlign) : BRect();
+	}
+
+	/** whether a point is on the card, on the object that it belongs to, or between the two */
+	bool _InCardZone(BPoint where) const
+	{
+		const BRect frame = _CardFrame();
+		if (frame.InsetByCopy(-4, -4).Contains(where))
+			return true;
+		if (hypotf(where.x - fCardAnchor.x, where.y - fCardAnchor.y) <= fCardDistance)
+			return true;
+		// the way from the anchor to the card
+		BRect corridor = frame.left >= fCardAnchor.x
+			? BRect(fCardAnchor.x - 6, fCardAnchor.y - 10, frame.left + 2, fCardAnchor.y + 10)
+			: BRect(frame.right - 2, fCardAnchor.y - 10, fCardAnchor.x + 6, fCardAnchor.y + 10);
+		return corridor.Contains(where);
+	}
+
+	void _ShowNodeCard(int32 node)
+	{
+		const Node& object = fGraph.Nodes()[node];
+		_ClearCard();
+		sen::EntityCard* card = fLoadCard ? fLoadCard(object.id) : NULL;
+		if (card == NULL) {
+			// no file to read (or no way to find it): what the graph knows
+			card = new sen::EntityCard();
+			card->SetTitle(object.label.c_str());
+			if (!object.group.empty())
+				card->AddRow("Type", object.group.c_str());
+		}
+		BString relations;
+		relations << object.degree << (object.degree == 1 ? " relation" : " relations");
+		card->SetFooter(relations.String());
+
+		fCard = card;
+		fCardKind = kNodeCard;
+		fCardIndex = node;
+		fCardAnchor = _ToView(object);
+		fCardDistance = _Radius(object) + 10;
+		fCardAlign = sen::EntityCard::kCentred;
+		fCardHot = false;
+	}
+
+	/** how many objects a node is related to by a type: the lines of that type at the node */
+	int32 _TargetsAt(int32 node, const std::string& type) const
+	{
+		int32 count = 0;
+		for (const Edge& edge : fGraph.Edges()) {
+			if (edge.type == type && (edge.from == node || edge.to == node))
+				count++;
+		}
+		return count;
+	}
+
+	/** the card of a relation: its icon and its label as seen from the end that the mouse is nearer to, the two objects, and how many targets that end has */
+	void _ShowEdgeCard(int32 index, bool nearFrom, BPoint where)
+	{
+		const Edge& edge = fGraph.Edges()[index];
+		const BPoint a = _ToView(fGraph.Nodes()[edge.from]), b = _ToView(fGraph.Nodes()[edge.to]);
+
+		// the point of the line that is nearest to the mouse: the card is next to it
+		const float dx = b.x - a.x, dy = b.y - a.y;
+		const float length2 = dx * dx + dy * dy;
+		float t = length2 > 0.0001f ? ((where.x - a.x) * dx + (where.y - a.y) * dy) / length2 : 0;
+		t = std::min(std::max(t, 0.0f), 1.0f);
+		const BPoint anchor(a.x + t * dx, a.y + t * dy);
+
+		if (fCardKind == kEdgeCard && fCardIndex == index && fCardNearFrom == nearFrom) {
+			fCardAnchor = anchor;	// (the same card follows the mouse along the line)
+			return;
+		}
+
+		_ClearCard();
+		const Node& near = fGraph.Nodes()[nearFrom ? edge.from : edge.to];
+		const Node& other = fGraph.Nodes()[nearFrom ? edge.to : edge.from];
+		sen::EntityCard* card = new sen::EntityCard();
+		// the label of the relation from the nearer end: the inverse one at the other end
+		const std::string& label = nearFrom || edge.inverseLabel.empty() ? edge.label : edge.inverseLabel;
+		BString title(label.c_str());
+		if (title.IsEmpty())
+			title = ShortTypeName(edge.type);
+		card->SetTitle(title.String());
+		card->AddRow("From", near.label.c_str());
+		card->AddRow("To", other.label.c_str());
+		// the icon of the relation type, else the one that all relations have (as the folders of the relations in Akita)
+		BBitmap* icon = new BBitmap(BRect(0, 0, 31, 31), B_RGBA32);
+		if (!icon->IsValid() || (BMimeType(edge.type.c_str()).GetIcon(icon, B_LARGE_ICON) != B_OK
+				&& BMimeType(sen::onto::core::mime::kContains).GetIcon(icon, B_LARGE_ICON) != B_OK)) {
+			delete icon;
+			icon = NULL;
+		}
+		card->SetPicture(icon);
+		const int32 targets = _TargetsAt(nearFrom ? edge.from : edge.to, edge.type);
+		BString count;
+		count << targets << (targets == 1 ? " target" : " targets");
+		card->SetFooter(count.String());
+
+		fCard = card;
+		fCardKind = kEdgeCard;
+		fCardIndex = index;
+		fCardNearFrom = nearFrom;
+		fCardAnchor = anchor;
+		fCardDistance = 12;
+		// the card is beside the line and not over it: a line that leans to the right going down has its lower part under a card that is on the right,
+		// so the card is above the point (and below it for the other lean), and the mouse can go on along the line to either end
+		fCardAlign = dx * dy > 0 ? sen::EntityCard::kAbove : sen::EntityCard::kBelow;
+		fCardHot = false;
+	}
+
+	/** what a click on the card does: the same as a double click on the object, or on the line (at the end that the card is of) */
+	void _OpenCard()
+	{
+		if (fCardKind == kNodeCard) {
+			_Select(fCardIndex);
+			BMessage open(kOpenNode);
+			open.AddString("id", fGraph.Nodes()[fCardIndex].id.c_str());
+			Window()->PostMessage(&open);
+		} else if (fCardKind == kEdgeCard) {
+			const Edge& edge = fGraph.Edges()[fCardIndex];
+			_SelectEdge(fCardIndex);
+			BMessage open(kOpenRelations);
+			open.AddString("id", fGraph.Nodes()[fCardNearFrom ? edge.from : edge.to].id.c_str());
+			open.AddString("type", edge.type.c_str());
+			Window()->PostMessage(&open);
+		}
+	}
+
 	int32 _NodeAt(BPoint where) const
 	{
 		const std::vector<Node>& nodes = fGraph.Nodes();
@@ -483,6 +683,7 @@ private:
 
 	void _Zoom(BPoint where, float factor)
 	{
+		_ClearCard();
 		float scale = std::min(std::max(fScale * factor, 0.05f), 6.0f);
 		factor = scale / fScale;
 		fAutoFit = false;
@@ -517,8 +718,17 @@ private:
 	BSize				fSize;
 	int32				fHover;
 	int32				fSelected;
-	sen::EntityCard*	fCard;		///< what is known about an object, drawn next to it with a translucent background
-	int32				fCardNode;	///< the object that the card is of
+	enum { kNoCard, kNodeCard, kEdgeCard };
+	sen::EntityCard*	fCard;			///< the card of what is under the mouse (an object or a line), drawn next to it with a translucent background
+	int32				fCardKind;
+	int32				fCardIndex;		///< the node or the line that the card is of
+	bool				fCardNearFrom;	///< for a line: the card is of the first of its nodes (else of the second)
+	BPoint				fCardAnchor;	///< where the card belongs to (the middle of the node, a point of the line)
+	float				fCardDistance;	///< how far from the anchor the card starts
+	sen::EntityCard::Align	fCardAlign;	///< beside the anchor: in the middle of it, or above or below it (a line must not run under the card)
+	bool				fCardHot;		///< the mouse is on the card: it lights up
+	bool				fOverlays;
+	std::function<sen::EntityCard*(const std::string&)>	fLoadCard;
 	int32				fHoverEdge;
 	int32				fSelectedEdge;
 	BPoint				fMouse;
@@ -727,47 +937,9 @@ GraphView::Draw(BRect)
 		DrawString(nodeTexts[i].String(), where);
 	}
 
-	// the card of the selected object: over everything but the tooltip, and the graph shows through
-	if (fCard != NULL && fSelected >= 0 && fSelected == fCardNode)
-		fCard->Draw(this, Bounds(), _ToView(nodes[fSelected]), _Radius(nodes[fSelected]) + 10, fDark);
-
-	// what is under the mouse: a node, or a line
-	BString lines[3];
-	int lineCount = 0;
-	if (fHover >= 0) {
-		const Node& node = nodes[fHover];
-		lines[0] = node.label.c_str();
-		lines[1] = node.group.c_str();
-		lines[2] << node.degree << (node.degree == 1 ? " relation" : " relations");
-		lineCount = 3;
-	} else if (fHoverEdge >= 0) {
-		const Edge& edge = edges[fHoverEdge];
-		lines[0] = nodes[edge.from].label.c_str();
-		lines[0] << (edge.reciprocal ? "  <->  " : "  ->  ") << nodes[edge.to].label.c_str();
-		lines[1] = EdgeLabel(edge);
-		if (!edge.type.empty())
-			lines[1] << (lines[1].IsEmpty() ? "" : "  ") << "(" << ShortTypeName(edge.type) << ")";
-		lines[2] = "Double click: its relations";
-		lineCount = 3;
-	}
-	if (lineCount > 0) {
-		float width = 0;
-		for (int line = 0; line < lineCount; line++)
-			width = std::max(width, font.StringWidth(lines[line].String()));
-		float lineHeight = height.ascent + height.descent + height.leading + 1;
-		BRect box(fMouse.x + 14, fMouse.y + 14, fMouse.x + 14 + width + 12, fMouse.y + 14 + lineHeight * lineCount + 8);
-		if (box.right > Bounds().right)
-			box.OffsetBy(Bounds().right - box.right - 4, 0);
-		if (box.bottom > Bounds().bottom)
-			box.OffsetBy(0, Bounds().bottom - box.bottom - 4);
-		SetHighColor(fDark ? Color({0x2a, 0x2d, 0x35}) : ui_color(B_TOOL_TIP_BACKGROUND_COLOR));
-		FillRoundRect(box, 3, 3);
-		SetHighColor(fDark ? Color({0x55, 0x5b, 0x66}) : tint_color(ui_color(B_TOOL_TIP_BACKGROUND_COLOR), B_DARKEN_3_TINT));
-		StrokeRoundRect(box, 3, 3);
-		SetHighColor(fDark ? textColor : ui_color(B_TOOL_TIP_TEXT_COLOR));
-		for (int line = 0; line < lineCount; line++)
-			DrawString(lines[line].String(), BPoint(box.left + 6, box.top + 4 + height.ascent + line * lineHeight));
-	}
+	// the card of what is under the mouse: over everything, and the graph shows through
+	if (fCard != NULL)
+		fCard->Draw(this, Bounds(), fCardAnchor, fCardDistance, fDark, fCardHot, fCardAlign);
 }
 
 
@@ -808,6 +980,7 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 	fHasFocus(false)
 {
 	fView = new GraphView();
+	fView->SetCardLoader([this](const std::string& id) { return _LoadCard(id); });
 	fMeta = new BCheckBox("meta", "Classifications and contexts", new BMessage(kFilter));
 	fUnconnected = new BCheckBox("unconnected", "Objects without relations", new BMessage(kFilter));
 	fOntologies = new BCheckBox("ontologies", "Ontologies", new BMessage(kFilter));
@@ -858,24 +1031,29 @@ GraphWindow::~GraphWindow()
 }
 
 
-/** The card of the selected object is shown over the graph next to its node (what Shoji would show of it, a line each, read-only); none if no object is selected,
- *  it is not a file that is known, or the preview is off. */
+/** The card of what is under the mouse (an object: what Shoji would show of it, a line each, read-only; a relation: its icon and label) is drawn by the view over the
+ *  graph; the window knows the file of a node, the checkbox switches the cards off. */
 void
 GraphWindow::_UpdatePreview()
 {
-	const int32 node = fPreview->Value() == B_CONTROL_ON ? fView->SelectedNode() : -1;
-	auto found = node >= 0 ? fRefs.find(fView->Graph().Nodes()[node].id) : fRefs.end();
-	if (found == fRefs.end()) {
-		fView->SetCard(NULL);
-		return;
-	}
+	fView->SetOverlays(fPreview->Value() == B_CONTROL_ON);
+}
+
+
+/** The card of the file of a node, NULL if the node is no file that is known or its card cannot be made. */
+sen::EntityCard*
+GraphWindow::_LoadCard(const std::string& id) const
+{
+	auto found = fRefs.find(id);
+	if (found == fRefs.end())
+		return NULL;
 
 	sen::EntityCard* card = new sen::EntityCard();
 	if (card->Load(found->second) != B_OK) {
 		delete card;
-		card = NULL;
+		return NULL;
 	}
-	fView->SetCard(card, node);
+	return card;
 }
 
 
@@ -917,8 +1095,16 @@ GraphWindow::MessageReceived(BMessage* message)
 		}
 		case kSelectionChanged:
 			fSaveSelection->SetEnabled(fView->HasSelection());
-			_UpdatePreview();
 			break;
+#ifdef SEN_TESTING
+		case kTestMouse:
+		{
+			BPoint screen;
+			if (message->FindPoint("screen_where", &screen) == B_OK)
+				fView->TestMouse(fView->ConvertFromScreen(screen), message->GetBool("down", false));
+			break;
+		}
+#endif
 		case kPreviewToggled:
 			_UpdatePreview();
 			break;

@@ -19,6 +19,8 @@ class BStringView;
 class SenConfigHandler;
 
 namespace sen {
+class EntityCard;
+
 namespace ui {
 
 class GraphView;
@@ -47,8 +49,9 @@ private:
 	void			_ApplyFocus();
 	void			_OpenRelations(const BMessage* message);
 	void			_Save(const BMessage* message);
-	/** the card of the selected object over the graph, or none */
+	/** the cards of what is under the mouse in the graph: on or off */
 	void			_UpdatePreview();
+	sen::EntityCard*	_LoadCard(const std::string& id) const;
 	static int32	_WorkEntry(void* data);
 
 	GraphView*		fView;
