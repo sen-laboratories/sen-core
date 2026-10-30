@@ -19,6 +19,8 @@
 
 #include <string.h>
 
+#include <map>
+#include <utility>
 #include <vector>
 
 #include <sen/Sen.h>
@@ -114,6 +116,43 @@ NameOfType(const std::string& type, std::map<std::string, std::string>* names)
 	return name;
 }
 
+/** the labels that the definition of a relation type gives (`SEN:REL:CONFIG` in the MIME database): what it says forward ("cites") and the other way ("cited by"); empty if it does not say */
+struct TypeLabels {
+	std::string	forward, inverse;
+};
+
+const TypeLabels&
+LabelsOfType(const std::string& type, std::map<std::string, TypeLabels>* cache)
+{
+	auto found = cache->find(type);
+	if (found != cache->end())
+		return found->second;
+
+	TypeLabels labels;
+	BPath path;
+	if (!type.empty() && find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK && path.Append("mime_db") == B_OK && path.Append(type.c_str()) == B_OK) {
+		BNode node(path.Path());
+		attr_info info;
+		if (node.InitCheck() == B_OK && node.GetAttrInfo(sen::attr::kRelationConfig, &info) == B_OK && info.size > 0 && info.size < 64 * 1024) {
+			std::vector<char> buffer(info.size);
+			BMessage config, relation, inverse;
+			if (node.ReadAttr(sen::attr::kRelationConfig, B_MESSAGE_TYPE, 0, buffer.data(), info.size) == info.size && config.Unflatten(buffer.data()) == B_OK) {
+				if (config.FindMessage(sen::conf::kRelation, &relation) == B_OK)
+					labels.forward = relation.GetString(sen::attr::kRelationLabel, "");
+				if (config.FindMessage(sen::conf::kInverse, &inverse) == B_OK)
+					labels.inverse = inverse.GetString(sen::attr::kRelationLabel, "");
+			}
+		}
+	}
+	return (*cache)[type] = labels;
+}
+
+/** a relation as a file has it, before the labels are settled */
+struct Pending {
+	std::string	from, to, label, type;
+	bool		meta;
+};
+
 }	// namespace
 
 
@@ -145,8 +184,11 @@ Collect(Collected* collected, size_t maxObjects)
 		collected->refs[id.String()] = ref;
 	}
 
-	// the edges
+	// the edges: first as the files have them
 	std::map<std::string, std::string> typeNames;
+	std::map<std::string, TypeLabels> typeLabels;
+	std::vector<Pending> pending;
+	std::map<std::pair<std::string, std::string>, size_t> index;
 	for (const auto& object : collected->refs) {
 		BNode node(&object.second);
 		if (node.InitCheck() != B_OK)
@@ -162,18 +204,45 @@ Collect(Collected* collected, size_t maxObjects)
 				continue;
 			const bool meta = strcmp(list, sen::attr::kMeta) == 0;
 			for (const std::string& target : targets) {
-				std::string label, type;
+				Pending edge;
+				edge.from = object.first;
+				edge.to = target;
+				edge.meta = meta;
 				auto relation = relations.find(target);
 				if (relation != relations.end()) {
-					type = relation->second.type;
-					label = relation->second.label;
+					edge.type = relation->second.type;
+					edge.label = relation->second.label;
 				}
-				if (label.empty())
-					label = NameOfType(type, &typeNames);
-				collected->graph.AddEdge(object.first, target, label, type, meta);
+				index[{edge.from, edge.to}] = pending.size();
+				pending.push_back(edge);
 			}
 		}
 	}
+
+	// a relation that has no label of its own says what its type says: "cites" forward and "cited by" the other way, not the name of the type ("Citation"). Of the two directions of a
+	// relation that have none, the one of the file with the smaller id is the forward one (the files do not tell which of them made the relation).
+	for (Pending& edge : pending) {
+		if (!edge.label.empty())
+			continue;
+		const TypeLabels& labels = LabelsOfType(edge.type, &typeLabels);
+		if (labels.forward.empty()) {
+			edge.label = NameOfType(edge.type, &typeNames);
+			continue;
+		}
+		auto opposite = index.find({edge.to, edge.from});
+		if (opposite == index.end()) {
+			edge.label = labels.forward;
+		} else {
+			const std::string& other = pending[opposite->second].label;
+			if (!other.empty())
+				edge.label = other == labels.forward && !labels.inverse.empty() ? labels.inverse : labels.forward;
+			else
+				edge.label = edge.from < edge.to || labels.inverse.empty() ? labels.forward : labels.inverse;
+		}
+	}
+
+	for (const Pending& edge : pending)
+		collected->graph.AddEdge(edge.from, edge.to, edge.label, edge.type, edge.meta);
 
 	spdlog::debug("graph: {} objects, {} nodes, {} relations", collected->objects, collected->graph.Nodes().size(), collected->graph.Edges().size());
 	return B_OK;
