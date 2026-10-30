@@ -6,6 +6,7 @@
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
 #include "Cli.h"
+#include "Enrichment.h"
 #include "../deskbar/DeskbarView.h"
 #include "SenServer.h"
 #include "Reply.h"
@@ -591,6 +592,14 @@ void SenServer::MessageReceived(BMessage* message)
             relationHandler->MessageReceived(message);
             return; // done
         }
+		// plugins: the server chooses the plugin for a file, for every client alike
+		case sen::cmd::kEnrichRefs:
+		{
+			BString detail;
+			result = sen::enrich::Handle(*message, &detail);
+			reply->AddString(sen::key::kDetail, detail);
+			break;
+		}
 		default:
 		{
             result = B_UNSUPPORTED;
