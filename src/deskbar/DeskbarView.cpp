@@ -9,6 +9,7 @@
 
 #include <sen/Sen.h>
 #include <sen/SenLookup.h>
+#include <sen/SenKey.h>
 #include <sen/SenOntoCore.h>
 #include <sen/Sensei.h>
 
@@ -169,9 +170,9 @@ DeskbarView::MouseDown(BPoint where)
 void
 DeskbarView::MouseUp(BPoint)
 {
-	// the knot opens the knowledge graph as a list: the query with all the files that have a SEN:ID; with the SEN key (Command) as a graph
+	// the knot opens the knowledge graph as a list: the query with all the files that have a SEN:ID; with the SEN key (a setting, the standard shortcut key by default) as a graph
 	if ((fLastButtons & B_PRIMARY_MOUSE_BUTTON) != 0)
-		_Send((modifiers() & B_COMMAND_KEY) != 0 ? sen::cmd::kUiOpenGraph : sen::cmd::kUiOpenObjects);
+		_Send(sen::SenKeyIsDown() ? sen::cmd::kUiOpenGraph : sen::cmd::kUiOpenObjects);
 	fLastButtons = 0;
 }
 

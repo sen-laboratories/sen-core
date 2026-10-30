@@ -73,12 +73,38 @@ struct KeyChoice {
 	int32		key;
 };
 
-static const KeyChoice kKeys[] = {
-	{"Command (the Apple key, Alt on a PC keyboard)", B_COMMAND_KEY},
+/** the other keys that can be the SEN key by choice (the standard shortcut key of Haiku is the first item of the menu) */
+static const KeyChoice kOtherKeys[] = {
 	{"Option (the Windows key on a PC keyboard)", B_OPTION_KEY},
 	{"Control", B_CONTROL_KEY},
 	{"Shift", B_SHIFT_KEY},
 };
+
+/** the standard shortcut key of Haiku, with the key of the keyboard that it is in the key map that is active (the Alt key in the default one of a PC keyboard) */
+static BString
+StandardKeyLabel()
+{
+	BString name;
+	uint32 code = 0;
+	if (get_modifier_key(B_LEFT_COMMAND_KEY, &code) == B_OK) {
+		switch (code) {
+			case 0x5d:
+			case 0x5f:	name = "Alt key"; break;
+			case 0x5c:
+			case 0x60:	name = "Control key"; break;
+			case 0x66:
+			case 0x67:	name = "Windows key, Command on a Mac keyboard"; break;
+			case 0x68:	name = "Menu key"; break;
+			case 0x4b:
+			case 0x56:	name = "Shift key"; break;
+			default:	break;
+		}
+	}
+	BString label("Standard shortcut key of Haiku");
+	if (!name.IsEmpty())
+		label << " (" << name << ")";
+	return label;
+}
 
 
 SettingsWindow::SettingsWindow(SenConfigHandler* config)
@@ -93,8 +119,18 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	bool akitaInstalled = AkitaInstalled();
 	bool useFileTypes = settings.GetBool(sen::key::kUseSenFileTypes, true);
 
+	// the standard shortcut key first (what Haiku itself uses for its shortcuts, wherever the user has it on the keyboard), then the keys that can be chosen by hand
 	BPopUpMenu* menu = new BPopUpMenu("key");
-	for (const KeyChoice& choice : kKeys) {
+	BMessage* standard = new BMessage(kSetKey);
+	standard->AddInt32("key", B_COMMAND_KEY);
+	BMenuItem* standardItem = new BMenuItem(StandardKeyLabel().String(), standard);
+	standardItem->SetMarked(current == B_COMMAND_KEY);
+	menu->AddItem(standardItem);
+	menu->AddSeparatorItem();
+	BMenuItem* heading = new BMenuItem("Or another key:", NULL);
+	heading->SetEnabled(false);
+	menu->AddItem(heading);
+	for (const KeyChoice& choice : kOtherKeys) {
 		BMessage* message = new BMessage(kSetKey);
 		message->AddInt32("key", choice.key);
 		BMenuItem* item = new BMenuItem(choice.label, message);
@@ -104,7 +140,7 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	menu->SetTargetForItems(this);
 	fKeyField = new BMenuField("keyfield", "SEN key:", menu);
 
-	BStringView* keyHelp = new BStringView("keyhelp", "Drag files onto others with this key pressed to relate them.");
+	BStringView* keyHelp = new BStringView("keyhelp", "Hold this key to relate files by dragging, and to open the graph from the knot and from Akita.");
 	keyHelp->SetFont(be_plain_font);
 
 	fAkita = new BCheckBox("akita", "Use Akita instead of Tracker", new BMessage(kSetAkita));
