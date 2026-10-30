@@ -116,10 +116,13 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	BMessage settings;
 	config->GetConfig(&settings);
 	int32 current = settings.GetInt32(sen::key::kModifierKey, B_COMMAND_KEY);
+	// (a value that is none of the keys of the menu counts as the standard one, as in SenKey.h)
+	if (current != B_OPTION_KEY && current != B_CONTROL_KEY && current != B_SHIFT_KEY)
+		current = B_COMMAND_KEY;
 	bool akitaInstalled = AkitaInstalled();
 	bool useFileTypes = settings.GetBool(sen::key::kUseSenFileTypes, true);
 
-	// the standard shortcut key first (what Haiku itself uses for its shortcuts, wherever the user has it on the keyboard), then the keys that can be chosen by hand
+	// the standard shortcut key first (what Haiku itself uses for its shortcuts, wherever the user has it on the keyboard), then, below the separator, the keys that can be chosen by hand
 	BPopUpMenu* menu = new BPopUpMenu("key");
 	BMessage* standard = new BMessage(kSetKey);
 	standard->AddInt32("key", B_COMMAND_KEY);
@@ -127,9 +130,6 @@ SettingsWindow::SettingsWindow(SenConfigHandler* config)
 	standardItem->SetMarked(current == B_COMMAND_KEY);
 	menu->AddItem(standardItem);
 	menu->AddSeparatorItem();
-	BMenuItem* heading = new BMenuItem("Or another key:", NULL);
-	heading->SetEnabled(false);
-	menu->AddItem(heading);
 	for (const KeyChoice& choice : kOtherKeys) {
 		BMessage* message = new BMessage(kSetKey);
 		message->AddInt32("key", choice.key);
