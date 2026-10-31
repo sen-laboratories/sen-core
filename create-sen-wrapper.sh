@@ -12,6 +12,7 @@
 #   sen info         --info:    an overview of SEN objects, types and relations
 #   sen types        --types:   the types and relations as a tree, with the number of files
 #   sen check        --check:   look for inconsistencies
+#   sen migrate-people  --migrate-people: add the standard attributes to the contacts of People (the server asks first; this is asking for it)
 #   sen migrate      --migrate: the steps that make the data of the user what this version expects (sen migrate --dry-run: only counts)
 #   sen help         the options
 #   sen --check      (any option of sen_server works, too)
@@ -117,7 +118,7 @@ stop_server()
 }
 
 case "\$1" in
-    version|info|types|check|migrate|help)
+    version|info|types|check|migrate|migrate-people|help)
         option="--\$1"
         shift
         exec "\$(server)" "\$option" "\$@"

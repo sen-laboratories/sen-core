@@ -249,6 +249,88 @@ CheckKnowsOfOlderVersions()
 	system(command.String());
 }
 
+// ---- the contacts of People
+
+static BString
+MakeContact(const char* name, std::initializer_list<std::pair<const char*, const char*>> attributes)
+{
+	BString path(dir);
+	path << "/" << name;
+	BFile file(path.String(), B_CREATE_FILE | B_READ_WRITE);
+	BNodeInfo(&file).SetType(sen::onto::people::mime::kPeoplePerson);
+	BNode node(path.String());
+	for (const auto& attribute : attributes) {
+		BString value(attribute.second);
+		node.WriteAttrString(attribute.first, &value);
+	}
+	return path;
+}
+
+static BString
+Text(const BString& path, const char* attribute)
+{
+	BNode node(path.String());
+	BString value;
+	node.ReadAttrString(attribute, &value);
+	return value;
+}
+
+static void
+TestPeopleAttributes()
+{
+	namespace people = sen::onto::people::attr;
+	BString ada = MakeContact("Contact Ada", {{people::kBeName, "Ada Lovelace"}, {people::kBeNickname, "Countess"}, {people::kBeEmail, "ada@example.org"},
+		{people::kBeHphone, "111"}, {people::kBeWphone, "333"}, {people::kBeUrl, "https://example.org/ada"}, {people::kBeGroup, "Family, Friends"}});
+	BString bob = MakeContact("Contact Bob", {{people::kBeName, "Bob Old"}, {people::kBeMphone, "222"}, {people::kBeWphone, "333"},
+		{people::kName, "Bob Edited"}});		// (a name that was edited since)
+	BString nobody = MakeContact("Contact Nobody", {});
+	BString other;
+	{
+		other << dir << "/Not a contact";
+		BFile file(other.String(), B_CREATE_FILE | B_READ_WRITE);
+		BNode node(other.String());
+		BString value("Some Name");
+		node.WriteAttrString(people::kBeName, &value);
+	}
+
+	auto refOf = [](const BString& path) {
+		entry_ref ref;
+		BEntry(path.String()).GetRef(&ref);
+		return ref;
+	};
+	std::vector<entry_ref> contacts = {refOf(ada), refOf(bob), refOf(nobody)};
+
+	sen::migration::Counts counts = sen::migration::UpsertPeopleAttributes(contacts, true);
+	CHECK(counts.failed == 0 && counts.changed == 2, "a dry run counts the two contacts that have something to add");
+	CHECK(!Has(ada, people::kName) && !Has(ada, people::kMbox), "a dry run adds nothing");
+
+	counts = sen::migration::UpsertPeopleAttributes(contacts, false);
+	CHECK(counts.failed == 0 && counts.changed == 2, "the run changes the two contacts");
+	CHECK(Text(ada, people::kName) == "Ada Lovelace" && Text(ada, people::kNickname) == "Countess" && Text(ada, people::kMbox) == "ada@example.org",
+		"the name, the nickname and the e-mail are there");
+	CHECK(Text(ada, people::kHomepage) == "https://example.org/ada", "and the homepage");
+	CHECK(Text(ada, people::kPhone) == "111", "the phone is the home phone if there is no mobile phone");
+	CHECK(Text(ada, people::kGroups) == "Family,Friends", "the groups are a list");
+	CHECK(Text(bob, people::kPhone) == "222", "the mobile phone is the one that is taken first");
+	CHECK(Text(bob, people::kName) == "Bob Edited", "a name that was edited since stays");
+	CHECK(Text(ada, people::kBeName) == "Ada Lovelace" && Text(ada, people::kBeEmail) == "ada@example.org" && Text(ada, people::kBeGroup) == "Family, Friends",
+		"what People keeps is as it was");
+	CHECK(!Has(nobody, people::kName) && !Has(other, people::kName), "a contact with nothing to add, and a file that is no contact, are left alone");
+
+	counts = sen::migration::UpsertPeopleAttributes(contacts, false);
+	CHECK(counts.failed == 0 && counts.changed == 0, "a second run has nothing to add");
+
+	std::vector<entry_ref> found = sen::migration::FindContacts();
+	bool foundAda = false, foundOther = false;
+	for (const entry_ref& ref : found) {
+		foundAda = foundAda || BString(BPath(&ref).Path()) == ada;
+		foundOther = foundOther || BString(BPath(&ref).Path()) == other;
+	}
+	CHECK(foundAda && !foundOther, "the contacts are found on the volumes by their type");
+
+	CHECK(!sen::migration::OptionalSteps().empty() && strcmp(sen::migration::OptionalSteps()[0].name, "people-attributes") == 0, "the step is an optional one");
+}
+
 int
 main()
 {
@@ -340,6 +422,17 @@ main()
 	system(command.String());
 
 	CheckKnowsOfOlderVersions();
+
+	// (CheckKnowsOfOlderVersions removes its folder at its end: the contacts get theirs)
+	{
+		BString make("mkdir -p '");
+		make << dir << "'";
+		system(make.String());
+		TestPeopleAttributes();
+		BString remove("rm -rf '");
+		remove << dir << "'";
+		system(remove.String());
+	}
 
 	printf("%s\n", failed == 0 ? "all ok" : "FAILED");
 	return failed == 0 ? 0 : 1;

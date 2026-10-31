@@ -17,6 +17,8 @@
 #include <spdlog/spdlog.h>
 
 #include <sen/Sen.h>
+#include <sen/SenList.h>
+#include <sen/SenOntoPeople.h>
 
 #include "../relations/QueryUtil.h"
 
@@ -140,6 +142,139 @@ PersonalRelation(bool dryRun)
 }
 
 }	// namespace
+
+
+namespace {
+
+/** the value of a string attribute, empty if it has none */
+BString
+StringAttr(BNode& node, const char* name)
+{
+	BString value;
+	node.ReadAttrString(name, &value);
+	value.Trim();
+	return value;
+}
+
+bool
+HasAttr(BNode& node, const char* name)
+{
+	attr_info info;
+	return node.GetAttrInfo(name, &info) == B_OK;
+}
+
+}	// namespace
+
+
+std::vector<entry_ref>
+FindContacts()
+{
+	std::vector<entry_ref> contacts;
+	BString predicate("BEOS:TYPE==\"");
+	predicate << sen::onto::people::mime::kPeoplePerson << "\"";
+	sen::QueryAllVolumes(predicate.String(), &contacts);
+	return contacts;
+}
+
+
+Counts
+UpsertPeopleAttributes(const std::vector<entry_ref>& contacts, bool dryRun)
+{
+	namespace people = sen::onto::people::attr;
+	struct Mapping {
+		const char*	from;
+		const char*	to;
+	};
+	// (the phone: the first that the contact has of these)
+	static const Mapping kSimple[] = {
+		{people::kBeName, people::kName},
+		{people::kBeNickname, people::kNickname},
+		{people::kBeEmail, people::kMbox},
+		{people::kBeUrl, people::kHomepage},
+	};
+	static const char* const kPhones[] = {people::kBeMphone, people::kBeHphone, people::kBeWphone};
+
+	Counts counts;
+	for (const entry_ref& contact : contacts) {
+		BNode node(&contact);
+		if (node.InitCheck() != B_OK)
+			continue;
+
+		// what is to be added: attribute name and value
+		std::vector<std::pair<const char*, BString>> additions;
+		for (const Mapping& mapping : kSimple) {
+			BString value = StringAttr(node, mapping.from);
+			if (!value.IsEmpty() && !HasAttr(node, mapping.to))
+				additions.push_back({mapping.to, value});
+		}
+		if (!HasAttr(node, people::kPhone)) {
+			for (const char* phone : kPhones) {
+				BString value = StringAttr(node, phone);
+				if (!value.IsEmpty()) {
+					additions.push_back({people::kPhone, value});
+					break;
+				}
+			}
+		}
+		// the groups of People are "Family, Friends": a list
+		BString groups = StringAttr(node, people::kBeGroup);
+		if (!groups.IsEmpty() && !HasAttr(node, people::kGroups)) {
+			std::vector<std::string> values;
+			for (const std::string& group : sen::list::Split(groups.String(), ',')) {
+				BString trimmed(group.c_str());
+				trimmed.Trim();
+				if (!trimmed.IsEmpty())
+					values.push_back(trimmed.String());
+			}
+			if (!values.empty())
+				additions.push_back({people::kGroups, BString(sen::list::Join(values, ',').c_str())});
+		}
+
+		if (additions.empty())
+			continue;
+		if (dryRun) {
+			counts.changed++;
+			continue;
+		}
+
+		bool failed = false;
+		for (const auto& addition : additions) {
+			ssize_t size = addition.second.Length() + 1;
+			if (node.WriteAttr(addition.first, B_STRING_TYPE, 0, addition.second.String(), size) != size) {
+				spdlog::error("migration: could not write {} of {}", addition.first, contact.name);
+				failed = true;
+			}
+		}
+		if (failed)
+			counts.failed++;
+		else {
+			spdlog::info("migration: {} got {} standard attributes", contact.name, (int) additions.size());
+			counts.changed++;
+		}
+	}
+	return counts;
+}
+
+
+namespace {
+
+Counts
+PeopleAttributes(bool dryRun)
+{
+	return UpsertPeopleAttributes(FindContacts(), dryRun);
+}
+
+}	// namespace
+
+
+const std::vector<OptionalStep>&
+OptionalSteps()
+{
+	static const std::vector<OptionalStep> steps = {
+		{"people-attributes", "the contacts of People get the standard attributes (name, e-mail, phone, homepage, groups), People's own stay as they are", PeopleAttributes},
+	};
+	return steps;
+}
 
 
 const std::vector<Step>&

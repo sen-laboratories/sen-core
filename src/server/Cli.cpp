@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+#include <File.h>
+#include <FindDirectory.h>
+#include <Message.h>
+#include <Path.h>
 #include <Roster.h>
 #include <String.h>
 
@@ -198,7 +202,43 @@ Migrate(bool dryRun)
 		printf("  %d %-20s %s: %s\n", (int) report.step->version, report.step->name, report.step->what, state.String());
 		failed = failed || report.counts.failed > 0;
 	}
+
+	// the steps that the user decides on: what they would do, and what the user said
+	BMessage settings;
+	{
+		BPath path;
+		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK && path.Append("sen") == B_OK && path.Append(sen::config::kSettingsFile) == B_OK) {
+			BFile file(path.Path(), B_READ_ONLY);
+			if (file.InitCheck() == B_OK)
+				settings.Unflatten(&file);
+		}
+	}
+	for (const sen::migration::OptionalStep& step : sen::migration::OptionalSteps()) {
+		const int32 state = settings.GetInt32((BString(sen::migration::kOptionalPrefix) << step.name).String(), sen::migration::kOptionalToAsk);
+		BString text;
+		if (state == sen::migration::kOptionalDone)
+			text = "done";
+		else {
+			sen::migration::Counts counts = step.run(true);
+			text << (int) counts.changed << " to change, " << (state == sen::migration::kOptionalDeclined ? "declined (the server does not ask)" : "the server asks");
+		}
+		printf("  - %-20s %s: %s\n", step.name, step.what, text.String());
+	}
 	return failed ? 1 : 0;
+}
+
+/** an optional step, run on request ("sen_server --migrate-people"): who asks for it has said yes. It counts with --dry-run. */
+int
+MigrateOptional(const char* name, bool dryRun)
+{
+	for (const sen::migration::OptionalStep& step : sen::migration::OptionalSteps()) {
+		if (strcmp(step.name, name) != 0)
+			continue;
+		sen::migration::Counts counts = step.run(dryRun);
+		printf("%s: %d %s%s\n", step.name, (int) counts.changed, dryRun ? "to change" : "changed", counts.failed > 0 ? ", some could not be changed" : "");
+		return counts.failed > 0 ? 1 : 0;
+	}
+	return 2;
 }
 
 void
@@ -213,6 +253,7 @@ Usage(FILE* out, const char* program)
 		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing indices\n"
 		"  --migrate  make the data of the user what this version expects (renamed relation types...): the steps that are done and to do\n"
 		"             (--migrate --dry-run only counts; the server runs the steps itself when it starts)\n"
+		"  --migrate-people  add the standard attributes to the contacts of People (the server asks first, this is asking for it; --dry-run counts)\n"
 		"  --help     this text\n",
 		program);
 }
@@ -237,6 +278,8 @@ RunCommandLine(int argc, char* argv[])
 		return Check();
 	if (strcmp(option, "--migrate") == 0)
 		return Migrate(argc > 2 && strcmp(argv[2], "--dry-run") == 0);
+	if (strcmp(option, "--migrate-people") == 0)
+		return MigrateOptional("people-attributes", argc > 2 && strcmp(argv[2], "--dry-run") == 0);
 	if (strcmp(option, "--help") == 0 || strcmp(option, "-h") == 0) {
 		Usage(stdout, argv[0]);
 		return 0;

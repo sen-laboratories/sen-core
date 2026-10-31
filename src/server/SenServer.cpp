@@ -25,7 +25,9 @@
 #include <utility>
 #include <vector>
 
+#include <Alert.h>
 #include <AppFileInfo.h>
+#include <Invoker.h>
 #include <Looper.h>
 #include <Deskbar.h>
 #include <Directory.h>
@@ -49,6 +51,10 @@ static const uint32 kRetryDeskbar = 'SDbr';
 /** sent when the ontologies should be brought up to date (by the timer), and by the thread that did it */
 static const uint32 kUpdateOntologies = 'SOnu';
 static const uint32 kOntologiesUpdated = 'SOnd';
+/** an optional migration has something to do and the user is to be asked; the answer of the user; the step that was run for a yes */
+static const uint32 kMigrationQuestion = 'SMqu';
+static const uint32 kMigrationAnswer = 'SMan';
+static const uint32 kMigrationRan = 'SMrn';
 
 /**
  * A package is activated some time after its file arrived (and the server is not told when): the update is repeated for a while.
@@ -110,7 +116,53 @@ static BMessage* RunMigrations(SenConfigHandler* config)
 		return config->UpdateSettings(&change);
 	};
 	sen::migration::Run(store, false);
+
+	// An optional step (it adds to what other programs keep) that has something to do is a question for the user, and the first one is asked now.
+	BMessage settings;
+	config->GetConfig(&settings);
+	for (const sen::migration::OptionalStep& step : sen::migration::OptionalSteps()) {
+		BString setting(sen::migration::kOptionalPrefix);
+		setting << step.name;
+		if (settings.GetInt32(setting.String(), sen::migration::kOptionalToAsk) != sen::migration::kOptionalToAsk)
+			continue;
+		sen::migration::Counts counts = step.run(true);
+		if (counts.changed <= 0)
+			continue;
+		BMessage* question = new BMessage(kMigrationQuestion);
+		question->AddString("step", step.name);
+		question->AddInt32("count", counts.changed);
+		return question;
+	}
 	return NULL;	// (no result to tell)
+}
+
+/** remembers what the user said about an optional step */
+static void
+RecordOptional(SenConfigHandler* config, const char* step, int32 state)
+{
+	BMessage change;
+	change.AddInt32((BString(sen::migration::kOptionalPrefix) << step).String(), state);
+	config->UpdateSettings(&change);
+}
+
+/** runs an optional step for real, in the worker; the message tells the server how many files it changed */
+static BMessage*
+RunOptionalStep(SenConfigHandler* config, BString name)
+{
+	for (const sen::migration::OptionalStep& step : sen::migration::OptionalSteps()) {
+		if (name != step.name)
+			continue;
+		sen::migration::Counts counts = step.run(false);
+		// (a step that could not change everything is asked again at the next start: what it did stays, a second run adds the rest)
+		if (counts.failed == 0)
+			RecordOptional(config, step.name, sen::migration::kOptionalDone);
+		BMessage* done = new BMessage(kMigrationRan);
+		done->AddString("step", name);
+		done->AddInt32("changed", counts.changed);
+		done->AddInt32("failed", counts.failed);
+		return done;
+	}
+	return NULL;
 }
 
 int main(int argc, char* argv[])
@@ -228,7 +280,7 @@ void SenServer::ReadyToRun()
     }
 
     // the data that older versions made: renamed relation types and the like
-    fWorker->Post([config = senConfigHandler]() { return RunMigrations(config); }, BMessenger());
+    fWorker->Post([config = senConfigHandler]() { return RunMigrations(config); }, BMessenger(this));
 
     // the relations that were installed before there was a navigator for them (or a navigator for all relations)
     relationHandler->AssignMissingNavigators();
@@ -326,6 +378,40 @@ bool SenServer::QuitRequested()
 
 void SenServer::MessageReceived(BMessage* message)
 {
+	if (message->what == kMigrationQuestion) {
+		// (only the one step that there is for now: its question is told in words here)
+		BString question;
+		int32 count = message->GetInt32("count", 0);
+		question << "SEN found " << (int) count << (count == 1 ? " contact" : " contacts") << " of the People application.\n\n"
+			<< "The standard attributes (name, e-mail, phone, homepage and groups) can be added to them, so that SEN and Shoji can use them. "
+			<< "What People keeps stays as it is: People, Mail and the other programs find their data as before, nothing is changed or removed.\n\n"
+			<< "Add the attributes now?";
+		BAlert* alert = new BAlert("SEN", question.String(), "Not now", "Never", "Add attributes", B_WIDTH_AS_USUAL, B_OFFSET_SPACING, B_INFO_ALERT);
+		alert->SetShortcut(0, B_ESCAPE);
+		BMessage* answer = new BMessage(kMigrationAnswer);
+		answer->AddString("step", message->GetString("step", ""));
+		alert->Go(new BInvoker(answer, BMessenger(this)));
+		return;
+	}
+	if (message->what == kMigrationAnswer) {
+		BString step(message->GetString("step", ""));
+		int32 which = message->GetInt32("which", 0);
+		if (which == 2) {
+			fWorker->Post([config = senConfigHandler, step]() { return RunOptionalStep(config, step); }, BMessenger(this));
+		} else if (which == 1) {
+			RecordOptional(senConfigHandler, step.String(), sen::migration::kOptionalDeclined);
+			spdlog::info("migration {}: declined, it is not asked again", step.String());
+		} else {
+			spdlog::info("migration {}: not now, it is asked again at the next start", step.String());
+		}
+		return;
+	}
+	if (message->what == kMigrationRan) {
+		spdlog::info("migration {}: {} changed, {} failed", message->GetString("step", ""), (int) message->GetInt32("changed", 0),
+			(int) message->GetInt32("failed", 0));
+		return;
+	}
+
 	if (message->what == kRetryDeskbar) {
 		fDeskbarTries++;
 		InstallDeskbarItem();
