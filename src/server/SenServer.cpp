@@ -40,6 +40,8 @@
 #include <Volume.h>
 #include <spdlog/spdlog.h>
 
+#include "../migrations/Migrations.h"
+
 
 /** sent by the timer that waits for the Deskbar */
 static const uint32 kRetryDeskbar = 'SDbr';
@@ -88,6 +90,24 @@ static int32 RunOntologyUpdate(void*)
 	done.AddBool("installer", found);
 	done.AddInt32("result", result);
 	be_app_messenger.SendMessage(&done);
+	return 0;
+}
+
+/** the steps that make the data of the user what this version expects (migrations/Migrations.h), in a thread of their own: they look at all the SEN objects */
+static int32 RunMigrations(void* data)
+{
+	SenConfigHandler* config = static_cast<SenConfigHandler*>(data);
+	sen::migration::VersionStore store;
+	store.read = [config]() -> int32 {
+		BMessage settings;
+		return config->GetConfig(&settings) == B_OK ? settings.GetInt32(sen::migration::kDataVersionKey, 0) : 0;
+	};
+	store.write = [config](int32 version) -> status_t {
+		BMessage change;
+		change.AddInt32(sen::migration::kDataVersionKey, version);
+		return config->UpdateSettings(&change);
+	};
+	sen::migration::Run(store, false);
 	return 0;
 }
 
@@ -202,6 +222,11 @@ void SenServer::ReadyToRun()
         spdlog::critical("critical error, aborting.");
         Quit();
     }
+
+    // the data that older versions made: renamed relation types and the like
+    thread_id migrations = spawn_thread(RunMigrations, "sen migrations", B_LOW_PRIORITY, senConfigHandler);
+    if (migrations >= 0)
+        resume_thread(migrations);
 
     // the relations that were installed before there was a navigator for them (or a navigator for all relations)
     relationHandler->AssignMissingNavigators();

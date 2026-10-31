@@ -5,6 +5,7 @@
 
 #include "Cli.h"
 
+#include "../migrations/Migrations.h"
 #include "../stats/SenStats.h"
 
 #include <stdio.h>
@@ -14,7 +15,10 @@
 #include <string>
 #include <vector>
 
+#include <Roster.h>
 #include <String.h>
+
+#include <sen/Sen.h>
 
 using namespace sen::stats;
 
@@ -164,6 +168,39 @@ Check()
 	return result.findings.empty() ? 0 : 1;
 }
 
+/**
+ * The changes to the data of the user that the steps in Migrations.h make: which are done, which are still to do. Without the server running, they are run;
+ * with --dry-run they are only counted. (The server runs them itself when it starts.)
+ * @return 0, or 1 if a step could not change everything
+ */
+int
+Migrate(bool dryRun)
+{
+	if (!dryRun && be_roster->IsRunning(sen::kServerSignature)) {
+		fprintf(stderr, "The SEN server is running: it runs the steps itself when it starts (stop it with 'sen stop' to run them here), --dry-run only counts.\n");
+		return 1;
+	}
+
+	sen::migration::VersionStore store = sen::migration::SettingsFileStore();
+	printf("Data version %d, current %d.\n", (int) store.read(), (int) sen::migration::Steps().back().version);
+
+	bool failed = false;
+	for (const sen::migration::Report& report : sen::migration::Run(store, dryRun)) {
+		BString state;
+		if (report.wasDone)
+			state = "done";
+		else if (report.counts.failed > 0)
+			state << (int) report.counts.failed << " could not be changed, will be tried again";
+		else if (dryRun)
+			state << (report.counts.changed == 0 ? BString("nothing to change") : BString() << (int) report.counts.changed << " to change");
+		else
+			state << (report.counts.changed == 0 ? BString("nothing to change") : BString() << (int) report.counts.changed << " changed") << ", done";
+		printf("  %d %-20s %s: %s\n", (int) report.step->version, report.step->name, report.step->what, state.String());
+		failed = failed || report.counts.failed > 0;
+	}
+	return failed ? 1 : 0;
+}
+
 void
 Usage(FILE* out, const char* program)
 {
@@ -174,6 +211,8 @@ Usage(FILE* out, const char* program)
 		"  --info     an overview: SEN objects, types and relations installed\n"
 		"  --types    the installed types and relations as a tree, with the number of files of each\n"
 		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing indices\n"
+		"  --migrate  make the data of the user what this version expects (renamed relation types...): the steps that are done and to do\n"
+		"             (--migrate --dry-run only counts; the server runs the steps itself when it starts)\n"
 		"  --help     this text\n",
 		program);
 }
@@ -196,6 +235,8 @@ RunCommandLine(int argc, char* argv[])
 		return Types();
 	if (strcmp(option, "--check") == 0)
 		return Check();
+	if (strcmp(option, "--migrate") == 0)
+		return Migrate(argc > 2 && strcmp(argv[2], "--dry-run") == 0);
 	if (strcmp(option, "--help") == 0 || strcmp(option, "-h") == 0) {
 		Usage(stdout, argv[0]);
 		return 0;

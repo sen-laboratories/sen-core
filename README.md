@@ -72,9 +72,22 @@ server for the options that print information and exit, which need no running se
 > sen info            # the number of SEN objects, types and relations
 > sen types           # the types and relations as a tree, with the number of files
 > sen check           # duplicate SEN:IDs, types that are not installed, missing indices
+> sen migrate         # the changes to your data that this version needs (renamed relation types...): done and to do; --dry-run only counts
 ```
 
-(`sen_server --version`, `--info`, `--types`, `--check` do the same.)
+(`sen_server --version`, `--info`, `--types`, `--check`, `--migrate` do the same.)
+
+### Migrations
+
+What SEN keeps in the attributes of your files outlives the programs that wrote it. When a version renames a relation type, the files that have it stay as they are, so
+the server runs **migration steps** when it starts (`src/migrations/Migrations.h`): numbered, safe and idempotent (a step that is run again changes nothing more), each
+one recorded in the settings (`SEN:dataVersion`) when it is complete; one that could not change everything is tried again at the next start. `sen migrate` shows
+which steps are done and which are to do. A step only moves what an older SEN made, never what other programs keep (no attribute of People or BePDF is touched), and
+anything that would replace data that you may have made (turning the contacts of People into the new person type, say) is a step of its own, with a question.
+
+To add one: a function in `Migrations.cpp` that does the work and returns what it changed, a line in `Steps()` with the next number (never reuse one), and a check in
+`tests/vm/MigrationTest.cpp` (`tests/vm/migrations.sh` runs it in the Haiku VM). Renaming a relation type is `RenameRelationTypes()`: the first step does it for
+`person.knows`, which is `person` (PersonalRelation) since beta 4.
 
 ## Package
 
