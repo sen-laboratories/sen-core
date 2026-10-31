@@ -7,6 +7,7 @@
 #include "../config/SenConfigHandler.h"
 #include "../relations/RelationHandler.h"
 #include "../ui/SenUi.h"
+#include "../ui/Worker.h"
 
 #include <Application.h>
 #include <MessageRunner.h>
@@ -59,6 +60,8 @@ private:
 
     /** @brief The folders of the packages (system and user): new and removed packages can bring or take ontologies. */
     std::vector<node_ref> fPackagesDirs;
+    /** the work that takes long (the installer of the ontologies, the migrations of the data): one at a time, off the thread of the server */
+    sen::ui::Worker*    fWorker;
     BMessageRunner*     fOntologyTimer;
     bool                fOntologyUpdating;
     /** @brief Packages changed while an update was running: another one follows. */

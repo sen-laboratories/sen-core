@@ -36,7 +36,8 @@ InfoWindow::InfoWindow()
 	:
 	BWindow(BRect(120, 120, 820, 660), "SEN Info", B_TITLED_WINDOW,
 		B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
-	fGathering(false)
+	fGathering(false),
+	fWorker(new Worker("gather SEN info"))
 {
 	fList = new BOutlineListView("list", B_SINGLE_SELECTION_LIST);
 	BScrollView* scroll = new BScrollView("scroll", fList, 0, false, true);
@@ -55,6 +56,13 @@ InfoWindow::InfoWindow()
 	.End();
 
 	_Gather();
+}
+
+
+InfoWindow::~InfoWindow()
+{
+	// (the worker quits when the statistics that it is gathering are done: the window does not wait for them)
+	fWorker->Finish();
 }
 
 
@@ -77,21 +85,18 @@ InfoWindow::MessageReceived(BMessage* message)
 }
 
 
-int32
-InfoWindow::_GatherEntry(void* data)
+/** what the worker does: the statistics (the queries over all volumes), the result goes to the window as a pointer */
+static BMessage*
+Gather()
 {
-	BMessenger* target = (BMessenger*)data;
 	GatherResult* result = new GatherResult;
 	result->overview = stats::GatherOverview();
 	result->groups = stats::GatherTypes(&result->notes);
 	result->plugins = stats::GatherPlugins();
 
-	BMessage done(kGathered);
-	done.AddPointer("result", result);
-	if (target->SendMessage(&done) != B_OK)
-		delete result;	// (the window is gone)
-	delete target;
-	return 0;
+	BMessage* done = new BMessage(kGathered);
+	done->AddPointer("result", result);
+	return done;
 }
 
 
@@ -104,10 +109,13 @@ InfoWindow::_Gather()
 	fRefresh->SetEnabled(false);
 	fStatus->SetText("Counting" B_UTF8_ELLIPSIS);
 
-	thread_id thread = spawn_thread(_GatherEntry, "gather SEN info", B_LOW_PRIORITY, new BMessenger(this));
-	if (thread >= 0)
-		resume_thread(thread);
-	else {
+	// (the result of a window that is gone is freed here)
+	status_t result = fWorker->Post(Gather, BMessenger(this), [](BMessage* message) {
+		GatherResult* gathered = NULL;
+		if (message->FindPointer("result", (void**)&gathered) == B_OK)
+			delete gathered;
+	});
+	if (result != B_OK) {
 		fGathering = false;
 		fRefresh->SetEnabled(true);
 	}

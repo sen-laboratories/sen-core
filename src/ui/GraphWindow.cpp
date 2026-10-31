@@ -946,7 +946,6 @@ GraphView::Draw(BRect)
 // ---- the window
 
 struct WorkRequest {
-	BMessenger							target;
 	bool								collect;
 	bool								withMeta;
 	bool								withUnconnected;
@@ -974,6 +973,7 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 	fSavePanel(NULL),
 	fConfig(config),
 	fSelectionOnly(false),
+	fWorker(new Worker("SEN graph")),
 	fWorking(false),
 	fTruncated(false),
 	fObjects(0),
@@ -1027,6 +1027,8 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 
 GraphWindow::~GraphWindow()
 {
+	// (the worker quits when the work that it is doing is done: the window does not wait for it)
+	fWorker->Finish();
 	delete fSavePanel;
 }
 
@@ -1140,10 +1142,10 @@ GraphWindow::MessageReceived(BMessage* message)
 }
 
 
-int32
-GraphWindow::_WorkEntry(void* data)
+/** what the worker does: read the objects (if asked), filter and lay out the graph; the result goes to the window as a pointer. Takes over the request. */
+static BMessage*
+RunWork(WorkRequest* request)
 {
-	WorkRequest* request = (WorkRequest*)data;
 	WorkResult* result = new WorkResult;
 	result->error = B_OK;
 	result->truncated = request->truncated;
@@ -1164,12 +1166,10 @@ GraphWindow::_WorkEntry(void* data)
 	result->shown = result->all.Filtered(request->withMeta, request->withUnconnected, request->withOntologies);
 	result->shown.Layout();
 
-	BMessage done(kWorkDone);
-	done.AddPointer("result", result);
-	if (request->target.SendMessage(&done) != B_OK)
-		delete result;	// (the window is gone)
+	BMessage* done = new BMessage(kWorkDone);
+	done->AddPointer("result", result);
 	delete request;
-	return 0;
+	return done;
 }
 
 
@@ -1183,7 +1183,6 @@ GraphWindow::_Start(bool collect)
 	fStatus->SetText(collect ? "Reading the objects" B_UTF8_ELLIPSIS : "Laying out" B_UTF8_ELLIPSIS);
 
 	WorkRequest* request = new WorkRequest;
-	request->target = BMessenger(this);
 	request->collect = collect;
 	request->withMeta = fMeta->Value() == B_CONTROL_ON;
 	request->withUnconnected = fUnconnected->Value() == B_CONTROL_ON;
@@ -1195,14 +1194,17 @@ GraphWindow::_Start(bool collect)
 		request->refs = fRefs;
 	}
 
-	thread_id thread = spawn_thread(_WorkEntry, "SEN graph", B_LOW_PRIORITY, request);
-	if (thread >= 0)
-		resume_thread(thread);
-	else {
+	// (the result of a window that is gone is freed here)
+	status_t result = fWorker->Post([request]() { return RunWork(request); }, BMessenger(this), [](BMessage* message) {
+		WorkResult* done = NULL;
+		if (message->FindPointer("result", (void**)&done) == B_OK)
+			delete done;
+	});
+	if (result != B_OK) {
 		delete request;
 		fWorking = false;
 		fRefresh->SetEnabled(true);
-		fStatus->SetText("Could not start the thread");
+		fStatus->SetText("Could not start the work");
 	}
 }
 

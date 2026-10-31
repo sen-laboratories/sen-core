@@ -70,8 +70,8 @@ static bool FindOntologyInstaller(BPath* path)
 	return false;
 }
 
-/** runs the installer, in a thread of its own (it talks to this server to relate the ontologies to their types) */
-static int32 RunOntologyUpdate(void*)
+/** runs the installer, in the worker of the server (it talks to this server to relate the ontologies to their types); the message that it returns tells the server how it went */
+static BMessage* RunOntologyUpdate()
 {
 	int32 result = 0;
 	BPath installer;
@@ -87,54 +87,31 @@ static int32 RunOntologyUpdate(void*)
 	} else {
 		spdlog::debug("no ontology installer (sen_oni) found, ontologies are not updated");
 	}
-	BMessage done(kOntologiesUpdated);
-	done.AddBool("installer", found);
-	done.AddInt32("result", result);
-	be_app_messenger.SendMessage(&done);
-	return 0;
+	BMessage* done = new BMessage(kOntologiesUpdated);
+	done->AddBool("installer", found);
+	done->AddInt32("result", result);
+	return done;
 }
 
-/** sent to the looper of the migrations to run the steps */
-static const uint32 kRunMigrations = 'SMgr';
-
 /**
- * The steps that make the data of the user what this version expects (migrations/Migrations.h) are run by a looper of their own: they look at all the SEN
- * objects, and the server is not held up. The looper handles the message once, then it is gone.
+ * The steps that make the data of the user what this version expects (migrations/Migrations.h), in the worker of the server: they look at all the SEN
+ * objects, and the server is not held up.
  */
-class MigrationLooper : public BLooper {
-public:
-	MigrationLooper(SenConfigHandler* config)
-		:
-		BLooper("sen migrations", B_LOW_PRIORITY),
-		fConfig(config)
-	{
-	}
-
-	virtual void
-	MessageReceived(BMessage* message)
-	{
-		if (message->what != kRunMigrations) {
-			BLooper::MessageReceived(message);
-			return;
-		}
-
-		sen::migration::VersionStore store;
-		store.read = [this]() -> int32 {
-			BMessage settings;
-			return fConfig->GetConfig(&settings) == B_OK ? settings.GetInt32(sen::migration::kDataVersionKey, 0) : 0;
-		};
-		store.write = [this](int32 version) -> status_t {
-			BMessage change;
-			change.AddInt32(sen::migration::kDataVersionKey, version);
-			return fConfig->UpdateSettings(&change);
-		};
-		sen::migration::Run(store, false);
-		PostMessage(B_QUIT_REQUESTED);
-	}
-
-private:
-	SenConfigHandler*	fConfig;
-};
+static BMessage* RunMigrations(SenConfigHandler* config)
+{
+	sen::migration::VersionStore store;
+	store.read = [config]() -> int32 {
+		BMessage settings;
+		return config->GetConfig(&settings) == B_OK ? settings.GetInt32(sen::migration::kDataVersionKey, 0) : 0;
+	};
+	store.write = [config](int32 version) -> status_t {
+		BMessage change;
+		change.AddInt32(sen::migration::kDataVersionKey, version);
+		return config->UpdateSettings(&change);
+	};
+	sen::migration::Run(store, false);
+	return NULL;	// (no result to tell)
+}
 
 int main(int argc, char* argv[])
 {
@@ -168,6 +145,7 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
     fUi = new sen::ui::SenUi(senConfigHandler, relationHandler);
     fDeskbarRetry = NULL;
     fDeskbarTries = 0;
+    fWorker = new sen::ui::Worker("sen server work", B_NORMAL_PRIORITY);
     fOntologyTimer = NULL;
     fOntologyUpdating = false;
     fOntologyPending = false;
@@ -232,6 +210,7 @@ void SenServer::EnsureIndices(dev_t device)
 
 SenServer::~SenServer()
 {
+    fWorker->Finish();
     delete fDeskbarRetry;
     delete fOntologyTimer;
     delete fUi;
@@ -249,9 +228,7 @@ void SenServer::ReadyToRun()
     }
 
     // the data that older versions made: renamed relation types and the like
-    BLooper* migrations = new MigrationLooper(senConfigHandler);
-    migrations->Run();
-    migrations->PostMessage(kRunMigrations);
+    fWorker->Post([config = senConfigHandler]() { return RunMigrations(config); }, BMessenger());
 
     // the relations that were installed before there was a navigator for them (or a navigator for all relations)
     relationHandler->AssignMissingNavigators();
@@ -319,8 +296,7 @@ void SenServer::StartOntologyUpdate()
         fOntologyPending = true;
         return;
     }
-    thread_id thread = spawn_thread(RunOntologyUpdate, "ontology update", B_NORMAL_PRIORITY, NULL);
-    if (thread < 0 || resume_thread(thread) != B_OK) {
+    if (fWorker->Post(RunOntologyUpdate, BMessenger(this)) != B_OK) {
         spdlog::warn("could not start the ontology update");
         return;
     }
