@@ -639,14 +639,15 @@ TEST(RelationsOfSeveralFilesAreThoseThatFitAllOfThem)
 		return false;
 	};
 
-	// what any of them has, as far as it fits all of them: two people have what Anna has (the reference is for any file), not what only fits people
-	// once a book is one of the files
+	// what all of them have, as far as it fits all of them: two people share the friendship, not the reference that only Anna has; with a book among the
+	// files nothing that only fits people is left
 	std::vector<std::string> people = relationsOf({f.refs[0], f.refs[1]});
 	CHECK(has(people, kFriend));
-	CHECK(has(people, kReference));
+	CHECK(!has(people, kReference));
 	std::vector<std::string> mixed = relationsOf({f.refs[0], f.refs[2]});
 	CHECK(!has(mixed, kFriend));
-	CHECK(has(mixed, kReference));
+	// Ben has no relation at all to the book: nothing is in common with Anna and Ben and the book
+	CHECK(relationsOf({f.refs[0], f.refs[1], f.refs[2]}).empty());
 	// one file is as it was
 	CHECK(has(relationsOf({f.refs[0]}), kFriend));
 

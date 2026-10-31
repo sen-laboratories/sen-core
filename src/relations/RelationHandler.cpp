@@ -287,15 +287,16 @@ static bool IsCompatibleWithTarget(const BMessage& relationConfig, const char* t
 }
 
 /**
- * What several files have, for the "Open related" menu of a selection: the relation types that any of them has (the relations that exist), as far as they fit
- * all of them. A relation fits a file by the types that the type of the relation names (SEN:sourceTypes, SEN:targetTypes and what they exclude, the same
- * that decide which relations can be created): the file is at one of the ends of it, which is why it fits if it is a source or a target.
+ * What several files have in common, for the "Open related" menu of a selection: the relation types that every one of them has (the relations that exist), as
+ * far as they fit all of them. A relation fits a file by the types that the type of the relation names (SEN:sourceTypes, SEN:targetTypes and what they exclude,
+ * the same that decide which relations can be created): the file is at one of the ends of it, which is why it fits if it is a source or a target.
  */
 status_t RelationHandler::GetAllRelationsOfSelection(const BMessage* message, const std::vector<entry_ref>& sources, BMessage* reply)
 {
     BStringList names;
     BMessage configs;
     std::vector<BString> fileTypes;
+    bool first = true;
 
     for (const entry_ref& source : sources) {
         BMessage single(*message);
@@ -307,14 +308,19 @@ status_t RelationHandler::GetAllRelationsOfSelection(const BMessage* message, co
         BString type = GetMimeTypeForRef(&source);
         fileTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
 
+        // (a file that has none, or cannot be read, has none in common with the others)
         BMessage one;
-        if (GetAllRelations(&single, &one) != B_OK)
-            continue;   // (a file that has none, or cannot be read, adds nothing)
         BStringList found;
-        one.FindStrings(sen::key::kRelations, &found);
-        for (int32 index = 0; index < found.CountStrings(); index++) {
-            if (!names.HasString(found.StringAt(index)))
-                names.Add(found.StringAt(index));
+        if (GetAllRelations(&single, &one) == B_OK)
+            one.FindStrings(sen::key::kRelations, &found);
+        if (first) {
+            names = found;
+            first = false;
+        } else {
+            for (int32 index = names.CountStrings() - 1; index >= 0; index--) {
+                if (!found.HasString(names.StringAt(index)))
+                    names.Remove(index);
+            }
         }
         BMessage map;
         if (one.FindMessage(sen::key::kRelationConfigMap, &map) == B_OK) {
