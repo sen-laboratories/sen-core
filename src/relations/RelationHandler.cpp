@@ -34,6 +34,17 @@ RelationHandler::~RelationHandler()
 {
 }
 
+/** the files of a request (SEN:sourceRef, repeated) */
+static std::vector<entry_ref>
+SourcesOf(const BMessage* message)
+{
+    std::vector<entry_ref> sources;
+    entry_ref ref;
+    for (int32 index = 0; message->FindRef(sen::key::kSourceRef, index, &ref) == B_OK; index++)
+        sources.push_back(ref);
+    return sources;
+}
+
 void RelationHandler::MessageReceived(BMessage* message)
 {
     BMessage* reply = new BMessage(sen::cmd::kReplyRelations);
@@ -49,12 +60,14 @@ void RelationHandler::MessageReceived(BMessage* message)
     {
         case sen::cmd::kRelationsGet:
         {
-            result = GetRelationsOfType(message, reply);
+            std::vector<entry_ref> sources = SourcesOf(message);
+            result = sources.size() > 1 ? GetRelationsOfTypeOfSelection(message, sources, reply) : GetRelationsOfType(message, reply);
             break;
         }
         case sen::cmd::kRelationsGetAll:
         {
-            result = GetAllRelations(message, reply);
+            std::vector<entry_ref> sources = SourcesOf(message);
+            result = sources.size() > 1 ? GetAllRelationsOfSelection(message, sources, reply) : GetAllRelations(message, reply);
             break;
         }
         case sen::cmd::kRelationsGetSelf:
@@ -271,6 +284,162 @@ static bool IsCompatibleWithTarget(const BMessage& relationConfig, const char* t
         excluded = excluded || matches(sen::conf::kExcludeSourceTypes, &inheritedExcludes);
 
     return (includes + inheritedIncludes == 0 || included) && !excluded;
+}
+
+/**
+ * What several files have, for the "Open related" menu of a selection: the relation types that any of them has (the relations that exist), as far as they fit
+ * all of them. A relation fits a file by the types that the type of the relation names (SEN:sourceTypes, SEN:targetTypes and what they exclude, the same
+ * that decide which relations can be created): the file is at one of the ends of it, which is why it fits if it is a source or a target.
+ */
+status_t RelationHandler::GetAllRelationsOfSelection(const BMessage* message, const std::vector<entry_ref>& sources, BMessage* reply)
+{
+    BStringList names;
+    BMessage configs;
+    std::vector<BString> fileTypes;
+
+    for (const entry_ref& source : sources) {
+        BMessage single(*message);
+        single.RemoveName(sen::key::kSourceRef);
+        single.AddRef(sen::key::kSourceRef, &source);
+        single.RemoveName(sen::key::kWithConfigs);
+        single.AddBool(sen::key::kWithConfigs, true);
+
+        BString type = GetMimeTypeForRef(&source);
+        fileTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
+
+        BMessage one;
+        if (GetAllRelations(&single, &one) != B_OK)
+            continue;   // (a file that has none, or cannot be read, adds nothing)
+        BStringList found;
+        one.FindStrings(sen::key::kRelations, &found);
+        for (int32 index = 0; index < found.CountStrings(); index++) {
+            if (!names.HasString(found.StringAt(index)))
+                names.Add(found.StringAt(index));
+        }
+        BMessage map;
+        if (one.FindMessage(sen::key::kRelationConfigMap, &map) == B_OK) {
+            char* name;
+            type_code code;
+            for (int32 index = 0; map.GetInfo(B_MESSAGE_TYPE, index, &name, &code) == B_OK; index++) {
+                BMessage config;
+                if (!configs.HasMessage(name) && map.FindMessage(name, &config) == B_OK)
+                    configs.AddMessage(name, &config);
+            }
+        }
+    }
+
+    BStringList fitting;
+    BMessage fittingConfigs;
+    for (int32 index = 0; index < names.CountStrings(); index++) {
+        const BString& type = names.StringAt(index);
+        BMessage config;
+        bool hasConfig = configs.FindMessage(type.String(), &config) == B_OK;
+        bool fits = true;
+        if (hasConfig) {
+            // (a relation that is resolved at run time is not created by hand, but a file has it: that is no reason to hide it)
+            BMessage restrictions(config);
+            restrictions.RemoveName(sen::conf::kDynamic);
+            for (size_t file = 0; fits && file < fileTypes.size(); file++) {
+                fits = IsCompatibleWithSource(restrictions, fileTypes[file].String())
+                    || IsCompatibleWithTarget(restrictions, fileTypes[file].String());
+            }
+        }
+        if (!fits) {
+            spdlog::debug("relation {} does not fit all {} files.", type.String(), sources.size());
+            continue;
+        }
+        fitting.Add(type);
+        if (hasConfig)
+            fittingConfigs.AddMessage(type.String(), &config);
+    }
+
+    reply->what = sen::cmd::kReplyRelations;
+    if (!fitting.IsEmpty())
+        reply->AddStrings(sen::key::kRelations, fitting);
+    if (message->GetBool(sen::key::kWithConfigs, true) && !fittingConfigs.IsEmpty())
+        reply->AddMessage(sen::key::kRelationConfigMap, &fittingConfigs);
+    reply->AddInt32(sen::key::kCount, fitting.CountStrings());
+    reply->AddString(sen::key::kDetail, BString("got ") << fitting.CountStrings() << " relation(s) that fit " << (int) sources.size() << " files");
+    return B_OK;
+}
+
+/** The targets of a relation type of several files: those of all of them, a target once (the first relation of it stays). */
+status_t RelationHandler::GetRelationsOfTypeOfSelection(const BMessage* message, const std::vector<entry_ref>& sources, BMessage* reply)
+{
+    BMessage relations, idToRef, idToName, configMap;
+    BString sourceId;
+    status_t last = B_ENTRY_NOT_FOUND;
+    int32 answered = 0;
+
+    for (const entry_ref& source : sources) {
+        BMessage single(*message);
+        single.RemoveName(sen::key::kSourceRef);
+        single.AddRef(sen::key::kSourceRef, &source);
+
+        BMessage one;
+        last = GetRelationsOfType(&single, &one);
+        if (last != B_OK)
+            continue;
+        answered++;
+
+        BMessage found;
+        if (one.FindMessage(sen::key::kRelations, &found) == B_OK) {
+            char* target;
+            type_code code;
+            int32 count;
+            for (int32 index = 0; found.GetInfo(B_MESSAGE_TYPE, index, &target, &code, &count) == B_OK; index++) {
+                if (relations.HasMessage(target))
+                    continue;
+                for (int32 set = 0; set < count; set++) {
+                    BMessage properties;
+                    if (found.FindMessage(target, set, &properties) == B_OK)
+                        relations.AddMessage(target, &properties);
+                }
+            }
+        }
+        BMessage map;
+        if (one.FindMessage(sen::key::kIdToRefMap, &map) == B_OK) {
+            char* id;
+            type_code code;
+            entry_ref ref;
+            for (int32 index = 0; map.GetInfo(B_REF_TYPE, index, &id, &code) == B_OK; index++) {
+                if (!idToRef.HasRef(id) && map.FindRef(id, &ref) == B_OK)
+                    idToRef.AddRef(id, &ref);
+            }
+        }
+        BMessage names;
+        if (one.FindMessage(sen::key::kIdToNameMap, &names) == B_OK) {
+            char* id;
+            type_code code;
+            const char* name;
+            for (int32 index = 0; names.GetInfo(B_STRING_TYPE, index, &id, &code) == B_OK; index++) {
+                if (!idToName.HasString(id) && names.FindString(id, &name) == B_OK)
+                    idToName.AddString(id, name);
+            }
+        }
+        if (configMap.IsEmpty())
+            one.FindMessage(sen::key::kRelationConfigMap, &configMap);
+        if (sourceId.IsEmpty())
+            sourceId = one.GetString(sen::key::kSourceId, "");
+    }
+
+    if (answered == 0)
+        return last;
+
+    reply->what = sen::cmd::kReplyRelations;
+    reply->AddMessage(sen::key::kRelations, &relations);
+    if (!configMap.IsEmpty())
+        reply->AddMessage(sen::key::kRelationConfigMap, &configMap);
+    if (!sourceId.IsEmpty())
+        reply->AddString(sen::key::kSourceId, sourceId);
+    if (message->GetBool(sen::key::kIdToRefMap, false)) {
+        reply->AddMessage(sen::key::kIdToRefMap, &idToRef);
+        reply->AddMessage(sen::key::kIdToNameMap, &idToName);
+    }
+    int32 targets = relations.CountNames(B_MESSAGE_TYPE);
+    reply->AddInt32("count", targets);
+    reply->AddString(sen::key::kDetail, BString("retrieved ") << targets << " relations from " << (int) sources.size() << " files");
+    return B_OK;
 }
 
 /**

@@ -12,6 +12,8 @@
 #include <Notification.h>
 #include <Roster.h>
 
+#include <OS.h>
+
 #include <vector>
 
 #include <sen/Sen.h>
@@ -57,6 +59,55 @@ PluginFor(const std::vector<entry_ref>& plugins, const BString& type, entry_ref*
 	return false;
 }
 
+/** a file and the plugin that enriches it */
+struct Job {
+	entry_ref	file;
+	entry_ref	plugin;
+};
+
+/** the files of one request, in the order in which they were given */
+struct Queue {
+	std::vector<Job>	jobs;
+	bool				wipe;
+	bool				automatic;
+};
+
+/** the longest that a plugin is waited for (one that asks the user may take its time) */
+static const bigtime_t kLongestWait = 15 * 60 * 1000000LL;
+
+/**
+ * The plugins are started one after the other, each one when the one before it is done: a plugin may ask the user (BERT chooses between several books), and
+ * several windows at once, for different files, cannot be answered. The thread ends with the last plugin.
+ */
+static int32
+RunQueue(void* data)
+{
+	Queue* queue = static_cast<Queue*>(data);
+	for (const Job& job : queue->jobs) {
+		BMessage launch(B_REFS_RECEIVED);
+		launch.AddRef("refs", &job.file);
+		launch.AddBool("wipe", queue->wipe);
+		if (queue->automatic)
+			launch.AddBool("auto", true);
+
+		team_id team = -1;
+		status_t result = be_roster->Launch(&job.plugin, &launch, &team);
+		if (result != B_OK && result != B_ALREADY_RUNNING) {
+			spdlog::error("enrich: could not start plugin '{}' for '{}': {}", job.plugin.name, job.file.name, strerror(result));
+			continue;
+		}
+		spdlog::info("enrich: '{}' goes to plugin '{}'", job.file.name, job.plugin.name);
+
+		// (a plugin that was running already, as a single launch application, is waited for as well)
+		bigtime_t deadline = system_time() + kLongestWait;
+		app_info info;
+		while (team >= 0 && be_roster->GetRunningAppInfo(team, &info) == B_OK && system_time() < deadline)
+			snooze(200000);
+	}
+	delete queue;
+	return 0;
+}
+
 status_t
 Handle(const BMessage& request, BString* detail)
 {
@@ -70,6 +121,10 @@ Handle(const BMessage& request, BString* detail)
 
 	const bool wipe = request.GetBool("wipe", true);
 	const bool automatic = request.GetBool("auto", false);
+
+	Queue* queue = new Queue;
+	queue->wipe = wipe;
+	queue->automatic = automatic;
 
 	int32 started = 0, unhandled = 0, files = 0;
 	BString unhandledNames, unhandledType;
@@ -88,21 +143,16 @@ Handle(const BMessage& request, BString* detail)
 			continue;
 		}
 
-		BMessage launch(B_REFS_RECEIVED);
-		launch.AddRef("refs", &ref);
-		launch.AddBool("wipe", wipe);
-		if (automatic)
-			launch.AddBool("auto", true);
-		result = be_roster->Launch(&plugin, &launch);
-		if (result == B_OK) {
-			spdlog::info("enrich: '{}' (type '{}') goes to plugin '{}'", ref.name, type.String(), plugin.name);
-			started++;
-		} else {
-			spdlog::error("enrich: could not start plugin '{}' for '{}': {}", plugin.name, ref.name, strerror(result));
-		}
+		Job job;
+		job.file = ref;
+		job.plugin = plugin;
+		queue->jobs.push_back(job);
+		spdlog::info("enrich: '{}' (type '{}') is for plugin '{}'", ref.name, type.String(), plugin.name);
+		started++;
 	}
 
 	if (files == 0) {
+		delete queue;
 		*detail = "no file to enrich";
 		return B_BAD_VALUE;
 	}
@@ -122,10 +172,20 @@ Handle(const BMessage& request, BString* detail)
 	}
 
 	if (started == 0) {
+		delete queue;
 		*detail = "no plugin handles the type of the file";
 		return B_NOT_SUPPORTED;
 	}
-	*detail = BString() << started << " plugin(s) started";
+
+	// one after the other, in a thread of its own: the server is not held up
+	thread_id thread = spawn_thread(RunQueue, "sen enrich queue", B_NORMAL_PRIORITY, queue);
+	if (thread < 0) {
+		delete queue;
+		*detail = "could not start the plugins";
+		return thread;
+	}
+	resume_thread(thread);
+	*detail = BString() << started << " file(s) will be enriched, one after the other";
 	return B_OK;
 }
 

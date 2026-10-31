@@ -597,6 +597,73 @@ TEST(RelationsEndOnlyAtTheTypesOfFilesThatTheyFit)
 	CHECK(!has(employmentTargets, kPerson));
 }
 
+TEST(RelationsOfSeveralFilesAreThoseThatFitAllOfThem)
+{
+	const char* kFriend = "relation/x-vnd.sen-labs.relation.person.friend";
+	const char* kPerson = "entity/x-vnd.sen-labs.entity.person";
+	const char* kBook = "entity/x-vnd.sen-labs.entity.book";
+	if (!BMimeType(kFriend).IsInstalled() || !BMimeType(kBook).IsInstalled()) {
+		printf("     (the people and the books ontology are not installed: skipped)\n");
+		return;
+	}
+
+	Fixture f("selection", 3);
+	auto setType = [](const entry_ref& ref, const char* type) {
+		BNode node(&ref);
+		BNodeInfo(&node).SetType(type);
+	};
+	setType(f.refs[0], kPerson);
+	setType(f.refs[1], kPerson);
+	setType(f.refs[2], kBook);
+	// Anna is a friend of Ben and has a reference to a book
+	CHECK_EQ(SenStatus(Send(sen::cmd::kRelationAdd, &f.refs[0], kFriend, &f.refs[1])), sen::status::kCreated);
+	CHECK_EQ(SenStatus(Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[2])), sen::status::kCreated);
+
+	auto relationsOf = [](std::vector<entry_ref> files) {
+		BMessage ask(sen::cmd::kRelationsGetAll);
+		for (const entry_ref& file : files)
+			ask.AddRef(sen::key::kSourceRef, &file);
+		BMessage reply;
+		BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+		std::vector<std::string> types;
+		const char* each;
+		for (int32 i = 0; reply.FindString(sen::key::kRelations, i, &each) == B_OK; i++)
+			types.push_back(each);
+		return types;
+	};
+	auto has = [](const std::vector<std::string>& types, const char* wanted) {
+		for (const std::string& each : types) {
+			if (each == wanted)
+				return true;
+		}
+		return false;
+	};
+
+	// what any of them has, as far as it fits all of them: two people have what Anna has (the reference is for any file), not what only fits people
+	// once a book is one of the files
+	std::vector<std::string> people = relationsOf({f.refs[0], f.refs[1]});
+	CHECK(has(people, kFriend));
+	CHECK(has(people, kReference));
+	std::vector<std::string> mixed = relationsOf({f.refs[0], f.refs[2]});
+	CHECK(!has(mixed, kFriend));
+	CHECK(has(mixed, kReference));
+	// one file is as it was
+	CHECK(has(relationsOf({f.refs[0]}), kFriend));
+
+	// the targets of a type: those of all the files, each once
+	BMessage ask(sen::cmd::kRelationsGet);
+	ask.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	ask.AddRef(sen::key::kSourceRef, &f.refs[1]);
+	ask.AddString(sen::key::kRelationType, kFriend);
+	BMessage reply, relations;
+	BMessenger(sen::kServerSignature).SendMessage(&ask, &reply, 10000000, 10000000);
+	CHECK_EQ(SenStatus(reply), sen::status::kOk);
+	CHECK(reply.FindMessage(sen::key::kRelations, &relations) == B_OK);
+	CHECK(relations.HasMessage(IdOf(f.refs[0]).c_str()));
+	CHECK(relations.HasMessage(IdOf(f.refs[1]).c_str()));
+	CHECK_EQ(relations.CountNames(B_MESSAGE_TYPE), 2);
+}
+
 TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 {
 	// (what is sticky on this machine already is applied, too: the test only looks at its own label)
