@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <AppFileInfo.h>
+#include <Looper.h>
 #include <Deskbar.h>
 #include <Directory.h>
 #include <Entry.h>
@@ -93,23 +94,47 @@ static int32 RunOntologyUpdate(void*)
 	return 0;
 }
 
-/** the steps that make the data of the user what this version expects (migrations/Migrations.h), in a thread of their own: they look at all the SEN objects */
-static int32 RunMigrations(void* data)
-{
-	SenConfigHandler* config = static_cast<SenConfigHandler*>(data);
-	sen::migration::VersionStore store;
-	store.read = [config]() -> int32 {
-		BMessage settings;
-		return config->GetConfig(&settings) == B_OK ? settings.GetInt32(sen::migration::kDataVersionKey, 0) : 0;
-	};
-	store.write = [config](int32 version) -> status_t {
-		BMessage change;
-		change.AddInt32(sen::migration::kDataVersionKey, version);
-		return config->UpdateSettings(&change);
-	};
-	sen::migration::Run(store, false);
-	return 0;
-}
+/** sent to the looper of the migrations to run the steps */
+static const uint32 kRunMigrations = 'SMgr';
+
+/**
+ * The steps that make the data of the user what this version expects (migrations/Migrations.h) are run by a looper of their own: they look at all the SEN
+ * objects, and the server is not held up. The looper handles the message once, then it is gone.
+ */
+class MigrationLooper : public BLooper {
+public:
+	MigrationLooper(SenConfigHandler* config)
+		:
+		BLooper("sen migrations", B_LOW_PRIORITY),
+		fConfig(config)
+	{
+	}
+
+	virtual void
+	MessageReceived(BMessage* message)
+	{
+		if (message->what != kRunMigrations) {
+			BLooper::MessageReceived(message);
+			return;
+		}
+
+		sen::migration::VersionStore store;
+		store.read = [this]() -> int32 {
+			BMessage settings;
+			return fConfig->GetConfig(&settings) == B_OK ? settings.GetInt32(sen::migration::kDataVersionKey, 0) : 0;
+		};
+		store.write = [this](int32 version) -> status_t {
+			BMessage change;
+			change.AddInt32(sen::migration::kDataVersionKey, version);
+			return fConfig->UpdateSettings(&change);
+		};
+		sen::migration::Run(store, false);
+		PostMessage(B_QUIT_REQUESTED);
+	}
+
+private:
+	SenConfigHandler*	fConfig;
+};
 
 int main(int argc, char* argv[])
 {
@@ -224,9 +249,9 @@ void SenServer::ReadyToRun()
     }
 
     // the data that older versions made: renamed relation types and the like
-    thread_id migrations = spawn_thread(RunMigrations, "sen migrations", B_LOW_PRIORITY, senConfigHandler);
-    if (migrations >= 0)
-        resume_thread(migrations);
+    BLooper* migrations = new MigrationLooper(senConfigHandler);
+    migrations->Run();
+    migrations->PostMessage(kRunMigrations);
 
     // the relations that were installed before there was a navigator for them (or a navigator for all relations)
     relationHandler->AssignMissingNavigators();
