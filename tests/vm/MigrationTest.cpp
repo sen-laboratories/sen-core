@@ -329,6 +329,12 @@ TestPeopleAttributes()
 	CHECK(foundAda && !foundOther, "the contacts are found on the volumes by their type");
 
 	CHECK(!sen::migration::OptionalSteps().empty() && strcmp(sen::migration::OptionalSteps()[0].name, "people-attributes") == 0, "the step is an optional one");
+	const sen::migration::OptionalStep& step = sen::migration::OptionalSteps()[0];
+	CHECK(sen::migration::NamesOptionalStep(step, "person") && sen::migration::NamesOptionalStep(step, "application/x-person")
+		&& sen::migration::NamesOptionalStep(step, "x-person") && sen::migration::NamesOptionalStep(step, "people-attributes"),
+		"it is named by its short name, its file type, its subtype and its name");
+	CHECK(!sen::migration::NamesOptionalStep(step, "people") && !sen::migration::NamesOptionalStep(step, "application/pdf") && !sen::migration::NamesOptionalStep(step, ""),
+		"and by nothing else");
 }
 
 int

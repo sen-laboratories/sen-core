@@ -177,9 +177,15 @@ Check()
  * with --dry-run they are only counted. (The server runs them itself when it starts.)
  * @return 0, or 1 if a step could not change everything
  */
+int MigrateOptional(const char* word, bool dryRun);
+
 int
-Migrate(bool dryRun)
+Migrate(bool dryRun, const char* type)
 {
+	// "sen migrate person": one of the steps that the user decides on, for the files of that type (the server asks first, this is asking for it)
+	if (type != NULL)
+		return MigrateOptional(type, dryRun);
+
 	if (!dryRun && be_roster->IsRunning(sen::kServerSignature)) {
 		fprintf(stderr, "The SEN server is running: it runs the steps itself when it starts (stop it with 'sen stop' to run them here), --dry-run only counts.\n");
 		return 1;
@@ -227,17 +233,25 @@ Migrate(bool dryRun)
 	return failed ? 1 : 0;
 }
 
-/** an optional step, run on request ("sen_server --migrate-people"): who asks for it has said yes. It counts with --dry-run. */
+/**
+ * An optional step, run on request ("sen migrate person", "sen migrate application/x-person"): who asks for it has said yes, whatever the server was told. It
+ * counts with --dry-run, and it does not matter whether the server is running (it only adds).
+ */
 int
-MigrateOptional(const char* name, bool dryRun)
+MigrateOptional(const char* word, bool dryRun)
 {
 	for (const sen::migration::OptionalStep& step : sen::migration::OptionalSteps()) {
-		if (strcmp(step.name, name) != 0)
+		if (!sen::migration::NamesOptionalStep(step, word))
 			continue;
 		sen::migration::Counts counts = step.run(dryRun);
-		printf("%s: %d %s%s\n", step.name, (int) counts.changed, dryRun ? "to change" : "changed", counts.failed > 0 ? ", some could not be changed" : "");
+		printf("%s (%s): %d %s%s\n", step.name, step.type, (int) counts.changed, dryRun ? "to change" : "changed", counts.failed > 0 ? ", some could not be changed" : "");
 		return counts.failed > 0 ? 1 : 0;
 	}
+
+	fprintf(stderr, "no migration for '%s'. There is one for:", word);
+	for (const sen::migration::OptionalStep& step : sen::migration::OptionalSteps())
+		fprintf(stderr, " %s (%s)", step.shortName, step.type);
+	fprintf(stderr, "\n");
 	return 2;
 }
 
@@ -253,7 +267,8 @@ Usage(FILE* out, const char* program)
 		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing indices\n"
 		"  --migrate  make the data of the user what this version expects (renamed relation types...): the steps that are done and to do\n"
 		"             (--migrate --dry-run only counts; the server runs the steps itself when it starts)\n"
-		"  --migrate-people  add the standard attributes to the contacts of People (the server asks first, this is asking for it; --dry-run counts)\n"
+		"  --migrate <type>  a change that adds to what other programs keep, for the files of a type (a short name like person, or application/x-person):\n"
+		"             the server asks the user first, this is asking for it (--migrate --dry-run <type> counts)\n"
 		"  --help     this text\n",
 		program);
 }
@@ -276,10 +291,18 @@ RunCommandLine(int argc, char* argv[])
 		return Types();
 	if (strcmp(option, "--check") == 0)
 		return Check();
-	if (strcmp(option, "--migrate") == 0)
-		return Migrate(argc > 2 && strcmp(argv[2], "--dry-run") == 0);
-	if (strcmp(option, "--migrate-people") == 0)
-		return MigrateOptional("people-attributes", argc > 2 && strcmp(argv[2], "--dry-run") == 0);
+	if (strcmp(option, "--migrate") == 0) {
+		// (--dry-run and the name of a type, in any order)
+		bool dryRun = false;
+		const char* type = NULL;
+		for (int i = 2; i < argc; i++) {
+			if (strcmp(argv[i], "--dry-run") == 0)
+				dryRun = true;
+			else
+				type = argv[i];
+		}
+		return Migrate(dryRun, type);
+	}
 	if (strcmp(option, "--help") == 0 || strcmp(option, "-h") == 0) {
 		Usage(stdout, argv[0]);
 		return 0;

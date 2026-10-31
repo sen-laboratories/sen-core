@@ -271,9 +271,22 @@ const std::vector<OptionalStep>&
 OptionalSteps()
 {
 	static const std::vector<OptionalStep> steps = {
-		{"people-attributes", "the contacts of People get the standard attributes (name, e-mail, phone, homepage, groups), People's own stay as they are", PeopleAttributes},
+		{"people-attributes", sen::onto::people::mime::kPeoplePerson, "person",
+			"the contacts of People get the standard attributes (name, e-mail, phone, homepage, groups), People's own stay as they are", PeopleAttributes},
 	};
 	return steps;
+}
+
+
+bool
+NamesOptionalStep(const OptionalStep& step, const char* word)
+{
+	if (word == NULL || word[0] == '\0')
+		return false;
+	if (strcmp(word, step.name) == 0 || strcmp(word, step.type) == 0 || strcmp(word, step.shortName) == 0)
+		return true;
+	const char* subtype = strchr(step.type, '/');
+	return subtype != NULL && strcmp(word, subtype + 1) == 0;
 }
 
 

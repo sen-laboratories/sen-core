@@ -83,12 +83,20 @@ Counts UpsertPeopleAttributes(const std::vector<entry_ref>& contacts, bool dryRu
 /** The contacts of People on all volumes. */
 std::vector<entry_ref> FindContacts();
 
-/** an optional step: its name, what it is for the user in a line, and the work (a dry run counts the files that it would change) */
+/**
+ * an optional step: its name, the file type that it is for (and so what `sen migrate <type>` names: the type itself, its subtype or its short name), what it is
+ * for the user in a line, and the work (a dry run counts the files that it would change)
+ */
 struct OptionalStep {
 	const char*	name;
+	const char*	type;
+	const char*	shortName;
 	const char*	what;
 	Counts		(*run)(bool dryRun);
 };
+
+/** whether a word on the command line names the step: its name, its file type ("application/x-person"), the subtype ("x-person") or its short name ("person") */
+bool NamesOptionalStep(const OptionalStep& step, const char* word);
 
 /** the optional steps */
 const std::vector<OptionalStep>& OptionalSteps();
