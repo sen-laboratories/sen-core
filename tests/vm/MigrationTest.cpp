@@ -5,7 +5,8 @@
 
 /**
  * The migration steps (src/migrations/Migrations.h): renaming a relation type in the files that have it (also where the new type is stored already), that a dry
- * run changes nothing, that a second run has nothing left to do, and that the data version is recorded step by step. Does not need the server. Haiku only: the
+ * run changes nothing, that a second run has nothing left to do, that the data version is recorded step by step, and (with the server running) the move of a
+ * real Knows relation of an older version to PersonalRelation. Haiku only: the
  * files are made in TEST_DIR (default /Develop/test), a BFS volume with the index for SEN:ID.
  */
 #include <stdio.h>
@@ -17,10 +18,14 @@
 
 #include <Directory.h>
 #include <File.h>
+#include <Messenger.h>
 #include <Node.h>
+#include <NodeInfo.h>
+#include <Path.h>
 #include <fs_attr.h>
 
 #include <sen/Sen.h>
+#include <sen/SenOntoPeople.h>
 
 #include "../../src/migrations/Migrations.h"
 
@@ -95,6 +100,153 @@ Has(const BString& path, const char* attribute)
 	BNode node(path.String());
 	attr_info info;
 	return node.GetAttrInfo(attribute, &info) == B_OK;
+}
+
+// ---- helpers for the part with the server
+
+/** a person file with a type (it has no SEN:ID: the server gives it one when it relates it) */
+static entry_ref
+MakePerson(const char* name)
+{
+	BString path(dir);
+	path << "/" << name;
+	BFile file(path.String(), B_CREATE_FILE | B_READ_WRITE);
+	BNodeInfo(&file).SetType(sen::onto::people::mime::kPerson);
+	entry_ref ref;
+	BEntry(path.String()).GetRef(&ref);
+	return ref;
+}
+
+static BString
+PathOf(const entry_ref& ref)
+{
+	return BString(BPath(&ref).Path());
+}
+
+static std::string
+IdOf(const entry_ref& ref)
+{
+	BNode node(&ref);
+	BString id;
+	node.ReadAttrString(sen::attr::kId, &id);
+	return id.String();
+}
+
+/** the relations of a type that a file stores (SEN:REL:<type>): the targets by their SEN:ID, each with its properties */
+static BMessage
+Stored(const entry_ref& ref, const char* type)
+{
+	BString attribute(sen::attr::kRelationPrefix);
+	attribute << (type + strlen(sen::mime::kRelationPrefix));
+	BMessage relations;
+	if (!Read(PathOf(ref), attribute.String(), &relations))
+		relations.MakeEmpty();
+	return relations;
+}
+
+/** how many relations of a type the file has to a target */
+static int32
+Sets(const entry_ref& ref, const char* type, const std::string& targetId)
+{
+	BMessage relations = Stored(ref, type);
+	type_code code;
+	int32 count = 0;
+	return relations.GetInfo(targetId.c_str(), &code, &count) == B_OK ? count : 0;
+}
+
+static BMessage
+Send(uint32 what, const entry_ref* source, const char* type, const entry_ref* target = NULL)
+{
+	BMessage message(what);
+	message.AddRef(sen::key::kSourceRef, source);
+	message.AddString(sen::key::kRelationType, type);
+	if (target != NULL)
+		message.AddRef(sen::key::kTargetRef, target);
+	BMessage reply;
+	BMessenger server(sen::kServerSignature);
+	if (!server.IsValid() || server.SendMessage(&message, &reply, 10000000, 10000000) != B_OK)
+		reply.AddInt32(sen::key::kStatus, -1);
+	return reply;
+}
+
+static int32
+StatusOf(const BMessage& reply)
+{
+	return reply.GetInt32(sen::key::kStatus, -1);
+}
+
+/**
+ * A relation as the versions before beta 4 stored it: Knows (relation.person.knows), the base of the personal relations. The server makes a real relation
+ * between two people (a Friend: the people have the type of the ontology, the relation is written by the server, in both directions). It is stored under the
+ * name that Knows had, with the labels that Knows has: that is what a file of a user has. The migration then moves it to PersonalRelation (relation.person),
+ * and the server finds it there. Needs the server (it is not started here) and the people ontology; without the server this is skipped.
+ */
+static void
+CheckKnowsOfOlderVersions()
+{
+	const char* kFriendType = sen::onto::people::mime::kFriend;
+	const char* kKnowsType = "relation/x-vnd.sen-labs.relation.person.knows";
+	const char* kPersonalType = sen::onto::people::mime::kPersonalRelation;
+	const char* kFriendAttr = "SEN:REL:x-vnd.sen-labs.relation.person.friend";
+	const char* kKnowsAttr = "SEN:REL:x-vnd.sen-labs.relation.person.knows";
+
+	if (!BMessenger(sen::kServerSignature).IsValid()) {
+		printf("     (the SEN server is not running: a relation that it wrote is not checked)\n");
+		return;
+	}
+
+	BString command("rm -rf '");
+	command << dir << "' && mkdir -p '" << dir << "'";
+	system(command.String());
+	entry_ref ada = MakePerson("Ada"), bob = MakePerson("Bob");
+
+	BMessage reply = Send(sen::cmd::kRelationAdd, &ada, kFriendType, &bob);
+	CHECK(StatusOf(reply) == sen::status::kCreated, "the server relates two people (a Friend)");
+	std::string adaId = IdOf(ada), bobId = IdOf(bob);
+	CHECK(!adaId.empty() && !bobId.empty() && Sets(ada, kFriendType, bobId) == 1 && Sets(bob, kFriendType, adaId) == 1,
+		"the relation is stored with both people");
+
+	// stored under the old name, with the labels of Knows: "knows" at the source, "known by" at the target
+	struct { entry_ref* person; const std::string* other; const char* label; } people[] = {{&ada, &bobId, "knows"}, {&bob, &adaId, "known by"}};
+	for (auto& each : people) {
+		BMessage relations = Stored(*each.person, kFriendType), old, properties;
+		relations.FindMessage(each.other->c_str(), &properties);
+		properties.RemoveName(sen::attr::kRelationLabel);
+		properties.AddString(sen::attr::kRelationLabel, each.label);
+		old.AddMessage(each.other->c_str(), &properties);
+		BNode node(each.person);
+		Write(node, kKnowsAttr, old);
+		node.RemoveAttr(kFriendAttr);
+	}
+	CHECK(Sets(ada, kKnowsType, bobId) == 1 && Sets(ada, kFriendType, bobId) == 0, "the people have Knows now, as in a file of an older version");
+	CHECK(Stored(ada, kPersonalType).IsEmpty(), "and they have no PersonalRelation yet");
+
+	int32 version = 0;
+	sen::migration::VersionStore store;
+	store.read = [&]() { return version; };
+	store.write = [&](int32 value) { version = value; return B_OK; };
+	std::vector<sen::migration::Report> reports = sen::migration::Run(store, false);
+	CHECK(!reports.empty() && reports[0].ran && reports[0].counts.failed == 0 && reports[0].counts.changed >= 2,
+		"the migration moves the relations of both people");
+
+	CHECK(Sets(ada, kPersonalType, bobId) == 1 && Sets(bob, kPersonalType, adaId) == 1, "they are PersonalRelations");
+	CHECK(!Has(PathOf(ada), kKnowsAttr) && !Has(PathOf(bob), kKnowsAttr), "the old attribute is gone");
+	BMessage properties;
+	Stored(ada, kPersonalType).FindMessage(bobId.c_str(), &properties);
+	CHECK(strcmp(properties.GetString(sen::attr::kRelationLabel, ""), "knows") == 0, "Ada knows Bob");
+	Stored(bob, kPersonalType).FindMessage(adaId.c_str(), &properties);
+	CHECK(strcmp(properties.GetString(sen::attr::kRelationLabel, ""), "known by") == 0, "Bob is known by Ada");
+
+	// the server finds it as it finds any relation of the type, and can remove it
+	BMessage found = Send(sen::cmd::kRelationsGet, &ada, kPersonalType), relations;
+	CHECK(StatusOf(found) == sen::status::kOk && found.FindMessage(sen::key::kRelations, &relations) == B_OK && relations.HasMessage(bobId.c_str()),
+		"the server finds Bob as the person that Ada knows");
+	CHECK(StatusOf(Send(sen::cmd::kRelationRemove, &ada, kPersonalType, &bob)) == sen::status::kOk, "and removes the relation");
+	CHECK(Sets(ada, kPersonalType, bobId) == 0 && Sets(bob, kPersonalType, adaId) == 0, "from both people");
+
+	command.SetTo("rm -rf '");
+	command << dir << "'";
+	system(command.String());
 }
 
 int
@@ -186,6 +338,8 @@ main()
 	command.SetTo("rm -rf '");
 	command << dir << "'";
 	system(command.String());
+
+	CheckKnowsOfOlderVersions();
 
 	printf("%s\n", failed == 0 ? "all ok" : "FAILED");
 	return failed == 0 ? 0 : 1;
