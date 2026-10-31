@@ -887,7 +887,7 @@ status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* rela
                 // to find the navigator to launch (see TrackerSen.cpp). Nothing
                 // else ever sets this, even though navigator plugins already
                 // declare the relation types they support via their own
-                // file_types resource (e.g. SenTextNavigator declares support
+                // file_types resource (e.g. SenTextReferenceNavigator declares support
                 // for this exact type) - so without this, GetPreferredApp()
                 // fails and the self-relation click silently aborts.
                 status_t navStatus = AssignPreferredNavigator(&relationType);

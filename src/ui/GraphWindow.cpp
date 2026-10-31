@@ -108,7 +108,7 @@ DistanceToSegment(BPoint point, BPoint a, BPoint b)
 }
 
 
-/** the name of a relation type for people, as far as it is in the name: "relation/x-vnd.sen-labs.relation.person.knows" is "person.knows" */
+/** the name of a relation type for people, as far as it is in the name: "relation/x-vnd.sen-labs.relation.person.friend" is "person.friend" */
 static BString
 ShortTypeName(const std::string& type)
 {
