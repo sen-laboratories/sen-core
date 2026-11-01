@@ -7,6 +7,8 @@
 #include <Entry.h>
 #include <Window.h>
 
+#include "Worker.h"
+
 #include <map>
 #include <string>
 
@@ -30,7 +32,7 @@ static const uint32 kGraphFocus = 'GWfo';
 
 /**
  * The window of the Graph item of the Deskbar menu (also the Knot with the SEN key): the objects of SEN as the nodes of a graph and their relations as its
- * edges, laid out by SenGraph.h. The objects are read in a thread of their own (see graph::Collect()). A click selects an object (its relations are
+ * edges, laid out by SenGraph.h. The objects are read by a worker (Worker.h, see graph::Collect()). A click selects an object (its relations are
  * emphasised), a double click opens it as Tracker does; the mouse wheel zooms, dragging moves, F fits the graph into the window. The graph can be
  * saved as SVG.
  */
@@ -52,7 +54,6 @@ private:
 	/** the cards of what is under the mouse in the graph: on or off */
 	void			_UpdatePreview();
 	sen::EntityCard*	_LoadCard(const std::string& id) const;
-	static int32	_WorkEntry(void* data);
 
 	GraphView*		fView;
 	BCheckBox*		fMeta;
@@ -67,6 +68,7 @@ private:
 	BStringView*	fStatus;
 	BFilePanel*		fSavePanel;
 
+	Worker*							fWorker;
 	bool							fWorking;
 	sen::graph::Graph				fAll;		///< every object and relation that was read
 	std::map<std::string, entry_ref>	fRefs;

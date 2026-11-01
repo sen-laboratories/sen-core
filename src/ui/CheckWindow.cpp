@@ -28,7 +28,8 @@ CheckWindow::CheckWindow()
 	:
 	BWindow(BRect(140, 140, 760, 560), "SEN Check", B_TITLED_WINDOW,
 		B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
-	fChecking(false)
+	fChecking(false),
+	fWorker(new Worker("check SEN"))
 {
 	fList = new BOutlineListView("list", B_SINGLE_SELECTION_LIST);
 	BScrollView* scroll = new BScrollView("scroll", fList, 0, false, true);
@@ -47,6 +48,13 @@ CheckWindow::CheckWindow()
 	.End();
 
 	_Check();
+}
+
+
+CheckWindow::~CheckWindow()
+{
+	// (the worker quits when the check that it is running is done: the window does not wait for it)
+	fWorker->Finish();
 }
 
 
@@ -69,18 +77,15 @@ CheckWindow::MessageReceived(BMessage* message)
 }
 
 
-int32
-CheckWindow::_CheckEntry(void* data)
+/** what the worker does: the check (the queries over all volumes), the result goes to the window as a pointer */
+static BMessage*
+Check()
 {
-	BMessenger* target = (BMessenger*)data;
 	stats::CheckResult* result = new stats::CheckResult(stats::RunCheck());
 
-	BMessage done(kChecked);
-	done.AddPointer("result", result);
-	if (target->SendMessage(&done) != B_OK)
-		delete result;	// (the window is gone)
-	delete target;
-	return 0;
+	BMessage* done = new BMessage(kChecked);
+	done->AddPointer("result", result);
+	return done;
 }
 
 
@@ -94,10 +99,13 @@ CheckWindow::_Check()
 	fStatus->SetText("Checking" B_UTF8_ELLIPSIS);
 	_Clear();
 
-	thread_id thread = spawn_thread(_CheckEntry, "check SEN", B_LOW_PRIORITY, new BMessenger(this));
-	if (thread >= 0)
-		resume_thread(thread);
-	else {
+	// (the result of a window that is gone is freed here)
+	status_t result = fWorker->Post(Check, BMessenger(this), [](BMessage* message) {
+		stats::CheckResult* checked = NULL;
+		if (message->FindPointer("result", (void**)&checked) == B_OK)
+			delete checked;
+	});
+	if (result != B_OK) {
 		fChecking = false;
 		fCheck->SetEnabled(true);
 	}

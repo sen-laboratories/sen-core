@@ -14,6 +14,7 @@ SRCS := src/relations/RelationHandler.cpp \
     	src/relations/RelationSets.cpp \
     	src/relations/SelfRelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \
+	src/migrations/Migrations.cpp \
 	src/server/Cli.cpp \
 	src/server/Enrichment.cpp \
 	src/deskbar/DeskbarView.cpp \

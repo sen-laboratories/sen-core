@@ -72,9 +72,24 @@ server for the options that print information and exit, which need no running se
 > sen info            # the number of SEN objects, types and relations
 > sen types           # the types and relations as a tree, with the number of files
 > sen check           # duplicate SEN:IDs, types that are not installed, missing indices
+> sen migrate         # the changes to your data that this version needs (renamed relation types...): done and to do; --dry-run only counts
 ```
 
-(`sen_server --version`, `--info`, `--types`, `--check` do the same.)
+(`sen_server --version`, `--info`, `--types`, `--check`, `--migrate` do the same.)
+
+### Migrations
+
+What SEN keeps in the attributes of your files outlives the programs that wrote it. When a version renames a relation type, the files that have it stay as they are, so
+the server runs **migration steps** when it starts (`src/migrations/Migrations.h`): numbered, safe and idempotent (a step that is run again changes nothing more), each
+one recorded in the settings (`SEN:dataVersion`) when it is complete; one that could not change everything is tried again at the next start. `sen migrate` shows
+which steps are done and which are to do. A step only moves what an older SEN made, never what other programs keep (no attribute of People or BePDF is touched), and
+anything that adds to what other programs keep is an **optional step**, with a question.
+
+To add one: a function in `Migrations.cpp` that does the work and returns what it changed, a line in `Steps()` with the next number (never reuse one), and a check in
+`tests/vm/MigrationTest.cpp` (`tests/vm/migrations.sh` runs it in the Haiku VM). Renaming a relation type is `RenameRelationTypes()`: the first step does it for
+`person.knows`, which is `person` (PersonalRelation) since beta 4.
+
+**Optional steps** (the contacts of People): the server asks once, when it has something to do ("SEN found 12 contacts of the People application... Add the attributes now?", *Not now* asks again at the next start, *Never* is remembered in the settings as `SEN:migration:<name>`). The step `people-attributes` adds the standard attributes (`foaf:name`, `foaf:nick`, `foaf:mbox`, `foaf:phone`, `foaf:homepage`, `vcard:category`) to the files of `application/x-person` from what People keeps (`META:name`, ...): it only adds where the new attribute is missing, so a name that you edited in Shoji stays, and nothing of People's is changed or removed (People, Mail and the other programs find their data as before). `sen migrate person` (or `sen migrate application/x-person`) does it on request, `--dry-run` counts; the optional steps are named by their short name or their file type, so a next one is a line in `OptionalSteps()`, not a new command. A package could not do this: its script runs once for the system, inside the activation, without a way to ask the user.
 
 ## Package
 

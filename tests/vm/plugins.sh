@@ -10,5 +10,5 @@ g++ -std=c++20 -Wall -Wno-multichar -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL 
 [ -x /tmp/find-plugins-test ] || { echo "FAIL the test did not compile"; exit 1; }
 /tmp/find-plugins-test \
 	extract=SenMarkdownExtractor,SenMimeExtractor,SenPdfExtractor,SenCodeExtractor \
-	navigate=SenPdfNavigator,SenReferenceNavigator,SenRelationNavigator,SenTextNavigator \
+	navigate=SenDocumentReferenceNavigator,SenReferenceNavigator,SenRelationNavigator,SenTextReferenceNavigator \
 	enrich=bert

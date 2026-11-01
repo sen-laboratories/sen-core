@@ -12,6 +12,9 @@
 #include <Notification.h>
 #include <Roster.h>
 
+#include <Looper.h>
+#include <OS.h>
+
 #include <vector>
 
 #include <sen/Sen.h>
@@ -57,6 +60,72 @@ PluginFor(const std::vector<entry_ref>& plugins, const BString& type, entry_ref*
 	return false;
 }
 
+/** a job for the queue: the file as `file`, the plugin as `plugin`, `wipe` and `auto` as they were asked */
+static const uint32 kEnrichJob = 'SEnj';
+
+/** the longest that a plugin is waited for (one that asks the user may take its time) */
+static const bigtime_t kLongestWait = 15 * 60 * 1000000LL;
+
+/**
+ * The queue of the files that are enriched: a looper, which handles one message at a time, in the order in which they came (the message queue of a BLooper is
+ * a BMessageQueue). A job is handled until its plugin has ended, so the next one starts when the one before it is done: a plugin may ask the user (BERT
+ * chooses between several books), and several windows at once, for different files, cannot be answered. The one queue is for all requests: files of a second
+ * request wait for those of the first.
+ */
+class EnrichQueue : public BLooper {
+public:
+	EnrichQueue()
+		:
+		BLooper("sen enrich queue", B_NORMAL_PRIORITY)
+	{
+	}
+
+	virtual void
+	MessageReceived(BMessage* message)
+	{
+		if (message->what != kEnrichJob) {
+			BLooper::MessageReceived(message);
+			return;
+		}
+
+		entry_ref file, plugin;
+		if (message->FindRef("file", &file) != B_OK || message->FindRef("plugin", &plugin) != B_OK)
+			return;
+
+		BMessage launch(B_REFS_RECEIVED);
+		launch.AddRef("refs", &file);
+		launch.AddBool("wipe", message->GetBool("wipe", true));
+		if (message->GetBool("auto", false))
+			launch.AddBool("auto", true);
+
+		team_id team = -1;
+		status_t result = be_roster->Launch(&plugin, &launch, &team);
+		if (result != B_OK && result != B_ALREADY_RUNNING) {
+			spdlog::error("enrich: could not start plugin '{}' for '{}': {}", plugin.name, file.name, strerror(result));
+			return;
+		}
+		spdlog::info("enrich: '{}' goes to plugin '{}'", file.name, plugin.name);
+
+		// (a plugin that was running already, as a single launch application, is waited for as well)
+		bigtime_t deadline = system_time() + kLongestWait;
+		app_info info;
+		while (team >= 0 && be_roster->GetRunningAppInfo(team, &info) == B_OK && system_time() < deadline)
+			snooze(200000);
+	}
+};
+
+/** the queue, made when the first file is to be enriched (the server asks from its own thread, one request at a time) */
+static EnrichQueue*
+Queue()
+{
+	static EnrichQueue* queue = NULL;
+	if (queue == NULL) {
+		queue = new EnrichQueue();
+		queue->Run();
+	}
+	return queue;
+}
+
 status_t
 Handle(const BMessage& request, BString* detail)
 {
@@ -71,6 +140,7 @@ Handle(const BMessage& request, BString* detail)
 	const bool wipe = request.GetBool("wipe", true);
 	const bool automatic = request.GetBool("auto", false);
 
+	std::vector<BMessage> jobs;
 	int32 started = 0, unhandled = 0, files = 0;
 	BString unhandledNames, unhandledType;
 	entry_ref ref;
@@ -88,18 +158,14 @@ Handle(const BMessage& request, BString* detail)
 			continue;
 		}
 
-		BMessage launch(B_REFS_RECEIVED);
-		launch.AddRef("refs", &ref);
-		launch.AddBool("wipe", wipe);
-		if (automatic)
-			launch.AddBool("auto", true);
-		result = be_roster->Launch(&plugin, &launch);
-		if (result == B_OK) {
-			spdlog::info("enrich: '{}' (type '{}') goes to plugin '{}'", ref.name, type.String(), plugin.name);
-			started++;
-		} else {
-			spdlog::error("enrich: could not start plugin '{}' for '{}': {}", plugin.name, ref.name, strerror(result));
-		}
+		BMessage job(kEnrichJob);
+		job.AddRef("file", &ref);
+		job.AddRef("plugin", &plugin);
+		job.AddBool("wipe", wipe);
+		job.AddBool("auto", automatic);
+		jobs.push_back(job);
+		spdlog::info("enrich: '{}' (type '{}') is for plugin '{}'", ref.name, type.String(), plugin.name);
+		started++;
 	}
 
 	if (files == 0) {
@@ -125,7 +191,11 @@ Handle(const BMessage& request, BString* detail)
 		*detail = "no plugin handles the type of the file";
 		return B_NOT_SUPPORTED;
 	}
-	*detail = BString() << started << " plugin(s) started";
+
+	// one after the other, in the queue: the server is not held up
+	for (BMessage& job : jobs)
+		Queue()->PostMessage(&job);
+	*detail = BString() << started << " file(s) will be enriched, one after the other";
 	return B_OK;
 }
 
