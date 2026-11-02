@@ -78,9 +78,9 @@ main()
 	int ontologies = Index(top, "Ontologies"), settings = Index(top, "Settings"), restart = Index(top, "Restart"), quit = Index(top, "Quit");
 	int plugins = Index(top, "Plugins"), graph = Index(top, "Graph" B_UTF8_ELLIPSIS), info = Index(top, "Info" B_UTF8_ELLIPSIS),
 		check_ = Index(top, "Check" B_UTF8_ELLIPSIS);
-	// Plugins, Ontologies, a separator, then Graph, Info, Check and Settings
+	// Plugins, Ontologies, Graph, a separator, then Info, Check and Settings
 	check("Plugins and Ontologies are next to each other, above the windows about SEN", plugins >= 0 && ontologies == plugins + 1
-		&& graph == ontologies + 2 && info == graph + 1 && check_ == info + 1 && settings == check_ + 1);
+		&& graph == ontologies + 1 && info == graph + 2 && check_ == info + 1 && settings == check_ + 1);
 	check("Restart is directly above Quit", restart >= 0 && quit == restart + 1);
 	BMenuItem* item = menu->ItemAt(ontologies);
 	// the menus are items that can be chosen themselves (no "Show all" in them)
