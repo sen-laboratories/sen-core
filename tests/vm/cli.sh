@@ -25,7 +25,7 @@ $output"; return; }
 }
 
 {
-check "VersionHasNameVersionDateAndBuild" "$SERVER --version" 0 '^.+ [0-9]+\.[0-9]+\.[0-9]+.* \([0-9]{4}-[0-9]{2}-[0-9]{2}, build [0-9]+\)$'
+check "VersionHasNameVersionAndDate" "$SERVER --version" 0 '^.+ [0-9]+\.[0-9]+\.[0-9]+.* \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$'
 check "InfoCountsObjectsTypesAndRelations" "$SERVER --info" 0 '^Objects +[0-9]+'
 check "InfoNamesTheTypes" "$SERVER --info" 0 '^Types +[0-9]+ entit(y|ies), [0-9]+ meta types?, [0-9]+ classifications?'
 check "InfoNamesTheRelations" "$SERVER --info" 0 '^Relations +[0-9]+'
