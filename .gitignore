@@ -40,3 +40,4 @@ objects.*
 examples/*
 *.hpkg
 package-build/
+.DS_Store
