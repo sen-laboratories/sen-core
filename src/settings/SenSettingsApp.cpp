@@ -8,6 +8,9 @@
 #include <sen/SenMimeTypes.h>
 
 #include <Application.h>
+#include <Entry.h>
+#include <Path.h>
+#include <string.h>
 #include <Window.h>
 
 /**
@@ -16,11 +19,20 @@
  */
 class SettingsApp : public BApplication {
 public:
-	SettingsApp() : BApplication(sen::kSettingsSignature), fWindow(NULL) {}
+	SettingsApp() : BApplication(sen::kSettingsSignature), fWindow(NULL), fHasPlugin(false) {}
+
+	/** `sen_settings --plugin <file>`: shows the settings of that plugin file instead of the installed copy of its signature (for the developer of a plugin) */
+	virtual void ArgvReceived(int32 argc, char** argv)
+	{
+		for (int32 i = 1; i + 1 < argc; i++) {
+			if (strcmp(argv[i], "--plugin") == 0 && get_ref_for_path(argv[i + 1], &fPlugin) == B_OK)
+				fHasPlugin = true;
+		}
+	}
 
 	virtual void ReadyToRun()
 	{
-		fWindow = new sen::settings::SettingsWindow();
+		fWindow = new sen::settings::SettingsWindow(fHasPlugin ? &fPlugin : NULL);
 		fWindow->Show();
 	}
 
@@ -37,6 +49,8 @@ public:
 
 private:
 	BWindow*	fWindow;
+	entry_ref	fPlugin;
+	bool		fHasPlugin;
 };
 
 

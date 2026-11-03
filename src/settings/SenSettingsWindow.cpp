@@ -34,6 +34,7 @@
 #include <stdlib.h>
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,7 @@ struct SettingsWindow::Target {
 	bool		core = false;
 	BString		signature;
 	BString		name;
+	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
 };
 
 
@@ -71,14 +73,18 @@ namespace {
 
 class NodeItem : public BStringItem {
 public:
-	NodeItem(const char* label, uint32 level, bool selectable, bool core, const char* signature)
+	NodeItem(const char* label, uint32 level, bool selectable, bool core, const char* signature, const entry_ref* file = NULL)
 		:
 		BStringItem(label, level, true),
 		fSelectable(selectable),
 		fCore(core),
 		fSignature(signature)
 	{
+		if (file != NULL)
+			fFile = *file;
 	}
+
+	const entry_ref&	File() const { return fFile; }
 
 	bool			IsSelectable() const { return fSelectable; }
 	bool			IsCore() const { return fCore; }
@@ -88,6 +94,7 @@ private:
 	bool		fSelectable;
 	bool		fCore;
 	BString		fSignature;
+	entry_ref	fFile;
 };
 
 
@@ -95,15 +102,10 @@ private:
 struct Request {
 	BMessenger	window;
 	int32		serial;
-	bool		core;
-	BString		signature;
 };
 
 
-/**
- * Asks for the settings: of the server, or of a plugin that is running. A plugin that is not is started with the request, which carries where to send the answer
- * (the roster delivers a message that nobody waits for a reply to). The window gets kMsgReady either way.
- */
+/** Asks the server for its settings (it answers at once); the window gets kMsgReady. A plugin is asked without a thread, see SettingsWindow::_Request(). */
 int32
 RunRequest(void* data)
 {
@@ -111,28 +113,10 @@ RunRequest(void* data)
 	BMessage ready(kMsgReady);
 	ready.AddInt32("serial", request->serial);
 
-	status_t result = B_OK;
 	BMessage reply;
-	if (request->core) {
-		BMessenger server(sen::kServerSignature);
-		BMessage ask(sen::cmd::kCoreSettings);
-		result = server.IsValid() ? server.SendMessage(&ask, &reply, kAnswerTimeout, kAnswerTimeout) : B_NAME_NOT_FOUND;
-	} else {
-		BMessenger plugin(request->signature.String());
-		BMessage ask(sensei::cmd::kSettings);
-		if (plugin.IsValid()) {
-			result = plugin.SendMessage(&ask, &reply, kAnswerTimeout, kAnswerTimeout);
-		} else {
-			// started for the request: its answer comes to the window, which is told with a message of its own
-			ask.AddMessenger(sensei::key::kReplyTo, request->window);
-			ask.AddInt32("serial", request->serial);
-			result = be_roster->Launch(request->signature.String(), &ask);
-			if (result == B_OK) {
-				delete request;
-				return 0;		// (kSettingsReply comes to the window)
-			}
-		}
-	}
+	BMessenger server(sen::kServerSignature);
+	BMessage ask(sen::cmd::kCoreSettings);
+	status_t result = server.IsValid() ? server.SendMessage(&ask, &reply, kAnswerTimeout, kAnswerTimeout) : B_NAME_NOT_FOUND;
 	ready.AddInt32(form::kFieldResult, result);
 	ready.AddMessage("reply", &reply);
 	request->window.SendMessage(&ready);
@@ -169,7 +153,7 @@ Capitalized(const char* word)
 }	// namespace
 
 
-SettingsWindow::SettingsWindow()
+SettingsWindow::SettingsWindow(const entry_ref* pluginFile)
 	:
 	BWindow(BRect(140, 140, 780, 580), "SEN Settings", B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE | B_CLOSE_ON_ESCAPE),
 	fTree(NULL),
@@ -183,6 +167,7 @@ SettingsWindow::SettingsWindow()
 	fHasDefaults(false),
 	fModified(false),
 	fWaiting(false),
+	fStartedTeam(-1),
 	fSerial(0),
 	fTimeout(NULL)
 {
@@ -224,7 +209,7 @@ SettingsWindow::SettingsWindow()
 	split->AddChild(fPane, 0.75f);
 	BLayoutBuilder::Group<>(this, B_VERTICAL, 0).Add(split).End();
 
-	_BuildTree();
+	_BuildTree(pluginFile);
 	if (fForm == NULL) {
 		BString text;
 		text << "The settings form needs Shoji (the package shoji) in a version that has it"
@@ -245,42 +230,69 @@ bool
 SettingsWindow::QuitRequested()
 {
 	// the plugins that have a settings session are told that it is over (a plugin that was started for it ends)
-	for (const std::string& signature : fOpened) {
-		BMessenger plugin(signature.c_str());
-		if (plugin.IsValid())
-			plugin.SendMessage(sensei::cmd::kSettingsClose);
+	for (auto& session : fSessions) {
+		if (session.second.IsValid())
+			session.second.SendMessage(sensei::cmd::kSettingsClose);
 	}
 	return true;
 }
 
 
-// Core, and a node for every feature that plugins have, with the plugins that have it (a plugin is under each of its features).
+// Core, and a node for every feature that plugins have, with the plugins that have it (a plugin is under each of its features). A plugin is started by its file, the
+// one that was found: its signature can be that of more than one copy. A file that was given (`sen_settings --plugin <file>`, for a developer of a plugin) replaces the
+// file of the plugin with its signature, or is a node of its own.
 void
-SettingsWindow::_BuildTree()
+SettingsWindow::_BuildTree(const entry_ref* pluginFile)
 {
 	fTree->AddItem(new NodeItem("Core", 0, true, true, ""));
 	fTree->AddItem(new NodeItem("Plugins", 0, false, false, ""));
 
+	BString givenSignature;
+	BString givenName;
+	if (pluginFile != NULL)
+		givenName = PluginName(*pluginFile, &givenSignature);
+	bool givenShown = false;
+	int32 select = 0;
+
+	struct Plugin {
+		std::string		signature;
+		entry_ref		file;
+	};
 	for (const char* feature : {sensei::feature::kExtract, sensei::feature::kEnrich, sensei::feature::kIdentify, sensei::feature::kNavigate, sensei::feature::kSearch}) {
 		std::vector<entry_ref> plugins;
 		if (sen::FindPlugins(feature, &plugins) != B_OK || plugins.empty())
 			continue;
 
-		std::map<std::string, std::string> byName;		// (sorted by the name that is shown)
+		std::map<std::string, Plugin> byName;		// (sorted by the name that is shown)
+		std::set<std::string> seen;
 		for (const entry_ref& ref : plugins) {
 			BString signature;
 			BString name = PluginName(ref, &signature);
-			if (!signature.IsEmpty())
-				byName[name.String()] = signature.String();
+			if (signature.IsEmpty() || !seen.insert(signature.String()).second)
+				continue;
+			Plugin plugin;
+			plugin.signature = signature.String();
+			plugin.file = (pluginFile != NULL && signature == givenSignature) ? *pluginFile : ref;
+			if (pluginFile != NULL && signature == givenSignature)
+				givenShown = true;
+			byName[name.String()] = plugin;
 		}
 		if (byName.empty())
 			continue;
 		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, false, false, ""));
-		for (const auto& plugin : byName)
-			fTree->AddItem(new NodeItem(plugin.first.c_str(), 2, true, false, plugin.second.c_str()));
+		for (const auto& plugin : byName) {
+			if (pluginFile != NULL && plugin.second.signature == givenSignature.String() && select == 0)
+				select = fTree->CountItems();
+			fTree->AddItem(new NodeItem(plugin.first.c_str(), 2, true, false, plugin.second.signature.c_str(), &plugin.second.file));
+		}
 	}
 
-	fTree->Select(0);
+	if (pluginFile != NULL && !givenShown) {
+		fTree->AddItem(new NodeItem("From a file", 1, false, false, ""));
+		select = fTree->CountItems();
+		fTree->AddItem(new NodeItem(givenName.String(), 2, true, false, givenSignature.String(), pluginFile));
+	}
+	fTree->Select(select);
 }
 
 
@@ -301,6 +313,7 @@ SettingsWindow::MessageReceived(BMessage* message)
 			target.core = item->IsCore();
 			target.signature = item->Signature();
 			target.name = item->Text();
+			target.file = item->File();
 			_Select(&target);
 			break;
 		}
@@ -329,6 +342,10 @@ SettingsWindow::MessageReceived(BMessage* message)
 		case kMsgTimeout:
 			if (fWaiting && message->GetInt32("serial", 0) == fSerial) {
 				fWaiting = false;
+				// (a plugin that does not know the request stays as an application with no work: it is asked to end)
+				if (fStartedTeam >= 0)
+					BMessenger(NULL, fStartedTeam).SendMessage(B_QUIT_REQUESTED);
+				fStartedTeam = -1;
 				BString text(fName);
 				text << " does not answer.";
 				_ShowNote(text.String());
@@ -382,17 +399,37 @@ SettingsWindow::_Request(const Target& target)
 	BMessage timeout(kMsgTimeout);
 	timeout.AddInt32("serial", fSerial + 1);
 	fTimeout = new BMessageRunner(BMessenger(this), &timeout, kStartTimeout, 1);
+	const int32 serial = ++fSerial;
 
-	Request* request = new Request();
-	request->window = BMessenger(this);
-	request->serial = ++fSerial;
-	request->core = target.core;
-	request->signature = target.signature;
-	if (!target.core)
-		fOpened.insert(target.signature.String());
-	thread_id thread = spawn_thread(RunRequest, "settings request", B_NORMAL_PRIORITY, request);
-	if (thread < 0 || resume_thread(thread) != B_OK)
-		delete request;
+	if (target.core) {
+		Request* request = new Request();
+		request->window = BMessenger(this);
+		request->serial = serial;
+		thread_id thread = spawn_thread(RunRequest, "settings request", B_NORMAL_PRIORITY, request);
+		if (thread < 0 || resume_thread(thread) != B_OK)
+			delete request;
+		return;
+	}
+
+	// A plugin: its answer comes to the window as kSettingsReply (a plugin that is started for the request has nobody that waits for a reply). A plugin that is not started
+	// is started with the request; one that has a session of ours is asked there (many plugins are multiple launch applications: the instance that has our session is the
+	// one to talk to, whatever else runs).
+	BMessage ask(sensei::cmd::kSettings);
+	ask.AddMessenger(sensei::key::kReplyTo, BMessenger(this));
+	ask.AddInt32("serial", serial);
+	std::map<std::string, BMessenger>::iterator session = fSessions.find(target.signature.String());
+	status_t result;
+	if (session != fSessions.end() && session->second.IsValid())
+		result = session->second.SendMessage(&ask);
+	else
+		result = be_roster->Launch(&target.file, &ask, &fStartedTeam);
+	if (result != B_OK) {
+		fWaiting = false;
+		BString text(fName);
+		text << " could not be started: " << strerror(result);
+		_ShowNote(text.String());
+		_Status("");
+	}
 }
 
 
@@ -400,9 +437,16 @@ SettingsWindow::_Request(const Target& target)
 void
 SettingsWindow::_Ready(BMessage* message)
 {
-	if (message->GetInt32("serial", 0) != fSerial)
-		return;		// (of an older request: another item was chosen since)
+	if (message->GetInt32("serial", 0) != fSerial) {
+		// (of an older request: another item was chosen since; a plugin that was started for it has no use for the session)
+		if (message->what == sensei::cmd::kSettingsReply && message->ReturnAddress().IsValid() && fSessions.find(message->GetString(sensei::key::kPlugin, "")) == fSessions.end())
+			message->ReturnAddress().SendMessage(sensei::cmd::kSettingsClose);
+		return;
+	}
 	fWaiting = false;
+	fStartedTeam = -1;
+	if (message->what == sensei::cmd::kSettingsReply && message->ReturnAddress().IsValid())
+		fSessions[fSignature.String()] = message->ReturnAddress();
 
 	status_t result = B_OK;
 	BMessage reply;
@@ -459,7 +503,14 @@ SettingsWindow::_Changed(BMessage* message)
 
 	BMessage set(fCore ? sen::cmd::kCoreSettingsSet : sensei::cmd::kSettingsSet);
 	set.AddMessage(form::kFieldSettings, &changes);
-	BMessenger target(fCore ? sen::kServerSignature : fSignature.String());
+	BMessenger target;
+	if (fCore) {
+		target = BMessenger(sen::kServerSignature);
+	} else {
+		std::map<std::string, BMessenger>::iterator session = fSessions.find(fSignature.String());
+		if (session != fSessions.end())
+			target = session->second;
+	}
 	if (!target.IsValid() || target.SendMessage(&set, this) != B_OK)
 		_Status("The settings could not be sent.");
 	_UpdateButtons();

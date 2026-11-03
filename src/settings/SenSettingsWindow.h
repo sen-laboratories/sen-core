@@ -4,12 +4,13 @@
  */
 #pragma once
 
+#include <Entry.h>
 #include <Message.h>
 #include <Messenger.h>
 #include <String.h>
 #include <Window.h>
 
-#include <set>
+#include <map>
 #include <string>
 
 class BButton;
@@ -29,7 +30,8 @@ namespace settings {
  */
 class SettingsWindow : public BWindow {
 public:
-					SettingsWindow();
+					/** @param pluginFile a plugin to show, instead of the copy that is installed (for the developer of a plugin) */
+					SettingsWindow(const entry_ref* pluginFile = NULL);
 	virtual			~SettingsWindow();
 
 	virtual void	MessageReceived(BMessage* message);
@@ -38,7 +40,7 @@ public:
 private:
 	struct Target;
 
-	void			_BuildTree();
+	void			_BuildTree(const entry_ref* pluginFile);
 	void			_Select(const Target* target);
 	void			_Request(const Target& target);
 	void			_Ready(BMessage* message);
@@ -61,13 +63,14 @@ private:
 	bool				fCore;
 	bool				fHasDefaults;
 	bool				fModified;
+	team_id				fStartedTeam;		///< of the plugin that was started for the request that is waited for
 	bool				fWaiting;			///< a request is out (a plugin that was started answers to the window, so there is a time limit)
 	int32				fSerial;			///< of the request that is waited for: an answer to an older one is dropped
 	BMessageRunner*		fTimeout;
 	BMessage			fSettings;			///< as the form has them now (the last change)
 	BMessage			fSchema;
 	BMessage			fDefaultsMessage;
-	std::set<std::string> fOpened;			///< the plugins that have a settings session: told when this window closes
+	std::map<std::string, BMessenger> fSessions;	///< by signature: the instance of a plugin that has a settings session of this window (told when it closes)
 };
 
 }	// namespace settings
