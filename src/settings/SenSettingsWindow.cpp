@@ -14,6 +14,7 @@
 #include <sen/SenSettingsFormHost.h>
 
 #include <AppFileInfo.h>
+#include <Bitmap.h>
 #include <Button.h>
 #include <ControlLook.h>
 #include <File.h>
@@ -23,6 +24,7 @@
 #include <LayoutBuilder.h>
 #include <ListItem.h>
 #include <MessageRunner.h>
+#include <NodeInfo.h>
 #include <OutlineListView.h>
 #include <Path.h>
 #include <Roster.h>
@@ -31,8 +33,10 @@
 #include <StringView.h>
 #include <TextView.h>
 
+#include <math.h>
 #include <stdlib.h>
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -71,6 +75,22 @@ struct SettingsWindow::Target {
 
 namespace {
 
+/** The icon of a file (an application: its vector icon from its resources), as a bitmap of the size; NULL if it has none. */
+BBitmap*
+IconOf(const entry_ref& file, int size)
+{
+	BBitmap* icon = new BBitmap(BRect(0, 0, size - 1, size - 1), B_RGBA32);
+	if (icon->InitCheck() == B_OK && BNodeInfo::GetTrackerIcon(&file, icon, (icon_size)size) == B_OK)
+		return icon;
+	delete icon;
+	return NULL;
+}
+
+
+/**
+ * A node of the tree. One that has a file (Core: the server, a plugin: its application) shows the icon of that file before its name, the icon that its resources have; the
+ * nodes that are headings have none. The icon is as high as the text needs, a little more.
+ */
 class NodeItem : public BStringItem {
 public:
 	NodeItem(const char* label, uint32 level, bool selectable, bool core, const char* signature, const entry_ref* file = NULL)
@@ -78,10 +98,53 @@ public:
 		BStringItem(label, level, true),
 		fSelectable(selectable),
 		fCore(core),
-		fSignature(signature)
+		fSignature(signature),
+		fIcon(NULL)
 	{
-		if (file != NULL)
+		if (file != NULL) {
 			fFile = *file;
+			font_height height;
+			be_plain_font->GetHeight(&height);
+			fIcon = IconOf(fFile, (int)ceilf(height.ascent + height.descent + height.leading) + 2);
+		}
+	}
+
+	virtual ~NodeItem() { delete fIcon; }
+
+	virtual void Update(BView* owner, const BFont* font)
+	{
+		BStringItem::Update(owner, font);
+		if (fIcon != NULL) {
+			SetHeight(std::max(Height(), fIcon->Bounds().Height() + 3));
+			SetWidth(Width() + fIcon->Bounds().Width() + 1 + kIconGap);
+		}
+	}
+
+	virtual void DrawItem(BView* owner, BRect frame, bool complete)
+	{
+		if (fIcon == NULL) {
+			BStringItem::DrawItem(owner, frame, complete);
+			return;
+		}
+
+		// as BStringItem does it: the background, then the name; the icon comes before the name
+		const rgb_color low = owner->LowColor();
+		if (IsSelected() || complete) {
+			owner->SetLowColor(IsSelected() ? ui_color(B_LIST_SELECTED_BACKGROUND_COLOR) : owner->ViewColor());
+			owner->FillRect(frame, B_SOLID_LOW);
+		}
+		owner->SetDrawingMode(B_OP_ALPHA);
+		owner->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
+		owner->DrawBitmap(fIcon, BPoint(frame.left + 2, frame.top + (frame.Height() - fIcon->Bounds().Height()) / 2));
+		owner->SetDrawingMode(B_OP_COPY);
+
+		font_height height;
+		owner->GetFontHeight(&height);
+		owner->SetHighColor(IsSelected() ? ui_color(B_LIST_SELECTED_ITEM_TEXT_COLOR) : ui_color(B_LIST_ITEM_TEXT_COLOR));
+		owner->MovePenTo(frame.left + 2 + fIcon->Bounds().Width() + 1 + kIconGap,
+			frame.top + (frame.Height() - (height.ascent + height.descent)) / 2 + height.ascent);
+		owner->DrawString(Text());
+		owner->SetLowColor(low);
 	}
 
 	const entry_ref&	File() const { return fFile; }
@@ -91,10 +154,13 @@ public:
 	const BString&	Signature() const { return fSignature; }
 
 private:
+	static constexpr float	kIconGap = 4;
+
 	bool		fSelectable;
 	bool		fCore;
 	BString		fSignature;
 	entry_ref	fFile;
+	BBitmap*	fIcon;
 };
 
 
@@ -244,7 +310,10 @@ SettingsWindow::QuitRequested()
 void
 SettingsWindow::_BuildTree(const entry_ref* pluginFile)
 {
-	fTree->AddItem(new NodeItem("Core", 0, true, true, ""));
+	// (Core is the server: its icon)
+	entry_ref server;
+	const bool hasServer = be_roster->FindApp(sen::kServerSignature, &server) == B_OK;
+	fTree->AddItem(new NodeItem("Core", 0, true, true, "", hasServer ? &server : NULL));
 	fTree->AddItem(new NodeItem("Plugins", 0, false, false, ""));
 
 	BString givenSignature;
