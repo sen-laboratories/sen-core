@@ -11,7 +11,6 @@
 #include "InfoWindow.h"
 #include "QueryFiles.h"
 #include "../stats/SenStats.h"
-#include "SettingsWindow.h"
 
 #include "../config/SenConfigHandler.h"
 #include "../relations/IdListAttr.h"
@@ -70,7 +69,7 @@ SenUi::Handle(BMessage* message)
 			_Show(&fCheck, &SenUi::_MakeCheck, 'CWac');
 			return true;
 		case sen::cmd::kUiShowSettings:
-			_Show(&fSettings, &SenUi::_MakeSettings, 'SWac');
+			_ShowSettings();
 			return true;
 		case sen::cmd::kUiShowAbout:
 			_Show(&fAbout, &SenUi::_MakeAbout, 'ABac');
@@ -130,7 +129,7 @@ SenUi::Handle(BMessage* message)
 void
 SenUi::CloseWindows()
 {
-	BMessenger* windows[] = {&fInfo, &fCheck, &fSettings, &fAbout, &fGraph};
+	BMessenger* windows[] = {&fInfo, &fCheck, &fAbout, &fGraph};
 	for (BMessenger* window : windows) {
 		if (window->IsValid())
 			window->SendMessage(B_QUIT_REQUESTED);
@@ -158,7 +157,12 @@ SenUi::_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate)
 
 BWindow* SenUi::_MakeInfo() { return new InfoWindow(); }
 BWindow* SenUi::_MakeCheck() { return new CheckWindow(); }
-BWindow* SenUi::_MakeSettings() { return new SettingsWindow(fConfig); }
+/** The settings are shown by the application sen_settings, not by the server: a fault in a form cannot take the server down. It is a single launch application: a second request brings its window to the front. */
+void
+SenUi::_ShowSettings()
+{
+	_Report("show the settings", be_roster->Launch(sen::kSettingsSignature));
+}
 BWindow* SenUi::_MakeAbout() { return new AboutWindow(); }
 BWindow* SenUi::_MakeGraph() { return new GraphWindow(fConfig); }
 

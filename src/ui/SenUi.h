@@ -35,7 +35,7 @@ private:
 	void			_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate);
 	BWindow*		_MakeInfo();
 	BWindow*		_MakeCheck();
-	BWindow*		_MakeSettings();
+	void			_ShowSettings();
 	BWindow*		_MakeAbout();
 	BWindow*		_MakeGraph();
 
@@ -59,7 +59,6 @@ private:
 	RelationHandler*	fRelations;
 	BMessenger			fInfo;
 	BMessenger			fCheck;
-	BMessenger			fSettings;
 	BMessenger			fAbout;
 	BMessenger			fGraph;
 	/** @brief When the server was asked to stop but is no service of the launch daemon, it quits by itself after a moment. */

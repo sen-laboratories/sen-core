@@ -14,6 +14,7 @@ SRCS := src/relations/RelationHandler.cpp \
     	src/relations/RelationSets.cpp \
     	src/relations/SelfRelationHandler.cpp \
 	src/config/SenConfigHandler.cpp \
+	src/config/CoreSettings.cpp \
 	src/migrations/Migrations.cpp \
 	src/server/Cli.cpp \
 	src/server/Enrichment.cpp \
@@ -27,7 +28,6 @@ SRCS := src/relations/RelationHandler.cpp \
 	src/ui/Knot.cpp \
 	src/ui/QueryFiles.cpp \
 	src/ui/SenUi.cpp \
-	src/ui/SettingsWindow.cpp \
 	src/ui/StatItem.cpp \
 	src/stats/SenStats.cpp \
 	src/server/SenServer.cpp

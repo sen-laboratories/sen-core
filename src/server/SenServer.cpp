@@ -5,8 +5,10 @@
 
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
+#include <sen/SenSettingsForm.h>
 #include "Cli.h"
 #include "Enrichment.h"
+#include "../config/CoreSettings.h"
 #include "../deskbar/DeskbarView.h"
 #include "SenServer.h"
 #include "Reply.h"
@@ -679,6 +681,32 @@ void SenServer::MessageReceived(BMessage* message)
         case sen::cmd::kConfigGet:
         {
             senConfigHandler->GetConfig(reply);
+            break;
+        }
+        // the settings of the server, for the settings window (sen_settings)
+        case sen::cmd::kCoreSettings:
+        case sen::cmd::kCoreSettingsSet:
+        {
+            result = B_OK;
+            if (message->what == sen::cmd::kCoreSettingsSet) {
+                BMessage changes;
+                std::vector<std::string> refused;
+                result = message->FindMessage(sen::settings::form::kFieldSettings, &changes);
+                if (result == B_OK)
+                    result = sen::core::ApplySettings(senConfigHandler, changes, &refused);
+                if (!refused.empty()) {
+                    std::string detail = "Refused: ";
+                    for (size_t i = 0; i < refused.size(); i++)
+                        detail += (i > 0 ? ", " : "") + refused[i];
+                    reply->AddString(sen::key::kDetail, detail.c_str());
+                }
+            }
+            // (the answer has the settings as they are now, also after a change)
+            BMessage settings, schema, defaults;
+            sen::core::DescribeSettings(senConfigHandler, &settings, &schema, &defaults);
+            reply->AddMessage(sen::settings::form::kFieldSettings, &settings);
+            reply->AddMessage(sen::settings::form::kFieldSchema, &schema);
+            reply->AddMessage(sen::settings::form::kFieldDefaults, &defaults);
             break;
         }
         case sen::cmd::kClassificationAdd:

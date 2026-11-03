@@ -24,6 +24,7 @@ urls			{
 provides		{
 	sen_core = @VERSION@
 	cmd:sen_server = @VERSION@
+	cmd:sen_settings = @VERSION@
 	cmd:sen = @VERSION@
 }
 requires		{

@@ -1,0 +1,36 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 SEN Labs e.U.
+ */
+#pragma once
+
+#include <Message.h>
+#include <SupportDefs.h>
+
+#include <string>
+#include <vector>
+
+class SenConfigHandler;
+
+namespace sen {
+namespace core {
+
+/**
+ * The settings of the server as the settings window shows them (sen_settings, with the form of Shoji, see SenSettingsForm.h): what the server answers to
+ * kCoreSettings and kCoreSettingsSet.
+ *
+ * The fields are the SEN key (`SEN:modifierKey`), whether the FileTypes of SEN is used (`SEN:useFileTypes`) and, if Akita is installed, whether it takes the place of
+ * Tracker at login (`akita`: not a setting of the server but a file of the launch daemon, which the command `akita` makes).
+ */
+
+/** The settings as they are now, the schema (labels, help, the choices of the key), and the defaults. */
+void DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults);
+
+/**
+ * Changes settings: every field of `changes` is a value under its name (the whole message after a revert or defaults). Valid values are applied and stored, the others
+ * are left; the names that were refused are in `refused`. B_OK if all were applied, else the first error.
+ */
+status_t ApplySettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused);
+
+}	// namespace core
+}	// namespace sen
