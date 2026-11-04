@@ -9,6 +9,7 @@
 #include "Cli.h"
 #include "Enrichment.h"
 #include "../config/CoreSettings.h"
+#include "../config/Library.h"
 #include "../deskbar/DeskbarView.h"
 #include "SenServer.h"
 #include "Reply.h"
@@ -707,6 +708,27 @@ void SenServer::MessageReceived(BMessage* message)
             reply->AddMessage(sen::settings::form::kFieldSettings, &settings);
             reply->AddMessage(sen::settings::form::kFieldSchema, &schema);
             reply->AddMessage(sen::settings::form::kFieldDefaults, &defaults);
+            break;
+        }
+        // where a new entity goes: the Library of a context (SenLibrary.h)
+        case sen::cmd::kContextLibrary:
+        {
+            BMessage settings;
+            senConfigHandler->GetConfig(&settings);
+            BPath folder;
+            std::string context;
+            result = sen::library::Resolve(settings, message->GetString(sen::key::kContext, ""), message->GetString(sen::key::kType, ""),
+                message->GetBool(sen::key::kCreate, true), &folder, &context);
+            if (result == B_OK) {
+                entry_ref ref;
+                // (a folder that was not made does not exist: no ref, the path is the answer)
+                if (BEntry(folder.Path()).Exists() && get_ref_for_path(folder.Path(), &ref) == B_OK)
+                    reply->AddRef("refs", &ref);
+                else if (message->GetBool(sen::key::kCreate, true))
+                    result = B_ENTRY_NOT_FOUND;
+                reply->AddString(sen::key::kLibraryPath, folder.Path());
+                reply->AddString(sen::key::kContext, context.c_str());
+            }
             break;
         }
         case sen::cmd::kClassificationAdd:
