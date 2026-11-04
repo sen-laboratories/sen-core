@@ -32,7 +32,7 @@ requires		{
 	lib:libspdlog
 	lib:libfmt
 	cmd:sen_oni
-	shoji >= 1.0.0~beta4-5
+	shoji >= 1.0.0~beta5
 	sen_ontology_core
 	sen_filetypes
 }
