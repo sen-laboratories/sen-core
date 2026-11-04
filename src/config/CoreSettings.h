@@ -20,7 +20,11 @@ namespace core {
  * kCoreSettings and kCoreSettingsSet.
  *
  * The fields are the SEN key (`SEN:modifierKey`), whether the FileTypes of SEN is used (`SEN:useFileTypes`) and, if Akita is installed, whether it takes the place of
- * Tracker at login (`akita`: not a setting of the server but a file of the launch daemon, which the command `akita` makes).
+ * Tracker at login (`akita`: not a setting of the server but a file of the launch daemon, which the command `akita` makes), and the name of the Library folder
+ * (`SEN:libraryName`).
+ *
+ * The settings that all plugins share (the node *Plugins* of the window; the request has `SEN:scope` = `plugins`) are the same thing for another set of fields:
+ * for now where plugins put the entities that they find (`SEN:extractEntitiesInto`: `files` or `attributes`).
  */
 
 /** The settings as they are now, the schema (labels, help, the choices of the key), and the defaults. */
@@ -31,6 +35,12 @@ void DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* sc
  * are left; the names that were refused are in `refused`. B_OK if all were applied, else the first error.
  */
 status_t ApplySettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused);
+
+/** The settings that all plugins share (see above), as DescribeSettings() describes the settings of the server. */
+void DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults);
+
+/** As ApplySettings(), for the settings that all plugins share. */
+status_t ApplyPluginSettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused);
 
 }	// namespace core
 }	// namespace sen

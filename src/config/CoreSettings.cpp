@@ -28,6 +28,8 @@ namespace core {
 static const char kKeyField[] = "SEN:modifierKey";
 static const char kFileTypesField[] = "SEN:useFileTypes";
 static const char kAkitaField[] = "akita";
+static const char kLibraryNameField[] = "SEN:libraryName";
+static const char kExtractIntoField[] = "SEN:extractEntitiesInto";
 
 
 /** A file of Akita or its command: in the folder of the system or of the user. */
@@ -117,6 +119,28 @@ IsKnownKey(int32 key)
 }
 
 
+/** The name of the Library folder as it is set (default: Library). */
+static std::string
+LibraryName(const BMessage& stored)
+{
+	const char* name = stored.GetString(sen::key::kLibraryName, "");
+	return name[0] != '\0' ? name : sen::config::kLibraryDir;
+}
+
+
+/** A name that is one folder in the home folder: not empty, no slash or colon, not . or .., no blanks at the ends. */
+static bool
+IsFolderName(const char* name)
+{
+	BString text(name);
+	if (text.IsEmpty() || text == "." || text == ".." || text.FindFirst('/') >= 0 || text.FindFirst(':') >= 0)
+		return false;
+	BString trimmed(text);
+	trimmed.Trim();
+	return trimmed == text;
+}
+
+
 void
 DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults)
 {
@@ -130,6 +154,7 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 	settings->MakeEmpty();
 	settings->AddInt32(kKeyField, key);
 	settings->AddBool(kFileTypesField, stored.GetBool(sen::key::kUseSenFileTypes, true));
+	settings->AddString(kLibraryNameField, LibraryName(stored).c_str());
 	const bool akita = AkitaInstalled();
 	if (akita)
 		settings->AddBool(kAkitaField, AkitaEnabled());
@@ -137,6 +162,7 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 	defaults->MakeEmpty();
 	defaults->AddInt32(kKeyField, B_COMMAND_KEY);
 	defaults->AddBool(kFileTypesField, true);
+	defaults->AddString(kLibraryNameField, sen::config::kLibraryDir);
 	if (akita)
 		defaults->AddBool(kAkitaField, true);
 
@@ -167,6 +193,13 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 	fileTypes.AddString(form::kAttrHelp, "Where SEN shows a type and its attributes (the Ontologies menu), and in the Preferences menu of the Deskbar.");
 	fileTypes.AddInt32(form::kAttrOrder, 2);
 	schema->AddMessage(kFileTypesField, &fileTypes);
+
+	BMessage libraryName;
+	libraryName.AddString(form::kAttrLabel, "Library name");
+	libraryName.AddString(form::kAttrHelp, "The folder in your home folder where SEN and its plugins put the entities they make (people, books, movies...). "
+		"A folder that exists is not moved.");
+	libraryName.AddInt32(form::kAttrOrder, 3);
+	schema->AddMessage(kLibraryNameField, &libraryName);
 }
 
 
@@ -202,6 +235,20 @@ ApplySettings(SenConfigHandler* config, const BMessage& changes, std::vector<std
 		sen::ui::ApplyFileTypesLink(fileTypes);
 	}
 
+	const BString libraryName = updated.GetString(kLibraryNameField, "");
+	if (libraryName != current.GetString(kLibraryNameField, "")) {
+		if (IsFolderName(libraryName.String())) {
+			BMessage change;
+			change.AddString(sen::key::kLibraryName, libraryName.String());
+			config->UpdateSettings(&change);
+		} else {
+			if (refused != NULL)
+				refused->push_back(kLibraryNameField);
+			if (first == B_OK)
+				first = B_BAD_VALUE;
+		}
+	}
+
 	if (current.HasBool(kAkitaField) && updated.GetBool(kAkitaField, true) != current.GetBool(kAkitaField, true)) {
 		// (the command does it: a file of the user for the launch daemon, which undoes what the package of Akita does)
 		BPath command;
@@ -209,6 +256,63 @@ ApplySettings(SenConfigHandler* config, const BMessage& changes, std::vector<std
 		BString line(command.Path() != NULL ? command.Path() : "akita");
 		line << (updated.GetBool(kAkitaField, true) ? " enable" : " disable") << " >/dev/null 2>&1";
 		system(line.String());
+	}
+	return first;
+}
+
+
+void
+DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults)
+{
+	BMessage stored;
+	config->GetConfig(&stored);
+	BString into = stored.GetString(sen::key::kExtractInto, sen::key::kExtractIntoFiles);
+	if (into != sen::key::kExtractIntoAttributes)
+		into = sen::key::kExtractIntoFiles;
+
+	settings->MakeEmpty();
+	settings->AddString(kExtractIntoField, into.String());
+	defaults->MakeEmpty();
+	defaults->AddString(kExtractIntoField, sen::key::kExtractIntoFiles);
+
+	schema->MakeEmpty();
+	schema->AddInt32(form::kSchemaVersion, 1);
+
+	BMessage extract;
+	extract.AddString(form::kAttrLabel, "Extract entities into");
+	extract.AddString(form::kAttrHelp, "What plugins find in a file (the authors of a book, the director and cast of a movie): a file of its own for each, related to the file, "
+		"or only the names in the attributes of the file itself.");
+	extract.AddString(form::kAttrKind, form::kKindRadio);
+	extract.AddInt32(form::kAttrOrder, 0);
+	extract.AddString(form::kAttrChoices, sen::key::kExtractIntoFiles);
+	extract.AddString(form::kAttrChoiceLabels, "Files");
+	extract.AddString(form::kAttrChoices, sen::key::kExtractIntoAttributes);
+	extract.AddString(form::kAttrChoiceLabels, "Attributes");
+	schema->AddMessage(kExtractIntoField, &extract);
+}
+
+
+status_t
+ApplyPluginSettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused)
+{
+	BMessage current, schema, defaults;
+	DescribePluginSettings(config, &current, &schema, &defaults);
+
+	BMessage updated(current);
+	status_t first = sen::settings::ApplyChanges(&updated, changes, refused);
+
+	const BString into = updated.GetString(kExtractIntoField, "");
+	if (into != current.GetString(kExtractIntoField, "")) {
+		if (into == sen::key::kExtractIntoFiles || into == sen::key::kExtractIntoAttributes) {
+			BMessage change;
+			change.AddString(sen::key::kExtractInto, into.String());
+			config->UpdateSettings(&change);
+		} else {
+			if (refused != NULL)
+				refused->push_back(kExtractIntoField);
+			if (first == B_OK)
+				first = B_BAD_VALUE;
+		}
 	}
 	return first;
 }

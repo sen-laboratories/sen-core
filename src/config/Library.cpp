@@ -61,18 +61,18 @@ FolderNameOf(const char* mimeType)
 	if (type.InitCheck() != B_OK || !type.IsValid())
 		return std::string();
 
-	// the resource of the ontology is an attribute of the entry of the type in the MIME database: the user's, then the system's
+	// the plural of the type (the annotation `plural` of the ontology) is an attribute of the entry of the type in the MIME database: the user's, then the system's
 	std::string name;
 	for (directory_which which : {B_USER_SETTINGS_DIRECTORY, B_SYSTEM_DATA_DIRECTORY, B_USER_DATA_DIRECTORY}) {
 		BPath path;
 		if (find_directory(which, &path) != B_OK || path.Append("mime_db") != B_OK || path.Append(mimeType) != B_OK)
 			continue;
-		name = FolderName(StringAttribute(path, sen::attr::kLibraryFolder));
+		name = FolderName(StringAttribute(path, sen::attr::kPlural));
 		if (!name.empty())
 			return name;
 	}
 
-	// no annotation: the short description of the type, else the last part of its name
+	// no plural: the short description of the type, else the last part of its name
 	char description[B_MIME_TYPE_LENGTH];
 	if (type.GetShortDescription(description) == B_OK)
 		name = FolderName(description);
@@ -84,7 +84,7 @@ FolderNameOf(const char* mimeType)
 
 /** The Library of a context: what the folder of the context says, else the place that is made from the name. */
 static status_t
-LibraryOf(const std::string& context, BPath* library)
+LibraryOf(const std::string& context, const std::string& libraryName, BPath* library)
 {
 	BPath contextFolder;
 	if (find_directory(B_USER_SETTINGS_DIRECTORY, &contextFolder) != B_OK || contextFolder.Append("sen") != B_OK
@@ -107,7 +107,7 @@ LibraryOf(const std::string& context, BPath* library)
 		return library->InitCheck();
 	}
 
-	library->SetTo(home.Path(), sen::config::kLibraryDir);
+	library->SetTo(home.Path(), libraryName.c_str());
 	if (context != sen::config::kContextDefault)
 		library->Append(sen::config::kLibraryContextsDir);
 	if (context != sen::config::kContextDefault)
@@ -125,7 +125,12 @@ Resolve(const BMessage& settings, const char* context, const char* type, bool cr
 	if (name.empty() || FolderName(name) != name)
 		return B_BAD_VALUE;
 
-	status_t result = LibraryOf(name, folder);
+	// the name of the Library folder in the home folder is a setting (a name that is not one folder is not used)
+	std::string libraryName = FolderName(settings.GetString(sen::key::kLibraryName, sen::config::kLibraryDir));
+	if (libraryName.empty())
+		libraryName = sen::config::kLibraryDir;
+
+	status_t result = LibraryOf(name, libraryName, folder);
 	if (result != B_OK)
 		return result;
 	if (contextUsed != NULL)

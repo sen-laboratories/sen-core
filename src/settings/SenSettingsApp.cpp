@@ -10,6 +10,7 @@
 #include <Application.h>
 #include <Entry.h>
 #include <Path.h>
+#include <String.h>
 #include <string.h>
 #include <Window.h>
 
@@ -21,18 +22,21 @@ class SettingsApp : public BApplication {
 public:
 	SettingsApp() : BApplication(sen::kSettingsSignature), fWindow(NULL), fHasPlugin(false) {}
 
-	/** `sen_settings --plugin <file>`: shows the settings of that plugin file instead of the installed copy of its signature (for the developer of a plugin) */
+	/** `sen_settings --plugin <file>`: shows the settings of that plugin file instead of the installed copy of its signature (for the developer of a plugin);
+	 *  `--node core|plugins` starts with that node selected (Core is the first) */
 	virtual void ArgvReceived(int32 argc, char** argv)
 	{
 		for (int32 i = 1; i + 1 < argc; i++) {
 			if (strcmp(argv[i], "--plugin") == 0 && get_ref_for_path(argv[i + 1], &fPlugin) == B_OK)
 				fHasPlugin = true;
+			if (strcmp(argv[i], "--node") == 0)
+				fNode = argv[i + 1];
 		}
 	}
 
 	virtual void ReadyToRun()
 	{
-		fWindow = new sen::settings::SettingsWindow(fHasPlugin ? &fPlugin : NULL);
+		fWindow = new sen::settings::SettingsWindow(fHasPlugin ? &fPlugin : NULL, fNode.IsEmpty() ? NULL : fNode.String());
 		fWindow->Show();
 	}
 
@@ -51,6 +55,7 @@ private:
 	BWindow*	fWindow;
 	entry_ref	fPlugin;
 	bool		fHasPlugin;
+	BString		fNode;
 };
 
 

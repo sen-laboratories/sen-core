@@ -23,15 +23,16 @@ namespace sen {
 namespace settings {
 
 /**
- * The window of the settings of SEN and of its plugins (docs/spec-settings-and-message-template.md in sento, section 6): a tree of what has settings on the left (Core,
- * and the plugins under the features that they have), and the form of the selected item on the right. The form is the view of Shoji for a message, loaded from there
+ * The window of the settings of SEN and of its plugins (docs/spec-settings-and-message-template.md in sento, section 6): a tree of what has settings on the left (SEN > Core,
+ * Plugins for what all plugins share, and below it the plugins under the features that they have), and the form of the selected item on the right. The form is the view of Shoji for a message, loaded from there
  * as a replicant (SenSettingsFormHost.h): this window does not link it, and talks to it with messages. The settings come from the server (Core) or from the plugin as
  * messages, and what the user changes goes back to where it came from: this window never reads or writes a settings file.
  */
 class SettingsWindow : public BWindow {
 public:
-					/** @param pluginFile a plugin to show, instead of the copy that is installed (for the developer of a plugin) */
-					SettingsWindow(const entry_ref* pluginFile = NULL);
+					/** @param pluginFile a plugin to show, instead of the copy that is installed (for the developer of a plugin)
+					 *  @param node the node to select at first, `core` (default) or `plugins` */
+					SettingsWindow(const entry_ref* pluginFile = NULL, const char* node = NULL);
 	virtual			~SettingsWindow();
 
 	virtual void	MessageReceived(BMessage* message);
@@ -40,7 +41,7 @@ public:
 private:
 	struct Target;
 
-	void			_BuildTree(const entry_ref* pluginFile);
+	void			_BuildTree(const entry_ref* pluginFile, const char* node);
 	void			_Select(const Target* target);
 	void			_Request(const Target& target);
 	void			_Ready(BMessage* message);
@@ -60,7 +61,8 @@ private:
 
 	BString				fSignature;			///< of what is shown: empty for Core
 	BString				fName;
-	bool				fCore;
+	bool				fCore;				///< what is shown comes from the server (Core, or what all plugins share: see fScope)
+	BString				fScope;
 	bool				fHasDefaults;
 	bool				fModified;
 	team_id				fStartedTeam;		///< of the plugin that was started for the request that is waited for

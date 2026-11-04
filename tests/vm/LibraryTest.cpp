@@ -5,7 +5,7 @@
 
 /**
  * The Library of a context (kContextLibrary, SenLibrary.h): the default place of the default context and of another one, the folder of a type (named by the type, by its
- * `SEN:LIBRARY`, else by its description), a context that names its Library, the refusals, and that nothing is made when it is not asked for. Runs against the sen_server that is
+ * `SEN:PLURAL`, else by its description), a context that names its Library, the refusals, and that nothing is made when it is not asked for. Runs against the sen_server that is
  * running (library.sh starts the one under test); the contexts, types and folders that it makes are removed.
  */
 
@@ -137,7 +137,7 @@ int main()
 	CHECK(Ask(NULL, person.c_str(), true, &reply) == B_OK);
 	CHECK(std::string(reply.GetString(sen::key::kContext, "")) != "");
 
-	// the folder of a type: the resource SEN:LIBRARY of the type (a type of the test, with the attribute), else its description, else the end of its name
+	// the folder of a type: the plural of the type (SEN:PLURAL) (a type of the test, with the attribute), else its description, else the end of its name
 	BMimeType gadget("entity/x-vnd.sen-test.gadget");
 	CHECK(gadget.Install() == B_OK);
 	gadget.SetShortDescription("Gadget");
@@ -150,7 +150,7 @@ int main()
 	CHECK(Ask("libtest", "entity/x-vnd.sen-test.gadget", true, &reply) == B_OK);
 	CHECK(std::string(reply.GetString(sen::key::kLibraryPath, "")) == mine + "/Gadget");
 	const std::string gadgets = "Gadgets";
-	mimeNode.WriteAttr(sen::attr::kLibraryFolder, B_STRING_TYPE, 0, gadgets.c_str(), gadgets.size() + 1);
+	mimeNode.WriteAttr(sen::attr::kPlural, B_STRING_TYPE, 0, gadgets.c_str(), gadgets.size() + 1);
 	reply.MakeEmpty();
 	CHECK(Ask("libtest", "entity/x-vnd.sen-test.gadget", true, &reply) == B_OK);
 	CHECK(std::string(reply.GetString(sen::key::kLibraryPath, "")) == mine + "/Gadgets");
@@ -183,6 +183,32 @@ int main()
 	CHECK(Ask("no such context", person.c_str(), true, &reply) == B_ENTRY_NOT_FOUND);
 	CHECK(Ask("../outside", person.c_str(), true, &reply) == B_BAD_VALUE);
 	CHECK(!Exists(library + "/Contexts/no such context"));
+
+	// the name of the Library folder is a setting (kCoreSettingsSet); a name that is not one folder is refused and the Library stays where it was
+	auto setName = [](const char* name, BMessage* answer) {
+		BMessage changes;
+		changes.AddString("SEN:libraryName", name);
+		BMessage request(sen::cmd::kCoreSettingsSet);
+		request.AddString(sen::key::kScope, sen::key::kScopeCore);
+		request.AddMessage("settings", &changes);
+		return BMessenger(sen::kServerSignature).SendMessage(&request, answer, 5000000, 5000000);
+	};
+	BMessage answer;
+	CHECK(setName("LibraryZz", &answer) == B_OK && answer.GetInt32(sen::key::kResult, -1) == B_OK);
+	reply.MakeEmpty();
+	CHECK(Ask("default", person.c_str(), false, &reply) == B_OK);
+	CHECK(std::string(reply.GetString(sen::key::kLibraryPath, "")).compare(0, home.size() + 11, home + "/LibraryZz/") == 0);
+	reply.MakeEmpty();
+	CHECK(Ask("libtest", NULL, false, &reply) == B_OK && std::string(reply.GetString(sen::key::kLibraryPath, "")) == home + "/LibraryZz/Contexts/libtest");
+	answer.MakeEmpty();
+	CHECK(setName("a/b", &answer) == B_OK && answer.GetInt32(sen::key::kResult, -1) == B_BAD_VALUE);
+	reply.MakeEmpty();
+	CHECK(Ask("default", NULL, false, &reply) == B_OK && std::string(reply.GetString(sen::key::kLibraryPath, "")) == home + "/LibraryZz");
+	answer.MakeEmpty();
+	CHECK(setName("Library", &answer) == B_OK && answer.GetInt32(sen::key::kResult, -1) == B_OK);			// (the default name again)
+	reply.MakeEmpty();
+	CHECK(Ask("default", NULL, false, &reply) == B_OK && std::string(reply.GetString(sen::key::kLibraryPath, "")) == library);
+	CHECK(!Exists(home + "/LibraryZz"));																	// (nothing was made: the path was asked for only)
 
 	// put everything back
 	gadget.Delete();

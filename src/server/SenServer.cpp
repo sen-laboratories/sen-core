@@ -689,12 +689,16 @@ void SenServer::MessageReceived(BMessage* message)
         case sen::cmd::kCoreSettingsSet:
         {
             result = B_OK;
+            // (the server's own settings, or what all plugins share)
+            const bool plugins = strcmp(message->GetString(sen::key::kScope, sen::key::kScopeCore), sen::key::kScopePlugins) == 0;
             if (message->what == sen::cmd::kCoreSettingsSet) {
                 BMessage changes;
                 std::vector<std::string> refused;
                 result = message->FindMessage(sen::settings::form::kFieldSettings, &changes);
-                if (result == B_OK)
-                    result = sen::core::ApplySettings(senConfigHandler, changes, &refused);
+                if (result == B_OK) {
+                    result = plugins ? sen::core::ApplyPluginSettings(senConfigHandler, changes, &refused)
+                        : sen::core::ApplySettings(senConfigHandler, changes, &refused);
+                }
                 if (!refused.empty()) {
                     std::string detail = "Refused: ";
                     for (size_t i = 0; i < refused.size(); i++)
@@ -704,7 +708,10 @@ void SenServer::MessageReceived(BMessage* message)
             }
             // (the answer has the settings as they are now, also after a change)
             BMessage settings, schema, defaults;
-            sen::core::DescribeSettings(senConfigHandler, &settings, &schema, &defaults);
+            if (plugins)
+                sen::core::DescribePluginSettings(senConfigHandler, &settings, &schema, &defaults);
+            else
+                sen::core::DescribeSettings(senConfigHandler, &settings, &schema, &defaults);
             reply->AddMessage(sen::settings::form::kFieldSettings, &settings);
             reply->AddMessage(sen::settings::form::kFieldSchema, &schema);
             reply->AddMessage(sen::settings::form::kFieldDefaults, &defaults);

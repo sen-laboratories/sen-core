@@ -35,6 +35,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <algorithm>
 #include <map>
@@ -66,7 +67,8 @@ const bigtime_t kStartTimeout = 12000000;	// (a plugin that was started for the 
 
 /** What a node of the tree stands for. */
 struct SettingsWindow::Target {
-	bool		core = false;
+	bool		core = false;		///< the server answers (its own settings, or what all plugins share)
+	BString		scope;			///< for the server: sen::key::kScopeCore or kScopePlugins
 	BString		signature;
 	BString		name;
 	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
@@ -93,11 +95,12 @@ IconOf(const entry_ref& file, int size)
  */
 class NodeItem : public BStringItem {
 public:
-	NodeItem(const char* label, uint32 level, bool selectable, bool core, const char* signature, const entry_ref* file = NULL)
+	/** @param scope what the server answers for (sen::key::kScopeCore, kScopePlugins), NULL for a plugin or a heading */
+	NodeItem(const char* label, uint32 level, bool selectable, const char* scope, const char* signature, const entry_ref* file = NULL)
 		:
 		BStringItem(label, level, true),
 		fSelectable(selectable),
-		fCore(core),
+		fScope(scope != NULL ? scope : ""),
 		fSignature(signature),
 		fIcon(NULL)
 	{
@@ -150,14 +153,15 @@ public:
 	const entry_ref&	File() const { return fFile; }
 
 	bool			IsSelectable() const { return fSelectable; }
-	bool			IsCore() const { return fCore; }
+	bool			IsCore() const { return !fScope.IsEmpty(); }
+	const BString&	Scope() const { return fScope; }
 	const BString&	Signature() const { return fSignature; }
 
 private:
 	static constexpr float	kIconGap = 4;
 
 	bool		fSelectable;
-	bool		fCore;
+	BString		fScope;
 	BString		fSignature;
 	entry_ref	fFile;
 	BBitmap*	fIcon;
@@ -168,6 +172,7 @@ private:
 struct Request {
 	BMessenger	window;
 	int32		serial;
+	BString		scope;
 };
 
 
@@ -182,6 +187,7 @@ RunRequest(void* data)
 	BMessage reply;
 	BMessenger server(sen::kServerSignature);
 	BMessage ask(sen::cmd::kCoreSettings);
+	ask.AddString(sen::key::kScope, request->scope);
 	status_t result = server.IsValid() ? server.SendMessage(&ask, &reply, kAnswerTimeout, kAnswerTimeout) : B_NAME_NOT_FOUND;
 	ready.AddInt32(form::kFieldResult, result);
 	ready.AddMessage("reply", &reply);
@@ -219,7 +225,7 @@ Capitalized(const char* word)
 }	// namespace
 
 
-SettingsWindow::SettingsWindow(const entry_ref* pluginFile)
+SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	:
 	BWindow(BRect(140, 140, 780, 580), "SEN Settings", B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE | B_CLOSE_ON_ESCAPE),
 	fTree(NULL),
@@ -275,7 +281,7 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile)
 	split->AddChild(fPane, 0.75f);
 	BLayoutBuilder::Group<>(this, B_VERTICAL, 0).Add(split).End();
 
-	_BuildTree(pluginFile);
+	_BuildTree(pluginFile, node);
 	if (fForm == NULL) {
 		BString text;
 		text << "The settings form needs Shoji (the package shoji) in a version that has it"
@@ -304,24 +310,25 @@ SettingsWindow::QuitRequested()
 }
 
 
-// Core, and a node for every feature that plugins have, with the plugins that have it (a plugin is under each of its features). A plugin is started by its file, the
-// one that was found: its signature can be that of more than one copy. A file that was given (`sen_settings --plugin <file>`, for a developer of a plugin) replaces the
-// file of the plugin with its signature, or is a node of its own.
+// SEN (Core), and Plugins: the settings that all plugins share, with a node for every feature that plugins have below it and the plugins that have it (a plugin is under
+// each of its features). A plugin is started by its file, the one that was found: its signature can be that of more than one copy. A file that was given
+// (`sen_settings --plugin <file>`, for a developer of a plugin) replaces the file of the plugin with its signature, or is a node of its own.
 void
-SettingsWindow::_BuildTree(const entry_ref* pluginFile)
+SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 {
 	// (Core is the server: its icon)
 	entry_ref server;
 	const bool hasServer = be_roster->FindApp(sen::kServerSignature, &server) == B_OK;
-	fTree->AddItem(new NodeItem("Core", 0, true, true, "", hasServer ? &server : NULL));
-	fTree->AddItem(new NodeItem("Plugins", 0, false, false, ""));
+	fTree->AddItem(new NodeItem("SEN", 0, false, NULL, ""));
+	fTree->AddItem(new NodeItem("Core", 1, true, sen::key::kScopeCore, "", hasServer ? &server : NULL));
+	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, ""));
 
 	BString givenSignature;
 	BString givenName;
 	if (pluginFile != NULL)
 		givenName = PluginName(*pluginFile, &givenSignature);
 	bool givenShown = false;
-	int32 select = 0;
+	int32 select = 1;		// (Core)
 
 	struct Plugin {
 		std::string		signature;
@@ -348,19 +355,21 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile)
 		}
 		if (byName.empty())
 			continue;
-		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, false, false, ""));
+		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, false, NULL, ""));
 		for (const auto& plugin : byName) {
-			if (pluginFile != NULL && plugin.second.signature == givenSignature.String() && select == 0)
+			if (pluginFile != NULL && plugin.second.signature == givenSignature.String() && select == 1)
 				select = fTree->CountItems();
-			fTree->AddItem(new NodeItem(plugin.first.c_str(), 2, true, false, plugin.second.signature.c_str(), &plugin.second.file));
+			fTree->AddItem(new NodeItem(plugin.first.c_str(), 2, true, NULL, plugin.second.signature.c_str(), &plugin.second.file));
 		}
 	}
 
 	if (pluginFile != NULL && !givenShown) {
-		fTree->AddItem(new NodeItem("From a file", 1, false, false, ""));
+		fTree->AddItem(new NodeItem("From a file", 1, false, NULL, ""));
 		select = fTree->CountItems();
-		fTree->AddItem(new NodeItem(givenName.String(), 2, true, false, givenSignature.String(), pluginFile));
+		fTree->AddItem(new NodeItem(givenName.String(), 2, true, NULL, givenSignature.String(), pluginFile));
 	}
+	if (node != NULL && strcmp(node, "plugins") == 0 && pluginFile == NULL)
+		select = 2;
 	fTree->Select(select);
 }
 
@@ -380,6 +389,7 @@ SettingsWindow::MessageReceived(BMessage* message)
 			}
 			Target target;
 			target.core = item->IsCore();
+				target.scope = item->Scope();
 			target.signature = item->Signature();
 			target.name = item->Text();
 			target.file = item->File();
@@ -446,6 +456,7 @@ void
 SettingsWindow::_Select(const Target* target)
 {
 	fCore = target->core;
+	fScope = target->scope;
 	fSignature = target->signature;
 	fName = target->name;
 	fModified = false;
@@ -474,6 +485,7 @@ SettingsWindow::_Request(const Target& target)
 		Request* request = new Request();
 		request->window = BMessenger(this);
 		request->serial = serial;
+			request->scope = target.scope;
 		thread_id thread = spawn_thread(RunRequest, "settings request", B_NORMAL_PRIORITY, request);
 		if (thread < 0 || resume_thread(thread) != B_OK)
 			delete request;
@@ -571,6 +583,8 @@ SettingsWindow::_Changed(BMessage* message)
 		changes = settings;
 
 	BMessage set(fCore ? sen::cmd::kCoreSettingsSet : sensei::cmd::kSettingsSet);
+	if (fCore)
+		set.AddString(sen::key::kScope, fScope);
 	set.AddMessage(form::kFieldSettings, &changes);
 	BMessenger target;
 	if (fCore) {
