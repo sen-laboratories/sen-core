@@ -22,6 +22,8 @@ class BStringView;
 namespace sen {
 namespace settings {
 
+class NoteView;
+
 /**
  * The window of the settings of SEN and of its plugins (docs/spec-settings-and-message-template.md in sento, section 6): a tree of what has settings on the left (SEN > Core,
  * Plugins for what all plugins share, and below it the plugins under the features that they have), and the form of the selected item on the right. The form is the view of Shoji for a message, loaded from there
@@ -42,6 +44,8 @@ private:
 	struct Target;
 
 	void			_BuildTree(const entry_ref* pluginFile, const char* node);
+	float			_TreeWidth();
+	void			_SelectBelow(int32 fullIndex);
 	void			_Select(const Target* target);
 	void			_Request(const Target& target);
 	void			_Ready(BMessage* message);
@@ -57,7 +61,8 @@ private:
 	BStringView*		fStatus;
 	BButton*			fRevert;
 	BButton*			fDefaults;
-	BStringView*		fNote;
+	NoteView*			fNote;
+	int32				fFirstSelect;		///< the node that is selected when the window is shown
 
 	BString				fSignature;			///< of what is shown: empty for Core
 	BString				fName;

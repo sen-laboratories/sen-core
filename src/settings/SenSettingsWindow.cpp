@@ -25,12 +25,14 @@
 #include <GroupView.h>
 #include <LayoutBuilder.h>
 #include <ListItem.h>
+#include <Node.h>
 #include <MimeType.h>
 #include <MessageRunner.h>
 #include <NodeInfo.h>
 #include <OutlineListView.h>
 #include <Path.h>
 #include <Roster.h>
+#include <Screen.h>
 #include <ScrollView.h>
 #include <SplitView.h>
 #include <StringView.h>
@@ -75,6 +77,60 @@ struct SettingsWindow::Target {
 	BString		signature;
 	BString		name;
 	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
+};
+
+
+/** The note in the pane where the form is not (no settings, reading, an error): its text in the middle of the whole pane, which it fills. */
+class NoteView : public BView {
+public:
+	NoteView(const char* name)
+		:
+		BView(name, B_WILL_DRAW | B_FULL_UPDATE_ON_RESIZE)
+	{
+		SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+		SetLowUIColor(B_PANEL_BACKGROUND_COLOR);
+		SetHighUIColor(B_PANEL_TEXT_COLOR, B_DARKEN_1_TINT);
+		SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, B_SIZE_UNLIMITED));
+	}
+
+	void SetText(const char* text)
+	{
+		fText = text;
+		InvalidateLayout();
+		Invalidate();
+	}
+
+	const char* Text() const { return fText.String(); }
+
+	virtual BSize MinSize()
+	{
+		return BSize(be_plain_font->StringWidth("M") * 8, _TextHeight());
+	}
+
+	virtual BSize PreferredSize()
+	{
+		return BSize(StringWidth(fText.String()) + 2 * be_control_look->DefaultItemSpacing(), _TextHeight());
+	}
+
+	virtual void Draw(BRect)
+	{
+		font_height height;
+		GetFontHeight(&height);
+		BRect bounds = Bounds();
+		const float width = StringWidth(fText.String());
+		MovePenTo(BPoint(floorf((bounds.Width() - width) / 2), floorf(bounds.Height() / 2 - (height.ascent + height.descent) / 2 + height.ascent)));
+		DrawString(fText.String());
+	}
+
+private:
+	float _TextHeight()
+	{
+		font_height height;
+		GetFontHeight(&height);
+		return ceilf(height.ascent + height.descent + height.leading) + 2 * be_control_look->DefaultItemSpacing();
+	}
+
+	BString		fText;
 };
 
 
@@ -149,6 +205,8 @@ public:
 			SetHeight(std::max(Height(), fIcon->Bounds().Height() + 3));
 			SetWidth(Width() + fIcon->Bounds().Width() + 1 + kIconGap);
 		}
+		// (what the outline list view puts before the name: the indent of the level and the latch, see BOutlineListView::LatchRect)
+		SetWidth(Width() + OutlineLevel() * be_control_look->DefaultItemSpacing() + be_plain_font->Size());
 	}
 
 	virtual void DrawItem(BView* owner, BRect frame, bool complete)
@@ -194,6 +252,26 @@ private:
 	entry_ref	fFile;
 	BBitmap*	fIcon;
 };
+
+
+/** Whether a plugin has settings that the window can show: its attribute `SEN:plugin:hasSettings` is there and not false. A plugin without the attribute is not listed (the plugins that
+ *  have no settings are the older ones, which have no attribute). */
+bool
+HasSettings(const entry_ref& ref)
+{
+	BNode node(&ref);
+	attr_info info;
+	if (node.InitCheck() != B_OK || node.GetAttrInfo(sensei::kHasSettingsAttr, &info) != B_OK || info.size < 1 || info.size > 4)
+		return false;
+	uint8 value[4] = {0, 0, 0, 0};
+	if (node.ReadAttr(sensei::kHasSettingsAttr, info.type, 0, value, info.size) != info.size)
+		return false;
+	for (off_t i = 0; i < info.size; i++) {
+		if (value[i] != 0)
+			return true;
+	}
+	return false;
+}
 
 
 /** What a request thread needs; the thread owns it. */
@@ -263,6 +341,7 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fRevert(NULL),
 	fDefaults(NULL),
 	fNote(NULL),
+	fFirstSelect(1),
 	fCore(true),
 	fHasDefaults(false),
 	fModified(false),
@@ -274,8 +353,6 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fTree = new BOutlineListView("tree", B_SINGLE_SELECTION_LIST);
 	fTree->SetSelectionMessage(new BMessage(kMsgSelect));
 	BScrollView* treeScroll = new BScrollView("tree scroll", fTree, 0, false, true, B_FANCY_BORDER);
-	treeScroll->SetExplicitMinSize(BSize(be_plain_font->StringWidth("M") * 16, B_SIZE_UNSET));
-	treeScroll->SetExplicitPreferredSize(BSize(be_plain_font->StringWidth("M") * 22, B_SIZE_UNSET));
 
 	// the form is loaded from Shoji; without it there is a note in the pane
 	// (SEN_FORM_SIGNATURE: the application that has the form, for testing a build of Shoji that is not the installed one)
@@ -295,8 +372,7 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	buttons->GroupLayout()->AddView(fDefaults);
 	buttons->GroupLayout()->AddView(fRevert);
 
-	fNote = new BStringView("note", "");
-	fNote->SetExplicitAlignment(BAlignment(B_ALIGN_LEFT, B_ALIGN_TOP));
+	fNote = new NoteView("note");
 
 	if (fForm != NULL)
 		fPane->GroupLayout()->AddView(fForm);
@@ -304,12 +380,27 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fPane->GroupLayout()->AddView(buttons);
 	fNote->Hide();
 
-	BSplitView* split = new BSplitView(B_HORIZONTAL, 0);
-	split->AddChild(treeScroll, 0.25f);
-	split->AddChild(fPane, 0.75f);
-	BLayoutBuilder::Group<>(this, B_VERTICAL, 0).Add(split).End();
-
+	// the tree keeps the width that its widest item needs (weight 0), the pane takes the rest and grows with the window; a divider is between them
 	_BuildTree(pluginFile, node);
+	treeScroll->SetExplicitMinSize(BSize(_TreeWidth() + B_V_SCROLL_BAR_WIDTH + 2 * be_control_look->DefaultItemSpacing(), B_SIZE_UNSET));
+	BSplitView* split = new BSplitView(B_HORIZONTAL, B_USE_HALF_ITEM_SPACING);
+	split->AddChild(treeScroll, 0.0f);
+	split->AddChild(fPane, 1.0f);
+	split->SetCollapsible(false);
+	BLayoutBuilder::Group<>(this, B_VERTICAL, 0).Add(split).End();
+	fTree->Select(fFirstSelect);
+
+	// tall enough for all the nodes of the tree, but not more than fits comfortably on the screen
+	float treeHeight = 0;
+	for (int32 i = 0; i < fTree->FullListCountItems(); i++)
+		treeHeight += fTree->FullListItemAt(i)->Height();
+	const BRect screen = BScreen(this).Frame();
+	const float comfortable = floorf(screen.Height() * 0.8f);
+	const float wanted = treeHeight + 2 * be_control_look->DefaultItemSpacing() + 6;
+	ResizeTo(Bounds().Width(), std::min(std::max(Bounds().Height(), wanted), comfortable));
+	BRect frame = Frame();
+	if (frame.bottom > screen.bottom - 20)
+		MoveTo(frame.left, std::max(screen.top + 30, screen.bottom - 20 - frame.Height()));
 	if (fForm == NULL) {
 		BString text;
 		text << "The settings form needs Shoji (the package shoji) in a version that has it"
@@ -374,6 +465,9 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 			BString name = PluginName(ref, &signature);
 			if (signature.IsEmpty() || !seen.insert(signature.String()).second)
 				continue;
+			// a plugin that does not say that it has settings is not listed (unless it is the one that was given: a developer wants to see it)
+			if (!(pluginFile != NULL && signature == givenSignature) && !HasSettings(ref))
+				continue;
 			Plugin plugin;
 			plugin.signature = signature.String();
 			plugin.file = (pluginFile != NULL && signature == givenSignature) ? *pluginFile : ref;
@@ -398,7 +492,39 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	}
 	if (node != NULL && strcmp(node, "plugins") == 0 && pluginFile == NULL)
 		select = 2;
-	fTree->Select(select);
+	// (selected when the window is built: the message of the selection needs the form)
+	fFirstSelect = select;
+}
+
+
+// The width that the items of the tree need: the widest one, with the indent of its level, the latch and its icon.
+float
+SettingsWindow::_TreeWidth()
+{
+	float widest = 0;
+	for (int32 i = 0; i < fTree->FullListCountItems(); i++) {
+		BListItem* item = fTree->FullListItemAt(i);
+		item->Update(fTree, be_plain_font);
+		widest = std::max(widest, item->Width());
+	}
+	return widest;
+}
+
+
+// The first node after the one at the index (of the full list) that can be selected: what a heading, or a node that has no settings, shows instead.
+void
+SettingsWindow::_SelectBelow(int32 fullIndex)
+{
+	for (int32 i = fullIndex + 1; i < fTree->FullListCountItems(); i++) {
+		NodeItem* item = dynamic_cast<NodeItem*>(fTree->FullListItemAt(i));
+		if (item == NULL || !item->IsSelectable())
+			continue;
+		BListItem* super = fTree->Superitem(item);
+		if (super != NULL && !super->IsExpanded())
+			fTree->Expand(super);
+		fTree->Select(fTree->IndexOf(item));
+		return;
+	}
 }
 
 
@@ -412,7 +538,8 @@ SettingsWindow::MessageReceived(BMessage* message)
 			if (item == NULL)
 				break;
 			if (!item->IsSelectable()) {
-				// a heading: the first plugin below it, or nothing
+				// a heading shows the node below it (the selection of the list says what the pane shows)
+				_SelectBelow(fTree->FullListIndexOf(item));
 				break;
 			}
 			Target target;
@@ -500,7 +627,15 @@ SettingsWindow::_Request(const Target& target)
 {
 	if (fForm == NULL)
 		return;
-	_Status("Reading the settings...");
+	if (target.core) {
+		_Status("Reading the settings...");
+	} else {
+		// a plugin may take a while to start: the form of the one before is not left standing
+		BString text("Reading the settings of ");
+		text << target.name << "...";
+		_ShowNote(text.String());
+		_Status("");
+	}
 
 	fWaiting = true;
 	delete fTimeout;
@@ -571,9 +706,20 @@ SettingsWindow::_Ready(BMessage* message)
 
 	BMessage settings;
 	if (result != B_OK || reply.FindMessage(form::kFieldSettings, &settings) != B_OK) {
+		const bool none = result == B_OK || result == B_NOT_SUPPORTED || result == B_UNSUPPORTED;
+		if (none && fCore) {
+			// (a node of SEN that has no settings: the node below it)
+			NodeItem* current = dynamic_cast<NodeItem*>(fTree->ItemAt(fTree->CurrentSelection()));
+			if (current != NULL) {
+				_SelectBelow(fTree->FullListIndexOf(current));
+				return;
+			}
+		}
 		BString text(fName);
-		text << ": " << (result == B_OK || result == B_NOT_SUPPORTED || result == B_UNSUPPORTED ? "has no settings that can be set here."
-			: result == B_TIMED_OUT ? "does not answer." : strerror(result));
+		if (none)
+			text << " has no settings.";
+		else
+			text << ": " << (result == B_TIMED_OUT ? "does not answer." : strerror(result));
 		_ShowNote(text.String());
 		_Status("");
 		return;

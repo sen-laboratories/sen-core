@@ -24,7 +24,8 @@ namespace core {
  * (`SEN:libraryName`).
  *
  * The settings that all plugins share (the node *Plugins* of the window; the request has `SEN:scope` = `plugins`) are the same thing for another set of fields:
- * for now where plugins put the entities that they find (`SEN:extractEntitiesInto`: `files` or `attributes`).
+ * where plugins put the entities that they find (`SEN:extractEntitiesInto`: `files` or `attributes`), whether the user is asked which one is meant if a lookup finds several
+ * answers (`SEN:askIfSeveral`) and the most entities of a type that are made of a file (`SEN:maxEntities`, 0 to 100). Plugins read them with sen::plugins::LoadSharedSettings().
  */
 
 /** The settings as they are now, the schema (labels, help, the choices of the key), and the defaults. */

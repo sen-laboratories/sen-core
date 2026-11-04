@@ -212,6 +212,53 @@ int main()
 	CHECK(Ask(sen::cmd::kCoreSettingsSet, &intoChange, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
 	CHECK(sen::plugins::ExtractEntitiesIntoFiles() == (originalInto != "attributes"));
 
+	// the other settings that plugins share: ask which one if several are found, and the most entities of a type
+	CHECK(pluginSettings.HasBool("SEN:askIfSeveral") && pluginSettings.HasInt32("SEN:maxEntities"));
+	CHECK(pluginDefaults.GetBool("SEN:askIfSeveral", false) && pluginDefaults.GetInt32("SEN:maxEntities", -1) == 10);
+	BMessage maximum;
+	CHECK(pluginSchema.FindMessage("SEN:maxEntities", &maximum) == B_OK && maximum.GetDouble(form::kAttrMin, -1) == 0 && maximum.GetDouble(form::kAttrMax, -1) == 100);
+	const bool originalAsk = pluginSettings.GetBool("SEN:askIfSeveral", true);
+	const int32 originalMost = pluginSettings.GetInt32("SEN:maxEntities", 10);
+	BMessage shared;
+	shared.AddBool("SEN:askIfSeveral", !originalAsk);
+	shared.AddInt32("SEN:maxEntities", 3);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &shared, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
+	sen::plugins::SharedSettings loaded = sen::plugins::LoadSharedSettings();
+	CHECK(loaded.askIfSeveral == !originalAsk && loaded.maxEntities == 3);
+	BMessage tooMany;
+	tooMany.AddInt32("SEN:maxEntities", 1000);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &tooMany, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, B_OK) == B_BAD_VALUE);
+	CHECK(sen::plugins::LoadSharedSettings().maxEntities == 3);
+	BMessage none;
+	none.AddInt32("SEN:maxEntities", 0);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &none, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
+	CHECK(sen::plugins::LoadSharedSettings().maxEntities == 0);
+	BMessage all;
+	all.AddInt32("SEN:maxEntities", 100);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &all, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
+	CHECK(sen::plugins::LoadSharedSettings().maxEntities == sen::key::kMaxEntitiesInternal);		// (All: no limit of the user's)
+	CHECK(strcmp(maximum.GetString(form::kAttrMinLabel, ""), "None") == 0 && strcmp(maximum.GetString(form::kAttrMaxLabel, ""), "All") == 0);
+	shared.MakeEmpty();
+	shared.AddBool("SEN:askIfSeveral", originalAsk);
+	shared.AddInt32("SEN:maxEntities", originalMost);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &shared, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
+	loaded = sen::plugins::LoadSharedSettings();
+	CHECK(loaded.askIfSeveral == originalAsk && loaded.maxEntities == originalMost);
+
+	// the choices of the SEN key have short labels (what they mean is in the tooltip, the help)
+	BMessage keyAttrs;
+	BMessage coreSchema;
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettings, NULL, &reply) == B_OK && reply.FindMessage(form::kFieldSchema, &coreSchema) == B_OK && coreSchema.FindMessage(kKey, &keyAttrs) == B_OK);
+	for (int32 i = 0; keyAttrs.FindString(form::kAttrChoiceLabels, i) != NULL; i++)
+		CHECK(strchr(keyAttrs.FindString(form::kAttrChoiceLabels, i), '(') == NULL);
+	CHECK(strstr(keyAttrs.GetString(form::kAttrHelp, ""), "Option") != NULL);
+
 	printf("%d checks, %d failure(s)\n", sChecks, sFailures);
 	return sFailures == 0 ? 0 : 1;
 }

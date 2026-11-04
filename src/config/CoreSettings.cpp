@@ -30,6 +30,8 @@ static const char kFileTypesField[] = "SEN:useFileTypes";
 static const char kAkitaField[] = "akita";
 static const char kLibraryNameField[] = "SEN:libraryName";
 static const char kExtractIntoField[] = "SEN:extractEntitiesInto";
+static const char kAskIfSeveralField[] = "SEN:askIfSeveral";
+static const char kMaxEntitiesField[] = "SEN:maxEntities";
 
 
 /** A file of Akita or its command: in the folder of the system or of the user. */
@@ -73,15 +75,15 @@ struct KeyChoice {
 
 /** the other keys that can be the SEN key by choice (the standard shortcut key of Haiku is the first of the choices) */
 static const KeyChoice kOtherKeys[] = {
-	{"Option (the Windows key on a PC keyboard)", B_OPTION_KEY},
+	{"Option", B_OPTION_KEY},
 	{"Control", B_CONTROL_KEY},
 	{"Shift", B_SHIFT_KEY},
 };
 
 
-/** the standard shortcut key of Haiku, with the key of the keyboard that it is in the key map that is active (the Alt key in the default one of a PC keyboard) */
+/** the key of the keyboard that is the standard shortcut key of Haiku in the key map that is active (the Alt key in the default one of a PC keyboard); empty if it is not known */
 static BString
-StandardKeyLabel()
+StandardKeyName()
 {
 	BString name;
 	uint32 code = 0;
@@ -99,10 +101,21 @@ StandardKeyLabel()
 			default:	break;
 		}
 	}
-	BString label("Standard shortcut key of Haiku");
-	if (!name.IsEmpty())
-		label << " (" << name << ")";
-	return label;
+	return name;
+}
+
+
+/** the help of the SEN key (a tooltip): what the key does, and which keys of the keyboard the choices are (the labels of the choices are short) */
+static BString
+KeyHelp()
+{
+	BString help("Hold this key to relate files by dragging, and to open the graph from the knot and from Akita.\n\n");
+	const BString standard = StandardKeyName();
+	help << "Standard shortcut key of Haiku: the key that has the shortcuts of the menus";
+	if (!standard.IsEmpty())
+		help << " (" << standard << " with your key map)";
+	help << ".\nOption: the Windows key on a PC keyboard.";
+	return help;
 }
 
 
@@ -171,11 +184,11 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 
 	BMessage keyField;
 	keyField.AddString(form::kAttrLabel, "SEN key");
-	keyField.AddString(form::kAttrHelp, "Hold this key to relate files by dragging, and to open the graph from the knot and from Akita.");
+	keyField.AddString(form::kAttrHelp, KeyHelp().String());
 	keyField.AddString(form::kAttrKind, form::kKindChoice);
 	keyField.AddInt32(form::kAttrOrder, 0);
 	keyField.AddString(form::kAttrChoices, std::to_string((int)B_COMMAND_KEY).c_str());
-	keyField.AddString(form::kAttrChoiceLabels, StandardKeyLabel().String());
+	keyField.AddString(form::kAttrChoiceLabels, "Standard shortcut key of Haiku");
 	for (const KeyChoice& choice : kOtherKeys) {
 		keyField.AddString(form::kAttrChoices, std::to_string((int)choice.key).c_str());
 		keyField.AddString(form::kAttrChoiceLabels, choice.label);
@@ -261,6 +274,14 @@ ApplySettings(SenConfigHandler* config, const BMessage& changes, std::vector<std
 }
 
 
+/** the number of entities that is set: from 0 to the limit, as a number (the form gives a number or a text) */
+static bool
+IsEntityCount(int32 count)
+{
+	return count >= 0 && count <= sen::key::kMaxEntitiesLimit;
+}
+
+
 void
 DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults)
 {
@@ -269,11 +290,18 @@ DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* s
 	BString into = stored.GetString(sen::key::kExtractInto, sen::key::kExtractIntoFiles);
 	if (into != sen::key::kExtractIntoAttributes)
 		into = sen::key::kExtractIntoFiles;
+	int32 most = stored.GetInt32(sen::key::kMaxEntities, sen::key::kMaxEntitiesDefault);
+	if (!IsEntityCount(most))
+		most = sen::key::kMaxEntitiesDefault;
 
 	settings->MakeEmpty();
 	settings->AddString(kExtractIntoField, into.String());
+	settings->AddBool(kAskIfSeveralField, stored.GetBool(sen::key::kAskIfSeveral, true));
+	settings->AddInt32(kMaxEntitiesField, most);
 	defaults->MakeEmpty();
 	defaults->AddString(kExtractIntoField, sen::key::kExtractIntoFiles);
+	defaults->AddBool(kAskIfSeveralField, true);
+	defaults->AddInt32(kMaxEntitiesField, sen::key::kMaxEntitiesDefault);
 
 	schema->MakeEmpty();
 	schema->AddInt32(form::kSchemaVersion, 1);
@@ -289,6 +317,23 @@ DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* s
 	extract.AddString(form::kAttrChoices, sen::key::kExtractIntoAttributes);
 	extract.AddString(form::kAttrChoiceLabels, "Attributes");
 	schema->AddMessage(kExtractIntoField, &extract);
+
+	BMessage ask;
+	ask.AddString(form::kAttrLabel, "Ask which one if several are found");
+	ask.AddString(form::kAttrHelp, "A lookup (a book by its title, a movie, a paper) may have several answers. On: a window lists them and you choose. Off: the best one is taken.");
+	ask.AddInt32(form::kAttrOrder, 1);
+	schema->AddMessage(kAskIfSeveralField, &ask);
+
+	BMessage maximum;
+	maximum.AddString(form::kAttrLabel, "Max. number of entities to extract");
+	maximum.AddString(form::kAttrHelp, "The most entities of one type that a plugin makes of one file (the first authors of a long list, the first actors of the credits). None: no entities are made. All: no limit.");
+	maximum.AddInt32(form::kAttrOrder, 2);
+	maximum.AddDouble(form::kAttrMin, 0);
+	maximum.AddString(form::kAttrKind, form::kKindSlider);
+	maximum.AddString(form::kAttrMinLabel, "None");
+	maximum.AddString(form::kAttrMaxLabel, "All");
+	maximum.AddDouble(form::kAttrMax, sen::key::kMaxEntitiesLimit);
+	schema->AddMessage(kMaxEntitiesField, &maximum);
 }
 
 
@@ -310,6 +355,27 @@ ApplyPluginSettings(SenConfigHandler* config, const BMessage& changes, std::vect
 		} else {
 			if (refused != NULL)
 				refused->push_back(kExtractIntoField);
+			if (first == B_OK)
+				first = B_BAD_VALUE;
+		}
+	}
+
+	const bool ask = updated.GetBool(kAskIfSeveralField, true);
+	if (ask != current.GetBool(kAskIfSeveralField, true)) {
+		BMessage change;
+		change.AddBool(sen::key::kAskIfSeveral, ask);
+		config->UpdateSettings(&change);
+	}
+
+	const int32 most = updated.GetInt32(kMaxEntitiesField, sen::key::kMaxEntitiesDefault);
+	if (most != current.GetInt32(kMaxEntitiesField, sen::key::kMaxEntitiesDefault)) {
+		if (IsEntityCount(most)) {
+			BMessage change;
+			change.AddInt32(sen::key::kMaxEntities, most);
+			config->UpdateSettings(&change);
+		} else {
+			if (refused != NULL)
+				refused->push_back(kMaxEntitiesField);
 			if (first == B_OK)
 				first = B_BAD_VALUE;
 		}
