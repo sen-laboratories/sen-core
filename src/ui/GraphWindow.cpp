@@ -12,6 +12,8 @@
 #include <Button.h>
 #include <CheckBox.h>
 #include <Directory.h>
+#include <Entry.h>
+#include <Node.h>
 #include <File.h>
 #include <FilePanel.h>
 #include <Font.h>
@@ -1256,18 +1258,32 @@ GraphWindow::_ApplyFocus()
 	if (!fHasFocus || fWorking)
 		return;
 
+	// The file is known by its id. It may be given as a link (the folders of the relations in Akita, "Open related", hold links to the files) or as another entry of the same
+	// file than the one that was read: the id is read from the file itself, and the entry only decides when the file has none.
 	std::string id;
-	for (const auto& object : fRefs) {
-		if (object.second == fFocusRef) {
-			id = object.first;
-			break;
+	{
+		BEntry entry(&fFocusRef, true);
+		BNode node(&entry);
+		char text[B_ATTR_NAME_LENGTH];
+		ssize_t length = node.InitCheck() == B_OK ? node.ReadAttr(sen::attr::kId, B_STRING_TYPE, 0, text, sizeof(text) - 1) : -1;
+		if (length > 0) {
+			text[length] = '\0';
+			id = text;
+		}
+	}
+	if (id.empty()) {
+		for (const auto& object : fRefs) {
+			if (object.second == fFocusRef) {
+				id = object.first;
+				break;
+			}
 		}
 	}
 	if (id.empty()) {
 		// not an object of SEN (it has no SEN:ID), or not read
 		fHasFocus = false;
 		BString status(fFocusRef.name);
-		status << " is no object of SEN: it has no relations.";
+		status << " has no relations.";
 		fStatus->SetText(status.String());
 		return;
 	}
@@ -1282,6 +1298,12 @@ GraphWindow::_ApplyFocus()
 			return;
 		}
 		fHasFocus = false;
+		if (fAll.IndexOf(id) < 0 && !fTruncated) {
+			// (everything is shown and the file is not in it: nothing is related to it)
+			BString status(fFocusRef.name);
+			status << " has no relations.";
+			fStatus->SetText(status.String());
+		}
 		return;
 	}
 	fHasFocus = false;
