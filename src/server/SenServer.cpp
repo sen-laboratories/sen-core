@@ -197,6 +197,7 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
 	// setup feature-specific handlers for initializing SEN modules and later redirecting messages appropriately
     relationHandler  = new RelationHandler();
     senConfigHandler = new SenConfigHandler();
+    relationHandler->SetConfig(senConfigHandler);
     fUi = new sen::ui::SenUi(senConfigHandler, relationHandler);
     fDeskbarRetry = NULL;
     fDeskbarTries = 0;

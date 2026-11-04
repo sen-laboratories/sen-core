@@ -117,10 +117,10 @@ int main()
 	CHECK(peopleFolder == library + "/People" || peopleFolder == library + "/Person" || peopleFolder == library + "/x-vnd.sen-labs.entity.person");
 	CHECK(Exists(peopleFolder));
 
-	// another context: ~/Library/Contexts/<name>
+	// another context: ~/Library/<name>
 	reply.MakeEmpty();
 	CHECK(Ask("libtest", person.c_str(), true, &reply) == B_OK);
-	const std::string mine = library + "/Contexts/libtest";
+	const std::string mine = library + "/libtest";
 	CHECK(std::string(reply.GetString(sen::key::kLibraryPath, "")).compare(0, mine.size() + 1, mine + "/") == 0);
 	CHECK(std::string(reply.GetString(sen::key::kContext, "")) == "libtest");
 	CHECK(Exists(reply.GetString(sen::key::kLibraryPath, "")));
@@ -182,7 +182,7 @@ int main()
 	CHECK(Ask("libtest", "entity/", true, &reply) == B_BAD_VALUE);
 	CHECK(Ask("no such context", person.c_str(), true, &reply) == B_ENTRY_NOT_FOUND);
 	CHECK(Ask("../outside", person.c_str(), true, &reply) == B_BAD_VALUE);
-	CHECK(!Exists(library + "/Contexts/no such context"));
+	CHECK(!Exists(library + "/no such context"));
 
 	// the name of the Library folder is a setting (kCoreSettingsSet); a name that is not one folder is refused and the Library stays where it was
 	auto setName = [](const char* name, BMessage* answer) {
@@ -199,7 +199,7 @@ int main()
 	CHECK(Ask("default", person.c_str(), false, &reply) == B_OK);
 	CHECK(std::string(reply.GetString(sen::key::kLibraryPath, "")).compare(0, home.size() + 11, home + "/LibraryZz/") == 0);
 	reply.MakeEmpty();
-	CHECK(Ask("libtest", NULL, false, &reply) == B_OK && std::string(reply.GetString(sen::key::kLibraryPath, "")) == home + "/LibraryZz/Contexts/libtest");
+	CHECK(Ask("libtest", NULL, false, &reply) == B_OK && std::string(reply.GetString(sen::key::kLibraryPath, "")) == home + "/LibraryZz/libtest");
 	answer.MakeEmpty();
 	CHECK(setName("a/b", &answer) == B_OK && answer.GetInt32(sen::key::kResult, -1) == B_BAD_VALUE);
 	reply.MakeEmpty();
@@ -221,7 +221,6 @@ int main()
 		RemoveTree(library);
 	} else {
 		// (the folder of the type in the default Library is left if it was there: only what was made here goes)
-		rmdir((library + "/Contexts").c_str());		// (only if empty)
 	}
 
 	printf("%d checks, %d failure(s)\n", sChecks, sFailures);

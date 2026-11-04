@@ -21,7 +21,7 @@ namespace core {
  *
  * The fields are the SEN key (`SEN:modifierKey`), whether the FileTypes of SEN is used (`SEN:useFileTypes`) and, if Akita is installed, whether it takes the place of
  * Tracker at login (`akita`: not a setting of the server but a file of the launch daemon, which the command `akita` makes), and the name of the Library folder
- * (`SEN:libraryName`).
+ * (`SEN:libraryName`), and whether what is made new belongs to the current context (`SEN:associateCurrentContext`, default on).
  *
  * The settings that all plugins share (the node *Plugins* of the window; the request has `SEN:scope` = `plugins`) are the same thing for another set of fields:
  * where plugins put the entities that they find (`SEN:extractEntitiesInto`: `files` or `attributes`), whether the user is asked which one is meant if a lookup finds several

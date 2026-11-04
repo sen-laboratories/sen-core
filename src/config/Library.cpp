@@ -14,8 +14,10 @@
 #include <Node.h>
 #include <String.h>
 
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace sen {
 namespace library {
@@ -108,10 +110,18 @@ LibraryOf(const std::string& context, const std::string& libraryName, BPath* lib
 	}
 
 	library->SetTo(home.Path(), libraryName.c_str());
-	if (context != sen::config::kContextDefault)
-		library->Append(sen::config::kLibraryContextsDir);
-	if (context != sen::config::kContextDefault)
+	if (context != sen::config::kContextDefault) {
+		BPath old(*library);
 		library->Append(FolderName(context).c_str());
+		// (the first versions kept the Libraries of the contexts in a folder `Contexts`: what is there is moved up, once)
+		if (old.Append("Contexts") == B_OK && old.Append(FolderName(context).c_str()) == B_OK && BEntry(old.Path()).Exists() && !BEntry(library->Path()).Exists()) {
+			if (rename(old.Path(), library->Path()) == 0) {
+				BPath contextsFolder;
+				if (old.GetParent(&contextsFolder) == B_OK)
+					rmdir(contextsFolder.Path());		// (only if empty)
+			}
+		}
+	}
 	return library->InitCheck();
 }
 

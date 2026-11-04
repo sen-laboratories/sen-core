@@ -29,6 +29,7 @@ static const char kKeyField[] = "SEN:modifierKey";
 static const char kFileTypesField[] = "SEN:useFileTypes";
 static const char kAkitaField[] = "akita";
 static const char kLibraryNameField[] = "SEN:libraryName";
+static const char kAssociateContextField[] = "SEN:associateCurrentContext";
 static const char kExtractIntoField[] = "SEN:extractEntitiesInto";
 static const char kAskIfSeveralField[] = "SEN:askIfSeveral";
 static const char kMaxEntitiesField[] = "SEN:maxEntities";
@@ -168,6 +169,7 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 	settings->AddInt32(kKeyField, key);
 	settings->AddBool(kFileTypesField, stored.GetBool(sen::key::kUseSenFileTypes, true));
 	settings->AddString(kLibraryNameField, LibraryName(stored).c_str());
+	settings->AddBool(kAssociateContextField, stored.GetBool(sen::key::kAssociateContext, true));
 	const bool akita = AkitaInstalled();
 	if (akita)
 		settings->AddBool(kAkitaField, AkitaEnabled());
@@ -176,6 +178,7 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 	defaults->AddInt32(kKeyField, B_COMMAND_KEY);
 	defaults->AddBool(kFileTypesField, true);
 	defaults->AddString(kLibraryNameField, sen::config::kLibraryDir);
+	defaults->AddBool(kAssociateContextField, true);
 	if (akita)
 		defaults->AddBool(kAkitaField, true);
 
@@ -213,6 +216,13 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 		"A folder that exists is not moved.");
 	libraryName.AddInt32(form::kAttrOrder, 3);
 	schema->AddMessage(kLibraryNameField, &libraryName);
+
+	BMessage associate;
+	associate.AddString(form::kAttrLabel, "New objects belong to the current context");
+	associate.AddString(form::kAttrHelp, "What is made new (a file, a relation, the people of a book or a movie that a plugin makes) gets an association relation to the context that is "
+		"checked in the menu of SEN, as for a context that is locked with the Shift key. Off: only what is locked is applied. The default context is every file and is never applied.");
+	associate.AddInt32(form::kAttrOrder, 4);
+	schema->AddMessage(kAssociateContextField, &associate);
 }
 
 
@@ -260,6 +270,13 @@ ApplySettings(SenConfigHandler* config, const BMessage& changes, std::vector<std
 			if (first == B_OK)
 				first = B_BAD_VALUE;
 		}
+	}
+
+	const bool associate = updated.GetBool(kAssociateContextField, true);
+	if (associate != current.GetBool(kAssociateContextField, true)) {
+		BMessage change;
+		change.AddBool(sen::key::kAssociateContext, associate);
+		config->UpdateSettings(&change);
 	}
 
 	if (current.HasBool(kAkitaField) && updated.GetBool(kAkitaField, true) != current.GetBool(kAkitaField, true)) {

@@ -12,6 +12,9 @@
  * (a new file, a new related file) and to every relation that is made: the file gets a relation of the association type to it, the relation lists the
  * classification in its properties (key::kClassifications), so that they can be filtered by it later. (The default context does not stick: it is every
  * file. The menu of SEN makes only one context sticky.)
+ *
+ * The current context counts as sticky even if it was not locked (the setting `SEN:associateCurrentContext`, on by default): checking a context in the menu is taken to mean that
+ * what is made from then on belongs to it.
  */
 
 #include <Directory.h>
@@ -24,6 +27,7 @@
 
 #include <sen/Sen.h>
 
+#include "../config/SenConfigHandler.h"
 #include "AttrSnapshot.h"
 #include "QueryUtil.h"
 #include "RelationHandler.h"
@@ -53,6 +57,14 @@ status_t RelationHandler::StickyClassifications(std::vector<entry_ref>* result)
     if (status != B_OK)
         return status;
 
+    // the current context, which counts as sticky if the setting says so
+    BString current;
+    if (fConfig != NULL) {
+        BMessage settings;
+        if (fConfig->GetConfig(&settings) == B_OK && settings.GetBool(sen::key::kAssociateContext, true))
+            current = settings.GetString(sen::key::kCurrentContext, sen::config::kContextDefault);
+    }
+
     for (const entry_ref& candidate : candidates) {
         BNode node(&candidate);
         if (node.InitCheck() != B_OK || InTrash(candidate))
@@ -60,10 +72,13 @@ status_t RelationHandler::StickyClassifications(std::vector<entry_ref>* result)
 
         // (the default context is every file: it does not stick)
         entry_ref copy(candidate);
-        if (GetMimeTypeForRef(&copy) == sen::mime::kContext && strcmp(candidate.name, sen::config::kContextDefault) == 0)
+        const bool isContext = GetMimeTypeForRef(&copy) == sen::mime::kContext;
+        if (isContext && strcmp(candidate.name, sen::config::kContextDefault) == 0)
             continue;
         bool sticky = false;
         if (node.ReadAttr(sen::attr::kSticky, B_BOOL_TYPE, 0, &sticky, sizeof(sticky)) == sizeof(sticky) && sticky)
+            result->push_back(candidate);
+        else if (isContext && !current.IsEmpty() && current == candidate.name)
             result->push_back(candidate);
     }
     return B_OK;

@@ -173,6 +173,21 @@ int main()
 	reply.MakeEmpty();
 	CHECK(Ask(sen::cmd::kCoreSettingsSet, &nameChange, &reply) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
 
+	// new objects belong to the current context: on by default, a check box that can be switched off and on
+	CHECK(defaults.GetBool("SEN:associateCurrentContext", false));
+	const bool originalAssociate = settings.GetBool("SEN:associateCurrentContext", true);
+	BMessage associateField;
+	CHECK(schema.FindMessage("SEN:associateCurrentContext", &associateField) == B_OK && strstr(associateField.GetString(form::kAttrLabel, ""), "current context") != NULL);
+	BMessage associateChange;
+	associateChange.AddBool("SEN:associateCurrentContext", !originalAssociate);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &associateChange, &reply) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
+	CHECK(reply.FindMessage(form::kFieldSettings, &now) == B_OK && now.GetBool("SEN:associateCurrentContext", originalAssociate) == !originalAssociate);
+	associateChange.MakeEmpty();
+	associateChange.AddBool("SEN:associateCurrentContext", originalAssociate);
+	reply.MakeEmpty();
+	CHECK(Ask(sen::cmd::kCoreSettingsSet, &associateChange, &reply) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
+
 	// the settings that all plugins share (scope plugins): the radio of where entities go; they do not mix with the settings of the server
 	reply.MakeEmpty();
 	CHECK(Ask(sen::cmd::kCoreSettings, NULL, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
@@ -248,7 +263,7 @@ int main()
 	reply.MakeEmpty();
 	CHECK(Ask(sen::cmd::kCoreSettingsSet, &shared, &reply, sen::key::kScopePlugins) == B_OK && reply.GetInt32(sen::key::kResult, -1) == B_OK);
 	loaded = sen::plugins::LoadSharedSettings();
-	CHECK(loaded.askIfSeveral == originalAsk && loaded.maxEntities == originalMost);
+	CHECK(loaded.askIfSeveral == originalAsk && loaded.maxEntities == (originalMost >= sen::key::kMaxEntitiesLimit ? sen::key::kMaxEntitiesInternal : originalMost));		// (All is handed out as 255)
 
 	// the choices of the SEN key have short labels (what they mean is in the tooltip, the help)
 	BMessage keyAttrs;
