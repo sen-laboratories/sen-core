@@ -117,9 +117,14 @@ public:
 		font_height height;
 		GetFontHeight(&height);
 		BRect bounds = Bounds();
-		const float width = StringWidth(fText.String());
+		// (a text that is wider than the pane is cut at the end, not at both sides)
+		BString shown(fText);
+		const float room = bounds.Width() - 2 * be_control_look->DefaultItemSpacing();
+		if (StringWidth(shown.String()) > room)
+			TruncateString(&shown, B_TRUNCATE_END, room);
+		const float width = StringWidth(shown.String());
 		MovePenTo(BPoint(floorf((bounds.Width() - width) / 2), floorf(bounds.Height() / 2 - (height.ascent + height.descent) / 2 + height.ascent)));
-		DrawString(fText.String());
+		DrawString(shown.String());
 	}
 
 private:
@@ -361,6 +366,10 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fForm = form::Instantiate("settings form", &error, formSignature != NULL && formSignature[0] != '\0' ? formSignature : form::kShojiSignature);
 	fPane = new BGroupView("pane", B_VERTICAL, B_USE_DEFAULT_SPACING);
 	fPane->GroupLayout()->SetInsets(B_USE_WINDOW_INSETS);
+	// (the pane takes what the window gives it: a form of one option must not make the window as small as itself)
+	fPane->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, B_SIZE_UNLIMITED));
+	if (fForm != NULL)
+		fForm->SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, B_SIZE_UNLIMITED));
 	fStatus = new BStringView("status", "");
 	fStatus->SetHighUIColor(B_PANEL_TEXT_COLOR, B_DARKEN_1_TINT);
 	fRevert = new BButton("revert", "Revert", new BMessage(kMsgRevert));
