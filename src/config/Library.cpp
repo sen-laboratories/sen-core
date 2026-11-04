@@ -61,7 +61,7 @@ FolderNameOf(const char* mimeType)
 	if (type.InitCheck() != B_OK || !type.IsValid())
 		return std::string();
 
-	// the plural of the type (the annotation `plural` of the ontology) is an attribute of the entry of the type in the MIME database: the user's, then the system's
+	// the plural of the type (the slot `plural` of the root class Entity of the ontology) is an attribute of the entry of the type in the MIME database: the user's, then the system's
 	std::string name;
 	for (directory_which which : {B_USER_SETTINGS_DIRECTORY, B_SYSTEM_DATA_DIRECTORY, B_USER_DATA_DIRECTORY}) {
 		BPath path;

@@ -18,7 +18,7 @@ namespace library {
  *
  * The Library of the default context is `~/Library`, that of another context `~/Library/Contexts/<name>`; a context can name another folder in the attribute
  * `SEN:libraryPath` of its folder (an absolute path, or one that starts with `~/`). The folder of an entity type in it is named by the plural of the type (the
- * resource `SEN:PLURAL`, the annotation `plural` of the ontology), else by the short description of the type. The name of the Library folder in the home folder is the setting
+ * resource `SEN:PLURAL`, the slot `plural` of the root class Entity of the ontology), else by the short description of the type. The name of the Library folder in the home folder is the setting
  * `SEN:libraryName` (default `Library`).
  */
 

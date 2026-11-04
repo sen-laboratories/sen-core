@@ -10,12 +10,14 @@
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
 #include <sen/SenMessagePath.h>
+#include <sen/SenOntoCore.h>
 #include <sen/SenSettingsForm.h>
 #include <sen/SenSettingsFormHost.h>
 
 #include <AppFileInfo.h>
 #include <Bitmap.h>
 #include <Button.h>
+#include <IconUtils.h>
 #include <ControlLook.h>
 #include <File.h>
 #include <FindDirectory.h>
@@ -23,6 +25,7 @@
 #include <GroupView.h>
 #include <LayoutBuilder.h>
 #include <ListItem.h>
+#include <MimeType.h>
 #include <MessageRunner.h>
 #include <NodeInfo.h>
 #include <OutlineListView.h>
@@ -89,6 +92,27 @@ IconOf(const entry_ref& file, int size)
 }
 
 
+/** The icon of a MIME type (its vector icon, as the ontology gives it), as a bitmap of the size; NULL if the type has none. */
+BBitmap*
+IconOfType(const char* mimeType, int size)
+{
+	BMimeType type(mimeType);
+	if (type.InitCheck() != B_OK)
+		return NULL;
+	uint8* data = NULL;
+	size_t dataSize = 0;
+	BBitmap* icon = new BBitmap(BRect(0, 0, size - 1, size - 1), B_RGBA32);
+	if (icon->InitCheck() == B_OK && type.GetIcon(&data, &dataSize) == B_OK) {
+		const status_t result = BIconUtils::GetVectorIcon(data, dataSize, icon);
+		delete[] data;
+		if (result == B_OK)
+			return icon;
+	}
+	delete icon;
+	return NULL;
+}
+
+
 /**
  * A node of the tree. One that has a file (Core: the server, a plugin: its application) shows the icon of that file before its name, the icon that its resources have; the
  * nodes that are headings have none. The icon is as high as the text needs, a little more.
@@ -96,7 +120,7 @@ IconOf(const entry_ref& file, int size)
 class NodeItem : public BStringItem {
 public:
 	/** @param scope what the server answers for (sen::key::kScopeCore, kScopePlugins), NULL for a plugin or a heading */
-	NodeItem(const char* label, uint32 level, bool selectable, const char* scope, const char* signature, const entry_ref* file = NULL)
+	NodeItem(const char* label, uint32 level, bool selectable, const char* scope, const char* signature, const entry_ref* file = NULL, const char* iconType = NULL)
 		:
 		BStringItem(label, level, true),
 		fSelectable(selectable),
@@ -104,11 +128,15 @@ public:
 		fSignature(signature),
 		fIcon(NULL)
 	{
+		// the icon of a file (the application), else that of a MIME type (the heading of the plugins: the type of a plugin)
+		font_height height;
+		be_plain_font->GetHeight(&height);
+		const int size = (int)ceilf(height.ascent + height.descent + height.leading) + 2;
 		if (file != NULL) {
 			fFile = *file;
-			font_height height;
-			be_plain_font->GetHeight(&height);
-			fIcon = IconOf(fFile, (int)ceilf(height.ascent + height.descent + height.leading) + 2);
+			fIcon = IconOf(fFile, size);
+		} else if (iconType != NULL) {
+			fIcon = IconOfType(iconType, size);
 		}
 	}
 
@@ -319,9 +347,9 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	// (Core is the server: its icon)
 	entry_ref server;
 	const bool hasServer = be_roster->FindApp(sen::kServerSignature, &server) == B_OK;
-	fTree->AddItem(new NodeItem("SEN", 0, false, NULL, ""));
+	fTree->AddItem(new NodeItem("SEN", 0, false, NULL, "", hasServer ? &server : NULL));
 	fTree->AddItem(new NodeItem("Core", 1, true, sen::key::kScopeCore, "", hasServer ? &server : NULL));
-	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, ""));
+	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, "", NULL, sen::onto::core::mime::kPlugin));
 
 	BString givenSignature;
 	BString givenName;
