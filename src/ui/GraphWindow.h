@@ -10,6 +10,7 @@
 #include "Worker.h"
 
 #include <map>
+#include <vector>
 #include <string>
 
 #include <sen/SenGraph.h>
@@ -17,6 +18,8 @@
 class BButton;
 class BCheckBox;
 class BFilePanel;
+class BMessageRunner;
+class BQuery;
 class BStringView;
 class SenConfigHandler;
 
@@ -43,9 +46,17 @@ public:
 
 	virtual void	DispatchMessage(BMessage* message, BHandler* handler);
 	virtual void	MessageReceived(BMessage* message);
+	virtual bool	QuitRequested();
 
 private:
-	void			_Start(bool collect);
+	/** @param live a refresh because the files changed: the zoom, the place and the selection stay, and nothing is said while it is read */
+	void			_Start(bool collect, bool live = false);
+	/** watch the files of the graph (their attributes and names) and the objects of SEN (a live query), so that the graph follows what changes on the disk */
+	void			_Watch();
+	void			_StopWatching();
+	/** something that is in the graph, or is an object of SEN, changed: read the objects again after a moment of quiet (what is written in a burst is read once) */
+	void			_Changed(const BMessage* message);
+	void			_ScheduleLive(bigtime_t delay);
 	void			_Done(BMessage* message);
 	void			_Open(const BMessage* message);
 	void			_ApplyFocus();
@@ -74,6 +85,11 @@ private:
 	std::map<std::string, entry_ref>	fRefs;
 	bool							fTruncated;
 	int32							fObjects;
+	bool							fLiveRun;	///< the work that is running (or was started last) is a live refresh
+	bool							fCollecting;	///< ... and it reads the files again (not only a new layout)
+	bool							fLiveAgain;	///< something changed while the objects were read: read them again
+	BMessageRunner*					fLiveRunner;
+	std::vector<BQuery*>			fQueries;	///< live queries for the objects of SEN, one for each volume that has them
 	bool							fHasFocus;	///< a file to centre the graph on, as soon as the graph is there
 	entry_ref						fFocusRef;
 };

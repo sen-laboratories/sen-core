@@ -106,6 +106,9 @@ SenUi::Handle(BMessage* message)
 		case sen::cmd::kUiRequestRestart:
 			_Restart();
 			return true;
+		case sen::cmd::kUiRestartAkita:
+			_RestartAkita();
+			return true;
 		case kQuitFallback:
 			be_app->PostMessage(B_QUIT_REQUESTED);
 			return true;
@@ -469,6 +472,25 @@ SenUi::_Restart()
 	system(command.String());
 
 	be_app->PostMessage(B_QUIT_REQUESTED);
+}
+
+
+/** Restarts Akita: the command `akita restart` of its package quits the file manager that runs (as a service of the launch daemon) and starts it again, in a command of its own,
+ *  which does not wait for it. */
+void
+SenUi::_RestartAkita()
+{
+	static const directory_which places[] = {B_SYSTEM_BIN_DIRECTORY, B_USER_BIN_DIRECTORY, B_SYSTEM_NONPACKAGED_BIN_DIRECTORY, B_USER_NONPACKAGED_BIN_DIRECTORY};
+	for (directory_which place : places) {
+		BPath akita;
+		if (find_directory(place, &akita) != B_OK || akita.Append("akita") != B_OK || !BEntry(akita.Path()).Exists())
+			continue;
+		BString command(Quoted(akita.Path()));
+		command << " restart >/dev/null 2>&1 &";
+		system(command.String());
+		return;
+	}
+	_Report("restart Akita", B_ENTRY_NOT_FOUND);
 }
 
 
