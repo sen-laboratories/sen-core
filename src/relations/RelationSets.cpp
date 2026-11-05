@@ -67,6 +67,27 @@ IsEmpty(const BMessage& relations)
     return CountTargets(relations) == 0;
 }
 
+bool
+FillProvenance(BMessage* relations, const char* targetId, const BMessage& properties)
+{
+    const char* creator = properties.GetString(onto::core::attr::kRelProvenance, "");
+    if (creator[0] == '\0')
+        return false;
+
+    const BMessage wanted = Identity(properties);
+    const int32 count = CountSets(*relations, targetId);
+    for (int32 i = 0; i < count; i++) {
+        BMessage existing;
+        if (relations->FindMessage(targetId, i, &existing) != B_OK || existing.HasString(onto::core::attr::kRelProvenance))
+            continue;
+        if (Identity(existing).HasSameData(wanted)) {
+            existing.AddString(onto::core::attr::kRelProvenance, creator);
+            return relations->ReplaceMessage(targetId, i, &existing) == B_OK;
+        }
+    }
+    return false;
+}
+
 status_t
 AddSet(BMessage* relations, const char* targetId, const BMessage& properties, BString* relationId)
 {

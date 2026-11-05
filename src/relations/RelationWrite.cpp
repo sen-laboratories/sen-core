@@ -233,6 +233,17 @@ status_t RelationHandler::AddRelationTx(const entry_ref& source, const entry_ref
     status = sen::relation::AddSet(&forward, targetId, properties, relationId);
     if (status == B_NAME_IN_USE) {
         spdlog::debug("relation {} to {} with the same properties exists already.", relationType, targetId);
+        // one that was made before relations knew their creator learns it now (both directions); the one that has it keeps it
+        if (sen::relation::FillProvenance(&forward, targetId, properties)) {
+            status = StoreRelationMessage(source, relationType, forward, tx);
+            if (status == B_OK && ShouldWriteInverse(relationConfig, sourceType, targetType) && ! (source == target)) {
+                BMessage inverse;
+                status = ReadRelationMessage(target, relationType, &inverse);
+                if (status == B_OK && sen::relation::FillProvenance(&inverse, sourceId, InverseProperties(relationConfig, properties)))
+                    status = StoreRelationMessage(target, relationType, inverse, tx);
+            }
+            return status;
+        }
         return B_OK;
     }
     if (status != B_OK)

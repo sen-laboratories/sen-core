@@ -93,6 +93,36 @@ TEST(ARelationKnowsWhoMadeIt)
 	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
 }
 
+TEST(ARelationFromBeforeProvenanceLearnsItsCreatorWhenItIsMadeAgain)
+{
+	Fixture f("provenance-late", 2);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+
+	// take the provenance away on both sides, as it was before relations had one
+	for (int side = 0; side < 2; side++) {
+		const entry_ref& ref = f.refs[side];
+		const std::string other = IdOf(f.refs[1 - side]);
+		BMessage relations = Stored(ref, kReference), set;
+		CHECK(relations.FindMessage(other.c_str(), &set) == B_OK);
+		set.RemoveName(sen::onto::core::attr::kRelProvenance);
+		relations.ReplaceMessage(other.c_str(), 0, &set);
+		BString attr(sen::attr::kRelationPrefix);
+		attr << (kReference + strlen(sen::mime::kRelationPrefix));
+		std::vector<char> buffer(relations.FlattenedSize());
+		relations.Flatten(buffer.data(), buffer.size());
+		BNode(&ref).WriteAttr(attr.String(), B_MESSAGE_TYPE, 0, buffer.data(), buffer.size());
+	}
+
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
+	CHECK_EQ(Sets(f.refs[1], kReference, IdOf(f.refs[0])), 1);
+	BMessage forward = Stored(f.refs[0], kReference), inverse = Stored(f.refs[1], kReference), set;
+	CHECK(forward.FindMessage(IdOf(f.refs[1]).c_str(), &set) == B_OK);
+	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
+	CHECK(inverse.FindMessage(IdOf(f.refs[0]).c_str(), &set) == B_OK);
+	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
+}
+
 TEST(SeveralRelationsToOneTargetGetRelationIdsInStepWithTheirOppositeDirection)
 {
 	Fixture f("several", 2);
