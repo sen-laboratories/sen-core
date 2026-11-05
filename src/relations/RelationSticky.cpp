@@ -26,6 +26,7 @@
 #include <spdlog/spdlog.h>
 
 #include <sen/Sen.h>
+#include <sen/SenOntoCore.h>
 
 #include "../config/SenConfigHandler.h"
 #include "AttrSnapshot.h"
@@ -121,6 +122,7 @@ status_t RelationHandler::ApplySticky(const BMessage* message, BMessage* reply)
                 BString relationId;
                 bool created = false;
                 BMessage properties;
+                properties.AddString(sen::onto::core::attr::kRelProvenance, sen::kServerSignature);		// (the server makes it, for what was made new)
                 status = AddRelationTx(file, entity, sen::mime::kAssociationRelation, properties, config, &tx, &relationId, &created, NULL);
                 if (status != B_OK)
                     break;

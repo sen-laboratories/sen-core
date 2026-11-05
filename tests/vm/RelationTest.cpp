@@ -12,6 +12,8 @@
 #include <MimeType.h>
 #include <string.h>
 
+#include <sen/SenOntoCore.h>
+
 #include "TestHarness.h"
 #include "TestSupport.h"
 
@@ -61,6 +63,34 @@ TEST(AddingTheSameRelationAgainChangesNothing)
 	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
 	CHECK_EQ(Sets(f.refs[1], kReference, IdOf(f.refs[0])), 1);
 	CHECK_EQ(List(f.refs[0], sen::attr::kTo).size(), 1u);
+}
+
+TEST(ARelationKnowsWhoMadeIt)
+{
+	Fixture f("provenance", 2);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+
+	// the sender of the request (this test program, which is no application: named by its command) is the creator, on both sides
+	BMessage forward = Stored(f.refs[0], kReference), set;
+	CHECK(forward.FindMessage(IdOf(f.refs[1]).c_str(), &set) == B_OK);
+	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
+	BMessage inverse = Stored(f.refs[1], kReference);
+	CHECK(inverse.FindMessage(IdOf(f.refs[0]).c_str(), &set) == B_OK);
+	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
+
+	// making the same relation again as another program does not make a second one, and the first creator stays
+	BMessage properties;
+	properties.AddString(sen::onto::core::attr::kRelProvenance, "application/x-vnd.other");
+	BMessage add(sen::cmd::kRelationAdd), reply;
+	add.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	add.AddString(sen::key::kRelationType, kReference);
+	add.AddRef(sen::key::kTargetRef, &f.refs[1]);
+	add.AddMessage(sen::key::kRelationProperties, &properties);
+	BMessenger(sen::kServerSignature).SendMessage(&add, &reply);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
+	forward = Stored(f.refs[0], kReference);
+	CHECK(forward.FindMessage(IdOf(f.refs[1]).c_str(), &set) == B_OK);
+	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
 }
 
 TEST(SeveralRelationsToOneTargetGetRelationIdsInStepWithTheirOppositeDirection)

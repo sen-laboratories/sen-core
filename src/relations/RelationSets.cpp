@@ -5,18 +5,28 @@
 #include "RelationSets.h"
 
 #include <sen/Sen.h>
+#include <sen/SenOntoCore.h>
 
 namespace sen {
 namespace relation {
 
 namespace {
 
-/** the properties without the relation id: what makes two sets the same */
+/** the properties without the relation id: what is stored */
 BMessage
 WithoutId(const BMessage& set)
 {
     BMessage copy(set);
     copy.RemoveName(key::kRelationId);
+    return copy;
+}
+
+/** the properties that make two sets the same: without the relation id, and without the provenance (who made a relation does not make it another one) */
+BMessage
+Identity(const BMessage& set)
+{
+    BMessage copy(WithoutId(set));
+    copy.RemoveName(onto::core::attr::kRelProvenance);
     return copy;
 }
 
@@ -69,7 +79,7 @@ AddSet(BMessage* relations, const char* targetId, const BMessage& properties, BS
         BMessage existing;
         if (relations->FindMessage(targetId, i, &existing) != B_OK)
             continue;
-        if (WithoutId(existing).HasSameData(wanted)) {
+        if (Identity(existing).HasSameData(Identity(wanted))) {
             relationId->SetTo(existing.GetString(key::kRelationId, ""));
             return B_NAME_IN_USE;
         }

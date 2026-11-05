@@ -18,7 +18,11 @@
  * (AttrSnapshot) and put back if a step fails.
  */
 
+#include <Application.h>
+#include <Messenger.h>
 #include <Node.h>
+#include <OS.h>
+#include <Roster.h>
 #include <NodeInfo.h>
 #include <Path.h>
 #include <String.h>
@@ -30,6 +34,7 @@
 #include <spdlog/spdlog.h>
 
 #include <sen/Sen.h>
+#include <sen/SenOntoCore.h>
 
 #include "AttrSnapshot.h"
 #include "IdListAttr.h"
@@ -163,6 +168,41 @@ BMessage RelationHandler::InverseProperties(const BMessage& relationConfig, cons
     return inverse;
 }
 
+namespace {
+
+/**
+ * The signature of the program that sent a request: the creator of what the request makes (the provenance of a relation). A program that is not an
+ * application (a shell command) has no signature, it is named by its command; a request that did not come from another team has none.
+ */
+BString SenderOf(const BMessage* message)
+{
+    BString name;
+    const BMessenger sender = message->ReturnAddress();
+    const team_id team = sender.Team();
+    if (!message->IsSourceRemote())
+        return name;
+    if (team < 0)
+        return name;
+
+    app_info info;
+    if (be_roster->GetRunningAppInfo(team, &info) == B_OK && info.signature[0] != '\0')
+        return BString(info.signature);
+
+    team_info teamInfo;
+    if (get_team_info(team, &teamInfo) == B_OK) {
+        name = teamInfo.args;
+        int32 space = name.FindFirst(' ');
+        if (space > 0)
+            name.Truncate(space);
+        int32 slash = name.FindLast('/');
+        if (slash >= 0)
+            name.Remove(0, slash + 1);
+    }
+    return name;
+}
+
+}   // namespace
+
 status_t RelationHandler::AddRelationTx(const entry_ref& source, const entry_ref& target, const char* relationType,
                                         const BMessage& properties, const BMessage& relationConfig,
                                         sen::AttrSnapshot* tx, BString* relationId, bool* created,
@@ -279,6 +319,13 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
     // properties are optional
     BMessage properties;
     message->FindMessage(sen::key::kRelationProperties, &properties);
+
+    // who made it: a program that says so keeps what it said, else the sender of the request (a relation that exists already keeps its first creator)
+    if (!properties.HasString(sen::onto::core::attr::kRelProvenance)) {
+        const BString creator = SenderOf(message);
+        if (!creator.IsEmpty())
+            properties.AddString(sen::onto::core::attr::kRelProvenance, creator);
+    }
 
     // what is related is put into the sticky classifications: the relation lists them (not those of the ontologies, and not the associations)
     if (!IsMetaRelation(relationType) && !properties.HasString(sen::key::kClassifications)
