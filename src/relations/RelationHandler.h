@@ -67,6 +67,14 @@ public:
         status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
                                                    const BMessage* pluginConfig,
                                                    BMessage* reply);
+        /**
+         * @brief The files that a dynamic relation (not a self relation: the spatial ones) relates a file to, asked of the navigator plugin that handles the type.
+         *
+         * The relations of that type are not stored anywhere: the plugin works them out when they are asked for (sensei::cmd::kResolve, see Sensei.h) and the answer is
+         * made like that of a stored relation: a set of properties for each target in @p relations, the refs of the targets in @p idToRefMap. A target gets a `SEN:ID` if it has none.
+         * @return B_OK (also if nothing is found), B_NAME_NOT_FOUND if no navigator handles the type, or the error of the plugin
+         */
+        status_t    ResolveDynamicRelationsWithPlugin(const entry_ref* sourceRef, const char* relationType, BMessage* relations, BMessage* idToRefMap);
 
 virtual
         void MessageReceived(BMessage* message);

@@ -10,6 +10,7 @@
 #include <fs_attr.h>
 #include <Looper.h>
 #include <Messenger.h>
+#include <MimeType.h>
 #include <Node.h>
 #include <NodeInfo.h>
 #include <Path.h>
@@ -20,6 +21,7 @@
 #include <Volume.h>
 
 #include "RelationHandler.h"
+#include "RelationSets.h"
 #include "QueryUtil.h"
 #include "../server/Reply.h"
 #include <sen/Sen.h>
@@ -723,4 +725,74 @@ BString RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
 
     spdlog::error("could not get MIME type for source node {}", ref->name);
     return BString();
+}
+
+
+status_t RelationHandler::ResolveDynamicRelationsWithPlugin(const entry_ref* sourceRef, const char* relationType, BMessage* relations, BMessage* idToRefMap)
+{
+    // the navigator of the relation type: its preferred application (set from the plugin that names the type in its file types, see AssignPreferredNavigator)
+    BMimeType type(relationType);
+    char pluginSig[B_MIME_TYPE_LENGTH];
+    if (type.InitCheck() != B_OK || type.GetPreferredApp(pluginSig) != B_OK) {
+        if (type.InitCheck() != B_OK || AssignPreferredNavigator(&type) != B_OK || type.GetPreferredApp(pluginSig) != B_OK) {
+            spdlog::warn("no navigator plugin handles the dynamic relation type {}", relationType);
+            return B_OK;        // (nothing can be found: no relations, not an error that stops the menu)
+        }
+    }
+
+    // as for self relations: a plugin is a multiple launch application that quits right after it has replied: talk to the instance that is started here
+    team_id pluginTeam = -1;
+    status_t result = be_roster->Launch(pluginSig, (BMessage*)NULL, &pluginTeam);
+    if (result != B_OK) {
+        spdlog::error("failed to launch plugin {}: {}", pluginSig, strerror(result));
+        return result;
+    }
+
+    BMessage request(sensei::cmd::kResolve);
+    request.AddRef("refs", sourceRef);
+    request.AddString(sen::key::kRelationType, relationType);
+
+    BMessenger pluginMessenger(pluginSig, pluginTeam);
+    BMessage pluginReply;
+    PluginReplyCollector* collector = new PluginReplyCollector();
+    collector->Run();
+    result = pluginMessenger.SendMessage(&request, BMessenger(collector));
+    if (result == B_OK)
+        result = collector->WaitForReply(&pluginReply, pluginTeam);
+    if (collector->Lock())
+        collector->Quit();
+    if (result != B_OK) {
+        spdlog::error("failed to communicate with plugin {}: {}", pluginSig, strerror(result));
+        return result;
+    }
+    result = pluginReply.GetInt32(sensei::key::kResult, B_OK);
+    if (result != B_OK) {
+        spdlog::error("plugin {} could not resolve {} of {}: {}", pluginSig, relationType, sourceRef->name, strerror(result));
+        return result;
+    }
+
+    // a set of properties for each target, as the relations of a stored relation: the properties of the plugin, and that the relation cannot be changed (it is worked out)
+    BMessage target;
+    int32 found = 0;
+    for (int32 index = 0; pluginReply.FindMessage(sensei::key::kTargets, index, &target) == B_OK; index++) {
+        entry_ref targetRef;
+        if (target.FindRef(sen::key::kTargetRef, &targetRef) != B_OK || !BEntry(&targetRef).Exists())
+            continue;
+        char targetId[sen::id::kLength];
+        if (GetOrCreateId(&targetRef, targetId, true) != B_OK) {
+            spdlog::warn("no SEN:ID for {}: not shown as a target of {}", targetRef.name, relationType);
+            continue;
+        }
+        BMessage properties(target);
+        properties.RemoveName(sen::key::kTargetRef);
+        if (!properties.HasBool(sen::attr::kRelationReadOnly))
+            properties.AddBool(sen::attr::kRelationReadOnly, true);
+        BString relationId;
+        sen::relation::AddSet(relations, targetId, properties, &relationId);
+        if (!idToRefMap->HasRef(targetId))
+            idToRefMap->AddRef(targetId, &targetRef);
+        found++;
+    }
+    spdlog::debug("plugin {} found {} target(s) of {} for {}", pluginSig, found, relationType, sourceRef->name);
+    return B_OK;
 }
