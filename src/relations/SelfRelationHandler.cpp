@@ -9,6 +9,7 @@
 #include <AppFileInfo.h>
 #include <fs_attr.h>
 #include <Looper.h>
+#include <File.h>
 #include <Messenger.h>
 #include <MimeType.h>
 #include <Node.h>
@@ -24,6 +25,8 @@
 #include "RelationSets.h"
 #include "QueryUtil.h"
 #include "../server/Reply.h"
+#include "../config/Library.h"
+#include "../config/SenConfigHandler.h"
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
 #include <spdlog/spdlog.h>
@@ -208,6 +211,9 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
 namespace {
 
+/** the longest that the server waits for a navigator plugin to resolve a relation (it may ask a web service, twice): then the relation is shown as not found, and the server is free again */
+const bigtime_t kResolveLimit = 90 * 1000000LL;
+
 // Receives a plugin's reply in a port owned by sen_server. A synchronous
 // BMessenger::SendMessage() with reply hands ownership of the reply port to the
 // target's team, so a plugin that quits right after replying (as they all do)
@@ -234,10 +240,14 @@ public:
         release_sem(fSem);
     }
 
-    status_t WaitForReply(BMessage* reply, team_id pluginTeam)
+    /** @p limit is the longest time to wait in microseconds, 0 for as long as the plugin runs */
+    status_t WaitForReply(BMessage* reply, team_id pluginTeam, bigtime_t limit = 0)
     {
+        const bigtime_t start = system_time();
         for (;;) {
             status_t status = acquire_sem_etc(fSem, 1, B_RELATIVE_TIMEOUT, 250000);
+            if (status == B_TIMED_OUT && limit > 0 && system_time() - start > limit)
+                return B_TIMED_OUT;
             if (status == B_TIMED_OUT) {
                 team_info info;
                 if (get_team_info(pluginTeam, &info) == B_OK)
@@ -740,6 +750,27 @@ status_t RelationHandler::ResolveDynamicRelationsWithPlugin(const entry_ref* sou
         }
     }
 
+    // Only a plugin that names this relation type itself (among the types that it handles) is asked: one that handles the supertype "relation" (the navigators that open the target of a
+    // relation) does not know the question and would never answer.
+    {
+        entry_ref pluginRef;
+        bool named = false;
+        if (be_roster->FindApp(pluginSig, &pluginRef) == B_OK) {
+            BFile pluginFile(&pluginRef, B_READ_ONLY);
+            BAppFileInfo appInfo(&pluginFile);
+            BMessage supported;
+            BString each;
+            if (appInfo.InitCheck() == B_OK && appInfo.GetSupportedTypes(&supported) == B_OK) {
+                for (int32 i = 0; supported.FindString("types", i, &each) == B_OK; i++)
+                    named = named || each == relationType;
+            }
+        }
+        if (!named) {
+            spdlog::warn("the navigator {} of the dynamic relation type {} does not name the type: not asked", pluginSig, relationType);
+            return B_OK;
+        }
+    }
+
     // as for self relations: a plugin is a multiple launch application that quits right after it has replied: talk to the instance that is started here
     team_id pluginTeam = -1;
     status_t result = be_roster->Launch(pluginSig, (BMessage*)NULL, &pluginTeam);
@@ -752,17 +783,39 @@ status_t RelationHandler::ResolveDynamicRelationsWithPlugin(const entry_ref* sou
     request.AddRef("refs", sourceRef);
     request.AddString(sen::key::kRelationType, relationType);
 
+    // The Library folders of the entity types of the relation: the plugin may have to make an entity (a place that is missing), and cannot ask the server for the folder, which waits
+    // for its answer. The server knows them: here they are.
+    BMessage config, libraries;
+    if (fConfig != NULL && GetRelationConfig(relationType, &config) == B_OK) {
+        BMessage settings;
+        fConfig->GetConfig(&settings);
+        for (const char* field : {sen::conf::kSourceTypes, sen::conf::kTargetTypes}) {
+            const char* type;
+            for (int32 index = 0; config.FindString(field, index, &type) == B_OK; index++) {
+                BPath folder;
+                std::string context;
+                entry_ref folderRef;
+                if (strncmp(type, "entity/", 7) == 0 && !libraries.HasRef(type)
+                        && sen::library::Resolve(settings, "", type, true, &folder, &context) == B_OK && get_ref_for_path(folder.Path(), &folderRef) == B_OK)
+                    libraries.AddRef(type, &folderRef);
+            }
+        }
+    }
+    request.AddMessage(sensei::key::kLibraries, &libraries);
+
     BMessenger pluginMessenger(pluginSig, pluginTeam);
     BMessage pluginReply;
     PluginReplyCollector* collector = new PluginReplyCollector();
     collector->Run();
     result = pluginMessenger.SendMessage(&request, BMessenger(collector));
     if (result == B_OK)
-        result = collector->WaitForReply(&pluginReply, pluginTeam);
+        result = collector->WaitForReply(&pluginReply, pluginTeam, kResolveLimit);
     if (collector->Lock())
         collector->Quit();
     if (result != B_OK) {
         spdlog::error("failed to communicate with plugin {}: {}", pluginSig, strerror(result));
+        if (result == B_TIMED_OUT)
+            kill_team(pluginTeam);      // (it did not answer: it is not left running)
         return result;
     }
     result = pluginReply.GetInt32(sensei::key::kResult, B_OK);
