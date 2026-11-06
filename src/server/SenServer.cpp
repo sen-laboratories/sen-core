@@ -5,8 +5,11 @@
 
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
+#include <sen/SenSettingsForm.h>
 #include "Cli.h"
 #include "Enrichment.h"
+#include "../config/CoreSettings.h"
+#include "../config/Library.h"
 #include "../deskbar/DeskbarView.h"
 #include "SenServer.h"
 #include "Reply.h"
@@ -194,6 +197,7 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
 	// setup feature-specific handlers for initializing SEN modules and later redirecting messages appropriately
     relationHandler  = new RelationHandler();
     senConfigHandler = new SenConfigHandler();
+    relationHandler->SetConfig(senConfigHandler);
     fUi = new sen::ui::SenUi(senConfigHandler, relationHandler);
     fDeskbarRetry = NULL;
     fDeskbarTries = 0;
@@ -679,6 +683,60 @@ void SenServer::MessageReceived(BMessage* message)
         case sen::cmd::kConfigGet:
         {
             senConfigHandler->GetConfig(reply);
+            break;
+        }
+        // the settings of the server, for the settings window (sen_settings)
+        case sen::cmd::kCoreSettings:
+        case sen::cmd::kCoreSettingsSet:
+        {
+            result = B_OK;
+            // (the server's own settings, or what all plugins share)
+            const bool plugins = strcmp(message->GetString(sen::key::kScope, sen::key::kScopeCore), sen::key::kScopePlugins) == 0;
+            if (message->what == sen::cmd::kCoreSettingsSet) {
+                BMessage changes;
+                std::vector<std::string> refused;
+                result = message->FindMessage(sen::settings::form::kFieldSettings, &changes);
+                if (result == B_OK) {
+                    result = plugins ? sen::core::ApplyPluginSettings(senConfigHandler, changes, &refused)
+                        : sen::core::ApplySettings(senConfigHandler, changes, &refused);
+                }
+                if (!refused.empty()) {
+                    std::string detail = "Refused: ";
+                    for (size_t i = 0; i < refused.size(); i++)
+                        detail += (i > 0 ? ", " : "") + refused[i];
+                    reply->AddString(sen::key::kDetail, detail.c_str());
+                }
+            }
+            // (the answer has the settings as they are now, also after a change)
+            BMessage settings, schema, defaults;
+            if (plugins)
+                sen::core::DescribePluginSettings(senConfigHandler, &settings, &schema, &defaults);
+            else
+                sen::core::DescribeSettings(senConfigHandler, &settings, &schema, &defaults);
+            reply->AddMessage(sen::settings::form::kFieldSettings, &settings);
+            reply->AddMessage(sen::settings::form::kFieldSchema, &schema);
+            reply->AddMessage(sen::settings::form::kFieldDefaults, &defaults);
+            break;
+        }
+        // where a new entity goes: the Library of a context (SenLibrary.h)
+        case sen::cmd::kContextLibrary:
+        {
+            BMessage settings;
+            senConfigHandler->GetConfig(&settings);
+            BPath folder;
+            std::string context;
+            result = sen::library::Resolve(settings, message->GetString(sen::key::kContext, ""), message->GetString(sen::key::kType, ""),
+                message->GetBool(sen::key::kCreate, true), &folder, &context);
+            if (result == B_OK) {
+                entry_ref ref;
+                // (a folder that was not made does not exist: no ref, the path is the answer)
+                if (BEntry(folder.Path()).Exists() && get_ref_for_path(folder.Path(), &ref) == B_OK)
+                    reply->AddRef("refs", &ref);
+                else if (message->GetBool(sen::key::kCreate, true))
+                    result = B_ENTRY_NOT_FOUND;
+                reply->AddString(sen::key::kLibraryPath, folder.Path());
+                reply->AddString(sen::key::kContext, context.c_str());
+            }
             break;
         }
         case sen::cmd::kClassificationAdd:

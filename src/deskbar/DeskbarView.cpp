@@ -188,6 +188,7 @@ DeskbarView::IsServerCommand(uint32 command)
 		case sen::cmd::kUiShowAbout:
 		case sen::cmd::kUiRequestQuit:
 		case sen::cmd::kUiRequestRestart:
+		case sen::cmd::kUiRestartAkita:
 		case sen::cmd::kUiOpenOntologies:
 		case sen::cmd::kUiOpenOntology:
 		case sen::cmd::kUiOpenType:
@@ -696,6 +697,15 @@ DeskbarView::_BuildMenu()
 	menu->AddSeparatorItem();
 	menu->AddItem(new BMenuItem((BString("About") << ellipsis).String(), new BMessage(sen::cmd::kUiShowAbout)));
 	menu->AddItem(new BMenuItem("Restart", new BMessage(sen::cmd::kUiRequestRestart)));
+	// (the file manager of SEN restarts like the server does: a window that shows a stale icon or relation is made again)
+	static const directory_which kBin[] = {B_SYSTEM_BIN_DIRECTORY, B_USER_BIN_DIRECTORY, B_SYSTEM_NONPACKAGED_BIN_DIRECTORY, B_USER_NONPACKAGED_BIN_DIRECTORY};
+	for (directory_which place : kBin) {
+		BPath akita;
+		if (find_directory(place, &akita) == B_OK && akita.Append("akita") == B_OK && BEntry(akita.Path()).Exists()) {
+			menu->AddItem(new BMenuItem("Restart Akita", new BMessage(sen::cmd::kUiRestartAkita)));
+			break;
+		}
+	}
 	menu->AddItem(new BMenuItem("Quit", new BMessage(sen::cmd::kUiRequestQuit)));
 
 	SetTargetOfAllItems(menu, this);

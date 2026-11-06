@@ -12,12 +12,19 @@
 #include <Button.h>
 #include <CheckBox.h>
 #include <Directory.h>
+#include <Entry.h>
+#include <Node.h>
 #include <File.h>
 #include <FilePanel.h>
 #include <Font.h>
 #include <LayoutBuilder.h>
 #include <Messenger.h>
+#include <MessageRunner.h>
 #include <NodeInfo.h>
+#include <NodeMonitor.h>
+#include <Query.h>
+#include <Volume.h>
+#include <VolumeRoster.h>
 #include <ScrollBar.h>
 #include <StringView.h>
 #include <View.h>
@@ -53,6 +60,7 @@ static const uint32 kTestMouse = 'GWtm';	///< the mouse of a test: "screen_where
 #endif
 static const uint32 kDark = 'GWdk';
 static const uint32 kWorkDone = 'GWdn';
+static const uint32 kLiveRefresh = 'GWlr';			///< after a moment of quiet since the last change on the disk
 static const uint32 kOpenNode = 'GWop';
 static const uint32 kOpenRelations = 'GWor';
 static const uint32 kSelectNode = 'GWsl';
@@ -60,6 +68,10 @@ static const uint32 kActivate = 'GWac';
 
 /** the most objects that are shown (the layout and the drawing are made for some thousands, not more) */
 static const size_t kMaxObjects = 2000;
+/** the most nodes that are watched (a team has a limit of monitors; the live query tells of what comes and goes) */
+static const size_t kMaxWatched = 1500;
+/** the quiet that a change has to be followed by (an enrichment writes hundreds of attributes: the graph is read once after it) */
+static const bigtime_t kLiveQuietTime = 700000;
 
 static const char* const kTrackerSignature = "application/x-vnd.Be-TRAK";
 
@@ -160,6 +172,39 @@ public:
 		fNeedFit = true;
 		fAutoFit = true;
 		_SelectionChanged();
+		Invalidate();
+	}
+
+	/** A graph that replaces the one shown because something changed on the disk: the zoom and the place stay, and what was selected stays selected (by its id). */
+	void ReplaceGraph(const sen::graph::Graph& graph)
+	{
+		std::string node, from, to;
+		if (fSelected >= 0 && fSelected < static_cast<int32>(fGraph.Nodes().size()))
+			node = fGraph.Nodes()[fSelected].id;
+		if (fSelectedEdge >= 0 && fSelectedEdge < static_cast<int32>(fGraph.Edges().size())) {
+			const Edge& edge = fGraph.Edges()[fSelectedEdge];
+			from = fGraph.Nodes()[edge.from].id;
+			to = fGraph.Nodes()[edge.to].id;
+		}
+		fGraph = graph;
+		_ClearCard();
+		fHover = fHoverEdge = fSelected = fSelectedEdge = -1;
+		fNeighbors.assign(fGraph.Nodes().size(), false);
+		int32 again = node.empty() ? -1 : fGraph.IndexOf(node);
+		if (again >= 0) {
+			_Select(again);
+		} else if (!from.empty()) {
+			const int32 a = fGraph.IndexOf(from), b = fGraph.IndexOf(to);
+			for (size_t i = 0; i < fGraph.Edges().size() && a >= 0 && b >= 0; i++) {
+				if (fGraph.Edges()[i].from == a && fGraph.Edges()[i].to == b) {
+					_SelectEdge(static_cast<int32>(i));
+					break;
+				}
+			}
+		}
+		_SelectionChanged();
+		if (fAutoFit)
+			fNeedFit = true;
 		Invalidate();
 	}
 
@@ -977,6 +1022,10 @@ GraphWindow::GraphWindow(SenConfigHandler* config)
 	fWorking(false),
 	fTruncated(false),
 	fObjects(0),
+	fLiveRun(false),
+	fCollecting(false),
+	fLiveAgain(false),
+	fLiveRunner(NULL),
 	fHasFocus(false)
 {
 	fView = new GraphView();
@@ -1030,6 +1079,79 @@ GraphWindow::~GraphWindow()
 	// (the worker quits when the work that it is doing is done: the window does not wait for it)
 	fWorker->Finish();
 	delete fSavePanel;
+	delete fLiveRunner;
+}
+
+
+bool
+GraphWindow::QuitRequested()
+{
+	_StopWatching();
+	return true;
+}
+
+
+void
+GraphWindow::_StopWatching()
+{
+	stop_watching(BMessenger(this));
+	for (BQuery* query : fQueries)
+		delete query;
+	fQueries.clear();
+}
+
+
+// The nodes of the graph are watched for what changes in them (an attribute of SEN: the relations, the id; their name), and the objects of SEN by a live query for each volume
+// (a new object, one that is gone). What changes is read again after a moment of quiet, see _Changed().
+void
+GraphWindow::_Watch()
+{
+	stop_watching(BMessenger(this));
+	size_t watched = 0;
+	for (const auto& object : fRefs) {
+		if (watched >= kMaxWatched)
+			break;	// (what is not watched is found by a click on Refresh)
+		BNode node(&object.second);
+		node_ref ref;
+		if (node.InitCheck() == B_OK && node.GetNodeRef(&ref) == B_OK && watch_node(&ref, B_WATCH_ATTR | B_WATCH_NAME, BMessenger(this)) == B_OK)
+			watched++;
+	}
+
+	if (fQueries.empty()) {
+		BVolumeRoster roster;
+		BVolume volume;
+		while (roster.GetNextVolume(&volume) == B_OK) {
+			if (!volume.KnowsQuery())
+				continue;
+			BQuery* query = new BQuery();
+			BString predicate(sen::attr::kId);
+			predicate << "==*";
+			if (query->SetVolume(&volume) == B_OK && query->SetPredicate(predicate.String()) == B_OK && query->SetTarget(BMessenger(this)) == B_OK && query->Fetch() == B_OK)
+				fQueries.push_back(query);
+			else
+				delete query;
+		}
+	}
+}
+
+
+void
+GraphWindow::_ScheduleLive(bigtime_t delay)
+{
+	delete fLiveRunner;
+	fLiveRunner = new BMessageRunner(BMessenger(this), new BMessage(kLiveRefresh), delay, 1);
+}
+
+
+void
+GraphWindow::_Changed(const BMessage* message)
+{
+	if (message->what == B_NODE_MONITOR) {
+		// of the attributes only those of SEN count (the relations, the ids): a thumbnail or the position of an icon does not change the graph
+		if (message->GetInt32("opcode", 0) == B_ATTR_CHANGED && strncmp(message->GetString("attr", ""), "SEN:", 4) != 0)
+			return;
+	}
+	_ScheduleLive(kLiveQuietTime);
 }
 
 
@@ -1113,6 +1235,18 @@ GraphWindow::MessageReceived(BMessage* message)
 		case kWorkDone:
 			_Done(message);
 			break;
+		case B_NODE_MONITOR:
+		case B_QUERY_UPDATE:
+			_Changed(message);
+			break;
+		case kLiveRefresh:
+			delete fLiveRunner;
+			fLiveRunner = NULL;
+			if (fWorking)
+				fLiveAgain = true;
+			else
+				_Start(true, true);
+			break;
 		case kOpenNode:
 			_Open(message);
 			break;
@@ -1174,13 +1308,16 @@ RunWork(WorkRequest* request)
 
 
 void
-GraphWindow::_Start(bool collect)
+GraphWindow::_Start(bool collect, bool live)
 {
 	if (fWorking)
 		return;
 	fWorking = true;
+	fLiveRun = live;
+	fCollecting = collect;
 	fRefresh->SetEnabled(false);
-	fStatus->SetText(collect ? "Reading the objects" B_UTF8_ELLIPSIS : "Laying out" B_UTF8_ELLIPSIS);
+	if (!live)
+		fStatus->SetText(collect ? "Reading the objects" B_UTF8_ELLIPSIS : "Laying out" B_UTF8_ELLIPSIS);
 
 	WorkRequest* request = new WorkRequest;
 	request->collect = collect;
@@ -1232,11 +1369,17 @@ GraphWindow::_Done(BMessage* message)
 	fRefs = result->refs;
 	fTruncated = result->truncated;
 	fObjects = result->objects;
+	const bool live = fLiveRun;
+	if (fCollecting)
+		_Watch();
 
 	if (result->shown.Nodes().empty()) {
 		fView->SetMessage(result->all.Nodes().empty() ? "There are no objects yet" : "No object has a relation yet (see the choices above)");
 	}
-	fView->SetGraph(result->shown);
+	if (live)
+		fView->ReplaceGraph(result->shown);
+	else
+		fView->SetGraph(result->shown);
 
 	BString status;
 	status << static_cast<int32>(result->shown.Nodes().size()) << " of " << static_cast<int32>(fAll.Nodes().size()) << " objects, "
@@ -1247,6 +1390,11 @@ GraphWindow::_Done(BMessage* message)
 	fStatus->SetText(status.String());
 	delete result;
 	_ApplyFocus();
+	if (fLiveAgain) {
+		// (something changed while the objects were read)
+		fLiveAgain = false;
+		_ScheduleLive(kLiveQuietTime / 2);
+	}
 }
 
 
@@ -1256,18 +1404,31 @@ GraphWindow::_ApplyFocus()
 	if (!fHasFocus || fWorking)
 		return;
 
+	// The file is known by its id. It may be given as a link (the folders of the relations in Akita, "Open related", hold links to the files) or as another entry of the same
+	// file than the one that was read: the id is read from the file itself, and the entry only decides when the file has none.
 	std::string id;
-	for (const auto& object : fRefs) {
-		if (object.second == fFocusRef) {
-			id = object.first;
-			break;
+	{
+		BEntry entry(&fFocusRef, true);
+		BNode node(&entry);
+		char text[B_ATTR_NAME_LENGTH];
+		ssize_t length = node.InitCheck() == B_OK ? node.ReadAttr(sen::attr::kId, B_STRING_TYPE, 0, text, sizeof(text) - 1) : -1;
+		if (length > 0) {
+			text[length] = '\0';
+			id = text;
 		}
 	}
 	if (id.empty()) {
-		// not an object of SEN (it has no SEN:ID), or not read
-		fHasFocus = false;
+		for (const auto& object : fRefs) {
+			if (object.second == fFocusRef) {
+				id = object.first;
+				break;
+			}
+		}
+	}
+	if (id.empty()) {
+		// not an object of SEN (it has no SEN:ID), or not read; the file is looked for again when the graph changes (a file gets its id and relations when it is enriched)
 		BString status(fFocusRef.name);
-		status << " is no object of SEN: it has no relations.";
+		status << " has no relations.";
 		fStatus->SetText(status.String());
 		return;
 	}
@@ -1281,11 +1442,22 @@ GraphWindow::_ApplyFocus()
 			_Start(false);
 			return;
 		}
-		fHasFocus = false;
+		if (fAll.IndexOf(id) < 0 && !fTruncated) {
+			// (everything is shown and the file is not in it: nothing is related to it)
+			BString status(fFocusRef.name);
+			status << " has no relations.";
+			fStatus->SetText(status.String());
+		}
 		return;
 	}
 	fHasFocus = false;
 	fView->Focus(id.c_str());
+	const int32 node = fView->Graph().IndexOf(id);
+	if (node >= 0 && fView->Graph().Nodes()[node].degree == 0) {
+		BString status(fFocusRef.name);
+		status << " has no relations.";
+		fStatus->SetText(status.String());
+	}
 }
 
 

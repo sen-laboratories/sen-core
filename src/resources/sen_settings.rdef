@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 SEN Labs e.U.
+
+resource app_signature "application/x-vnd.sen-labs.sen-settings";
+
+resource app_flags B_SINGLE_LAUNCH;
+
+resource app_version {
+	 major = 2,
+	 middle = 0,
+	 minor = 0,
+	 // the version is the one of the server (see sen_server.rdef): the same package
+	 variety = B_APPV_DEVELOPMENT,
+	 internal = 1,
+	 short_info = "SEN Settings",
+	 long_info = "The settings of SEN and its plugins."
+};

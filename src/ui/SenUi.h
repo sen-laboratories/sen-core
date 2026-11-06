@@ -35,7 +35,7 @@ private:
 	void			_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate);
 	BWindow*		_MakeInfo();
 	BWindow*		_MakeCheck();
-	BWindow*		_MakeSettings();
+	void			_ShowSettings();
 	BWindow*		_MakeAbout();
 	BWindow*		_MakeGraph();
 
@@ -49,6 +49,8 @@ private:
 	void			_AskToQuit();
 	void			_Quit();
 	void			_Restart();
+	/** restarts Akita with its own command (`akita restart`), which quits it and starts it again */
+	void			_RestartAkita();
 	void			_OpenContexts();
 	void			_OpenOntologies();
 	void			_OpenOntology(const BMessage* message);
@@ -59,7 +61,6 @@ private:
 	RelationHandler*	fRelations;
 	BMessenger			fInfo;
 	BMessenger			fCheck;
-	BMessenger			fSettings;
 	BMessenger			fAbout;
 	BMessenger			fGraph;
 	/** @brief When the server was asked to stop but is no service of the launch daemon, it quits by itself after a moment. */

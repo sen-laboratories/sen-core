@@ -48,6 +48,18 @@ int32 CountTargets(const BMessage& relations);
 status_t AddSet(BMessage* relations, const char* targetId, const BMessage& properties, BString* relationId);
 
 /**
+ * @brief Gives the set that is the same as @p properties its provenance, if it has none (a relation that was made before relations had one).
+ *
+ * Who made a relation does not make it another relation (see AddSet()); the first creator stays, so only a set without provenance is changed.
+ *
+ * @param relations  the relations of one type of a file
+ * @param targetId   the `SEN:ID` of the target
+ * @param properties the properties of the relation that is made again, with its provenance
+ * @return true if a set was changed (the relations have to be stored)
+ */
+bool FillProvenance(BMessage* relations, const char* targetId, const BMessage& properties);
+
+/**
  * @brief Find the set of one relation.
  *
  * @param relationId the relation id, or empty if the target has only one set

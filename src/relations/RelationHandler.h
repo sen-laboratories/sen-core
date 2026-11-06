@@ -20,6 +20,7 @@
 
 
 namespace sen { class AttrSnapshot; }
+class SenConfigHandler;
 
 class RelationHandler : public BHandler {
 
@@ -28,6 +29,8 @@ public:
          *  relations (the supertype), see AssignPreferredNavigator. Done when the server starts. */
         void        AssignMissingNavigators();
         RelationHandler();
+        /** the settings of the server: the current context and whether it counts as sticky (SEN:associateCurrentContext) */
+        void        SetConfig(SenConfigHandler* config) { fConfig = config; }
 
         status_t    AddRelation             (const BMessage* message, BMessage* reply);
         status_t    GetCompatibleRelations  (const BMessage* message, BMessage* reply);
@@ -101,6 +104,7 @@ protected:
                                           BMessage *pluginResult);
 
 private:
+        SenConfigHandler*   fConfig = NULL;
         status_t    ReadRelationsOfType(const entry_ref* ref, const char* relationType, BMessage* relations,
                                                 BMessage* idToRefMap = NULL, BStringList* targetIds = NULL);
         status_t    ReadRelationNames(const entry_ref* ref, BStringList* relations);

@@ -23,6 +23,7 @@
 #include <String.h>
 
 #include <sen/Sen.h>
+#include <sen/SenLibrary.h>
 
 using namespace sen::stats;
 
@@ -255,6 +256,38 @@ MigrateOptional(const char* word, bool dryRun)
 	return 2;
 }
 
+/** `--library [--create] [--context <name>] [<type>]`: where new entities go; the type is an entity type or a short name (person, book, movie) */
+int
+Library(int argc, char* argv[])
+{
+	bool create = false;
+	const char* context = NULL;
+	BString type;
+	for (int i = 2; i < argc; i++) {
+		if (strcmp(argv[i], "--create") == 0)
+			create = true;
+		else if (strcmp(argv[i], "--context") == 0 && i + 1 < argc)
+			context = argv[++i];
+		else if (strchr(argv[i], '/') != NULL)
+			type = argv[i];
+		else
+			type << "entity/x-vnd.sen-labs.entity." << argv[i];
+	}
+	BString path;
+	status_t result = sen::library::PathFor(type.IsEmpty() ? NULL : type.String(), &path, context, create);
+	if (result == B_NAME_NOT_FOUND) {
+		fprintf(stderr, "the SEN server is not running.\n");
+		return 1;
+	}
+	if (result != B_OK) {
+		fprintf(stderr, "no Library: %s\n", strerror(result));
+		return 1;
+	}
+	printf("%s\n", path.String());
+	return 0;
+}
+
+
 void
 Usage(FILE* out, const char* program)
 {
@@ -269,6 +302,8 @@ Usage(FILE* out, const char* program)
 		"             (--migrate --dry-run only counts; the server runs the steps itself when it starts)\n"
 		"  --migrate <type>  a change that adds to what other programs keep, for the files of a type (a short name like person, or application/x-person):\n"
 		"             the server asks the user first, this is asking for it (--migrate --dry-run <type> counts)\n"
+		"  --library [--create] [--context <name>] [<type>]  where new entities go: the Library of a context (the current one), or the folder of an\n"
+		"             entity type in it (a type like entity/x-vnd.sen-labs.entity.person, or person, book, movie); needs the server\n"
 		"  --help     this text\n",
 		program);
 }
@@ -291,6 +326,8 @@ RunCommandLine(int argc, char* argv[])
 		return Types();
 	if (strcmp(option, "--check") == 0)
 		return Check();
+	if (strcmp(option, "--library") == 0)
+		return Library(argc, argv);
 	if (strcmp(option, "--migrate") == 0) {
 		// (--dry-run and the name of a type, in any order)
 		bool dryRun = false;

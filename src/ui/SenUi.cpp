@@ -11,7 +11,6 @@
 #include "InfoWindow.h"
 #include "QueryFiles.h"
 #include "../stats/SenStats.h"
-#include "SettingsWindow.h"
 
 #include "../config/SenConfigHandler.h"
 #include "../relations/IdListAttr.h"
@@ -70,7 +69,7 @@ SenUi::Handle(BMessage* message)
 			_Show(&fCheck, &SenUi::_MakeCheck, 'CWac');
 			return true;
 		case sen::cmd::kUiShowSettings:
-			_Show(&fSettings, &SenUi::_MakeSettings, 'SWac');
+			_ShowSettings();
 			return true;
 		case sen::cmd::kUiShowAbout:
 			_Show(&fAbout, &SenUi::_MakeAbout, 'ABac');
@@ -107,6 +106,9 @@ SenUi::Handle(BMessage* message)
 		case sen::cmd::kUiRequestRestart:
 			_Restart();
 			return true;
+		case sen::cmd::kUiRestartAkita:
+			_RestartAkita();
+			return true;
 		case kQuitFallback:
 			be_app->PostMessage(B_QUIT_REQUESTED);
 			return true;
@@ -130,7 +132,7 @@ SenUi::Handle(BMessage* message)
 void
 SenUi::CloseWindows()
 {
-	BMessenger* windows[] = {&fInfo, &fCheck, &fSettings, &fAbout, &fGraph};
+	BMessenger* windows[] = {&fInfo, &fCheck, &fAbout, &fGraph};
 	for (BMessenger* window : windows) {
 		if (window->IsValid())
 			window->SendMessage(B_QUIT_REQUESTED);
@@ -158,7 +160,12 @@ SenUi::_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate)
 
 BWindow* SenUi::_MakeInfo() { return new InfoWindow(); }
 BWindow* SenUi::_MakeCheck() { return new CheckWindow(); }
-BWindow* SenUi::_MakeSettings() { return new SettingsWindow(fConfig); }
+/** The settings are shown by the application sen_settings, not by the server: a fault in a form cannot take the server down. It is a single launch application: a second request brings its window to the front. */
+void
+SenUi::_ShowSettings()
+{
+	_Report("show the settings", be_roster->Launch(sen::kSettingsSignature));
+}
 BWindow* SenUi::_MakeAbout() { return new AboutWindow(); }
 BWindow* SenUi::_MakeGraph() { return new GraphWindow(fConfig); }
 
@@ -465,6 +472,25 @@ SenUi::_Restart()
 	system(command.String());
 
 	be_app->PostMessage(B_QUIT_REQUESTED);
+}
+
+
+/** Restarts Akita: the command `akita restart` of its package quits the file manager that runs (as a service of the launch daemon) and starts it again, in a command of its own,
+ *  which does not wait for it. */
+void
+SenUi::_RestartAkita()
+{
+	static const directory_which places[] = {B_SYSTEM_BIN_DIRECTORY, B_USER_BIN_DIRECTORY, B_SYSTEM_NONPACKAGED_BIN_DIRECTORY, B_USER_NONPACKAGED_BIN_DIRECTORY};
+	for (directory_which place : places) {
+		BPath akita;
+		if (find_directory(place, &akita) != B_OK || akita.Append("akita") != B_OK || !BEntry(akita.Path()).Exists())
+			continue;
+		BString command(Quoted(akita.Path()));
+		command << " restart >/dev/null 2>&1 &";
+		system(command.String());
+		return;
+	}
+	_Report("restart Akita", B_ENTRY_NOT_FOUND);
 }
 
 

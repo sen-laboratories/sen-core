@@ -5,18 +5,28 @@
 #include "RelationSets.h"
 
 #include <sen/Sen.h>
+#include <sen/SenOntoCore.h>
 
 namespace sen {
 namespace relation {
 
 namespace {
 
-/** the properties without the relation id: what makes two sets the same */
+/** the properties without the relation id: what is stored */
 BMessage
 WithoutId(const BMessage& set)
 {
     BMessage copy(set);
     copy.RemoveName(key::kRelationId);
+    return copy;
+}
+
+/** the properties that make two sets the same: without the relation id, and without the provenance (who made a relation does not make it another one) */
+BMessage
+Identity(const BMessage& set)
+{
+    BMessage copy(WithoutId(set));
+    copy.RemoveName(onto::core::attr::kRelProvenance);
     return copy;
 }
 
@@ -57,6 +67,27 @@ IsEmpty(const BMessage& relations)
     return CountTargets(relations) == 0;
 }
 
+bool
+FillProvenance(BMessage* relations, const char* targetId, const BMessage& properties)
+{
+    const char* creator = properties.GetString(onto::core::attr::kRelProvenance, "");
+    if (creator[0] == '\0')
+        return false;
+
+    const BMessage wanted = Identity(properties);
+    const int32 count = CountSets(*relations, targetId);
+    for (int32 i = 0; i < count; i++) {
+        BMessage existing;
+        if (relations->FindMessage(targetId, i, &existing) != B_OK || existing.HasString(onto::core::attr::kRelProvenance))
+            continue;
+        if (Identity(existing).HasSameData(wanted)) {
+            existing.AddString(onto::core::attr::kRelProvenance, creator);
+            return relations->ReplaceMessage(targetId, i, &existing) == B_OK;
+        }
+    }
+    return false;
+}
+
 status_t
 AddSet(BMessage* relations, const char* targetId, const BMessage& properties, BString* relationId)
 {
@@ -69,7 +100,7 @@ AddSet(BMessage* relations, const char* targetId, const BMessage& properties, BS
         BMessage existing;
         if (relations->FindMessage(targetId, i, &existing) != B_OK)
             continue;
-        if (WithoutId(existing).HasSameData(wanted)) {
+        if (Identity(existing).HasSameData(Identity(wanted))) {
             relationId->SetTo(existing.GetString(key::kRelationId, ""));
             return B_NAME_IN_USE;
         }

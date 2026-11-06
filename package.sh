@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 APP=bin/sen_server
 RDEF=src/resources/sen_server.rdef
 [ -f "$APP" ] || { echo "$APP not found, run ./build.sh first" >&2; exit 1; }
+[ -f bin/sen_settings ] || { echo "bin/sen_settings not found, run ./build.sh first" >&2; exit 1; }
 
 # version from the app_version resource, a development build becomes a pre-release, a beta is 1.0.0~beta1
 major=$(sed -n 's/^[[:space:]]*major[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' $RDEF | head -n1)
@@ -35,7 +36,7 @@ rm -rf $STAGE
 mkdir -p $STAGE/bin $STAGE/data/user_launch $STAGE/data/sen-core $STAGE/documentation/packages/sen_core
 
 # the server, and the command "sen" for its options (it starts the server by its path in the package)
-cp -a $APP $STAGE/bin/
+cp -a $APP bin/sen_settings $STAGE/bin/
 ./create-sen-wrapper.sh $STAGE/bin/sen_server $STAGE/bin /boot/system/bin/sen_server >/dev/null
 
 # the server is started with the session, like the mail server (it waits for the Deskbar to put its item there)
