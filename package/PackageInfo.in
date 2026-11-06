@@ -13,9 +13,11 @@ packager		"Gregor B. Rosenauer <semantic.extensions@gmail.com>"
 vendor			"SEN Labs e.U."
 copyrights		{
 	"2020-2026 SEN Labs e.U."
+	"Library Folder icon: Matthew McClintock"
 }
 licenses		{
 	"MIT"
+	"Design Science License"
 }
 urls			{
 	"https://sen-labs.org"

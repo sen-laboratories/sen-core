@@ -9,9 +9,12 @@
 
 #include <Directory.h>
 #include <Entry.h>
+#include <File.h>
 #include <FindDirectory.h>
 #include <MimeType.h>
 #include <Node.h>
+#include <TypeConstants.h>
+#include <fs_attr.h>
 #include <String.h>
 
 #include <stdio.h>
@@ -25,6 +28,9 @@ namespace library {
 // rwxr-xr-x (a mode: B_READ_WRITE is a flag of an open file, not this)
 static const mode_t kFolderMode = S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
 
+// the attribute that holds the vector icon of a node
+static const char* const kIconAttribute = "BEOS:ICON";
+
 
 /** The text of an attribute of a node, empty if it has none. */
 static std::string
@@ -37,6 +43,54 @@ StringAttribute(const BPath& path, const char* attribute)
 	return std::string();
 }
 
+
+/**
+ * The vector icon of a Library folder, read from the data file of the package (sen-core/icons/library-folder.hvif in a data folder). The icon is a separate work by another
+ * author under its own license (data/icons/library-folder.COPYING), which is why it is a file and is not compiled into the program. Empty if it is not found.
+ */
+static std::string
+LibraryFolderIcon()
+{
+	static const directory_which places[] = {B_SYSTEM_NONPACKAGED_DATA_DIRECTORY, B_USER_NONPACKAGED_DATA_DIRECTORY, B_SYSTEM_DATA_DIRECTORY, B_USER_DATA_DIRECTORY};
+	for (directory_which which : places) {
+		BPath path;
+		if (find_directory(which, &path) != B_OK || path.Append("sen-core/icons/library-folder.hvif") != B_OK)
+			continue;
+		BFile file(path.Path(), B_READ_ONLY);
+		off_t size = 0;
+		if (file.InitCheck() != B_OK || file.GetSize(&size) != B_OK || size <= 0 || size > 65536)
+			continue;
+		std::string icon((size_t)size, '\0');
+		if (file.Read(&icon[0], (size_t)size) == size)
+			return icon;
+	}
+	return std::string();
+}
+
+
+/**
+ * Makes the folder of a Library if it is not there and gives it the icon of a Library, unless it has an icon (one that the user chose stays).
+ * Used for the Library in the home folder and for that of a context, not for the folders of the types in it.
+ */
+static status_t
+MakeLibraryFolder(const BPath& path)
+{
+	if (!BEntry(path.Path()).Exists()) {
+		status_t result = create_directory(path.Path(), kFolderMode);
+		if (result != B_OK && result != B_FILE_EXISTS)
+			return result;
+	}
+
+	BNode node(path.Path());
+	attr_info info;
+	if (node.InitCheck() == B_OK && node.GetAttrInfo(kIconAttribute, &info) != B_OK) {
+		// (the icon is a nicety: without the file, or on a volume without attributes, the folder stays as it is)
+		const std::string icon = LibraryFolderIcon();
+		if (!icon.empty())
+			node.WriteAttr(kIconAttribute, B_VECTOR_ICON_TYPE, 0, icon.data(), icon.size());
+	}
+	return B_OK;
+}
 
 /** A name that is one folder: no slash, no leading or trailing blanks. */
 static std::string
@@ -145,6 +199,20 @@ Resolve(const BMessage& settings, const char* context, const char* type, bool cr
 		return result;
 	if (contextUsed != NULL)
 		*contextUsed = name;
+
+	if (create) {
+		// the Library of the context and, if it is one inside the Library of the home folder, that one too: both get the icon of a Library
+		BPath root, home;
+		if (find_directory(B_USER_DIRECTORY, &home) == B_OK && root.SetTo(home.Path(), libraryName.c_str()) == B_OK
+				&& strncmp(folder->Path(), root.Path(), strlen(root.Path())) == 0 && folder->Path()[strlen(root.Path())] == '/') {
+			result = MakeLibraryFolder(root);
+			if (result != B_OK)
+				return result;
+		}
+		result = MakeLibraryFolder(*folder);
+		if (result != B_OK)
+			return result;
+	}
 
 	if (type != NULL && type[0] != '\0') {
 		const std::string typeFolder = FolderNameOf(type);
