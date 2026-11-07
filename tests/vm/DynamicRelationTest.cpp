@@ -17,6 +17,7 @@
 
 #include <map>
 #include <set>
+#include <thread>
 #include <vector>
 
 #include <sen/SenOntoSpatial.h>
@@ -273,6 +274,41 @@ TEST(AStoredRelationIsNotAffectedByTheDynamicOnes)
 	CHECK(types.count(kReference) == 1);
 	CHECK(types.count(kDynamicType) == 1);
 	CHECK_EQ(Sets(a, kReference, IdOf(b)), 1);
+	RemoveType(kDynamicType);
+}
+
+TEST(TheServerIsNotHeldUpWhileANavigatorWorks)
+{
+	// the navigator takes four seconds (the folder has a file "slow"); the server asks it from the channel of that plugin, and answers other requests at the same time
+	InstallType(kDynamicType, kStubSignature);
+	Fixture f("dyn-channel", 0);
+	entry_ref place = f.Create("place", kSourceFileType);
+	f.Create("target-a", "text/plain");
+	f.Create("slow", "text/plain");
+
+	Answer slow;
+	bigtime_t slowTime = 0;
+	std::thread asker([&]() {
+		bigtime_t start = system_time();
+		slow = Get(place, kDynamicType);
+		slowTime = system_time() - start;
+	});
+	snooze(1000000);	// (the navigator is at work now)
+
+	bigtime_t start = system_time();
+	BMessage all = Send(sen::cmd::kRelationsGetAll, &place, NULL);
+	bigtime_t quick = system_time() - start;
+	CHECK_EQ(all.GetInt32(sen::key::kResult, -1), (int32) B_OK);
+	CHECK(quick < 1500000);			// (not after the navigator: it has three more seconds)
+
+	// a message of the kind that a plugin sends meanwhile (a new file is put into the context) is handled as well
+	start = system_time();
+	BMessage sticky = Send(sen::cmd::kClassificationApplySticky, &place, NULL);
+	CHECK(system_time() - start < 1500000);
+
+	asker.join();
+	CHECK(slowTime >= 3500000);		// (the test did overlap with the work of the navigator)
+	CHECK_EQ(slow.labels.size(), (size_t) 1);
 	RemoveType(kDynamicType);
 }
 

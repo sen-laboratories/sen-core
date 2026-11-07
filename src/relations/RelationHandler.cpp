@@ -6,6 +6,9 @@
 #include "../server/Dump.h"
 #include <AppFileInfo.h>
 #include <cassert>
+#include <Autolock.h>
+#include <Locker.h>
+#include <Mime.h>
 #include <fs_attr.h>
 #include <FindDirectory.h>
 #include <Node.h>
@@ -22,6 +25,7 @@
 #include "QueryUtil.h"
 #include "RelationSets.h"
 #include "../server/Reply.h"
+#include "../plugins/PluginChannels.h"
 #include <sen/Sen.h>
 #include <spdlog/spdlog.h>
 
@@ -45,7 +49,60 @@ SourcesOf(const BMessage* message)
     return sources;
 }
 
+static bool IsResolvedByPlugin(const BMessage& relationConfig);
+
+BString RelationHandler::PluginSignatureFor(const BMessage* message)
+{
+    switch (message->what) {
+        case sen::cmd::kRelationsGet:
+        {
+            // a dynamic relation is worked out by the navigator of its type
+            BString relationType;
+            BMessage config;
+            if (message->FindString(sen::key::kRelationType, &relationType) != B_OK || GetRelationConfig(relationType.String(), &config) != B_OK
+                    || !IsResolvedByPlugin(config))
+                return BString();
+            char signature[B_MIME_TYPE_LENGTH];
+            if (BMimeType(relationType.String()).GetPreferredApp(signature) == B_OK)
+                return BString(signature);
+            return BString("sen navigators");       // (no navigator is known yet: the one that is looked for in the request has this channel)
+        }
+        case sen::cmd::kRelationsGetSelf:
+        {
+            // a self relation is worked out by the extractor that the client chose, else the one that is looked for in the request
+            BString plugin;
+            if (message->FindString(sensei::key::kPlugin, &plugin) == B_OK && !plugin.IsEmpty())
+                return plugin;
+            return BString("sen extractors");
+        }
+        default:
+            return BString();
+    }
+}
+
 void RelationHandler::MessageReceived(BMessage* message)
+{
+    // A request that needs a plugin is taken over by the channel of that plugin (a looper and thread of its own) and answered from there: the thread of the server, which
+    // is the one that gets the messages of every client and of the plugins themselves, does not wait for the plugin.
+    const BString plugin = PluginSignatureFor(message);
+    if (!plugin.IsEmpty() && be_app != NULL && be_app->CurrentMessage() == message) {
+        BMessage* detached = be_app->DetachCurrentMessage();
+        if (detached != NULL) {
+            const status_t queued = sen::plugin::Run(plugin.String(), [this, detached]() {
+                HandleRequest(detached);
+                delete detached;
+            });
+            if (queued != B_OK) {
+                HandleRequest(detached);
+                delete detached;
+            }
+            return;
+        }
+    }
+    HandleRequest(message);
+}
+
+void RelationHandler::HandleRequest(BMessage* message)
 {
     BMessage* reply = new BMessage(sen::cmd::kReplyRelations);
     status_t result = B_OK;
@@ -1309,6 +1366,10 @@ BString RelationHandler::GenerateId() {
  */
 status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool createIfMissing)
 {
+    // (a file gets its ID once: the server and the channels of the plugins make them at the same time)
+    static BLocker idLock("sen ids");
+    BAutolock idAutolock(idLock);
+
     status_t result;
     BNode node(ref);
 

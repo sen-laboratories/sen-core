@@ -30,7 +30,7 @@ resource file_types message {
 };
 RDEF
 rc -o "$STUBDIR/stub.rsrc" "$STUBDIR/stub.rdef" && xres -o "$STUBDIR/DynamicStub" "$STUBDIR/stub.rsrc" && mimeset -f "$STUBDIR/DynamicStub"
-g++ -std=c++20 -Wall -Wno-multichar -I$HEADERS -I${SENTO_TESTS:-/Develop/SEN/sento/tests} -o /tmp/dynamic-relation-test $SRC/DynamicRelationTest.cpp -lbe 2>&1 | grep -E "error|Error" | head -20
+g++ -std=c++20 -Wall -Wno-multichar -I$HEADERS -I${SENTO_TESTS:-/Develop/SEN/sento/tests} -o /tmp/dynamic-relation-test $SRC/DynamicRelationTest.cpp -lbe -lpthread 2>&1 | grep -E "error|Error" | head -20
 [ -x "$STUBDIR/DynamicStub" ] && [ -x /tmp/dynamic-relation-test ] || { echo "FAIL the stub or the test did not compile"; touch "$DONE"; exit 1; }
 
 SEN_LOG_LEVEL=info $SERVER > /tmp/sen_server.log 2>&1 &

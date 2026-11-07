@@ -76,11 +76,18 @@ public:
          */
         status_t    ResolveDynamicRelationsWithPlugin(const entry_ref* sourceRef, const char* relationType, BMessage* relations, BMessage* idToRefMap);
 
+/**
+ * The requests that need a plugin are handed to the channel of that plugin (src/plugins/PluginChannels.h) and answered from its thread; the others are handled at once.
+ */
 virtual
         void MessageReceived(BMessage* message);
         ~RelationHandler();
 
 protected:
+        /** handles a request and sends the reply (in the thread that calls it) */
+        void        HandleRequest(BMessage* message);
+        /** the signature of the plugin that a request needs, or the name of the channel for the plugins of a kind if it is not known yet; empty if the request needs no plugin */
+        BString     PluginSignatureFor(const BMessage* message);
         status_t    GetPluginsForTypeAndFeature(const char* mimeType, const char* feature, BMessage* outputTypesToPlugins);
         status_t    GetPluginConfig(const char* pluginSig, entry_ref* pluginRef,
                                             const char* mimeType, BMessage* pluginConfig);

@@ -15,6 +15,8 @@
 #include <Looper.h>
 #include <OS.h>
 
+#include <map>
+#include <string>
 #include <vector>
 
 #include <sen/Sen.h>
@@ -69,14 +71,14 @@ static const bigtime_t kLongestWait = 15 * 60 * 1000000LL;
 /**
  * The queue of the files that are enriched: a looper, which handles one message at a time, in the order in which they came (the message queue of a BLooper is
  * a BMessageQueue). A job is handled until its plugin has ended, so the next one starts when the one before it is done: a plugin may ask the user (BERT
- * chooses between several books), and several windows at once, for different files, cannot be answered. The one queue is for all requests: files of a second
- * request wait for those of the first.
+ * chooses between several books), and several windows at once, for different files, cannot be answered. There is a queue for each plugin, for all requests: files of a
+ * second request for the same plugin wait for those of the first, while another plugin enriches its files at the same time.
  */
 class EnrichQueue : public BLooper {
 public:
-	EnrichQueue()
+	EnrichQueue(const char* plugin)
 		:
-		BLooper("sen enrich queue", B_NORMAL_PRIORITY)
+		BLooper((std::string("sen enrich queue ") + plugin).c_str(), B_NORMAL_PRIORITY)
 	{
 	}
 
@@ -114,13 +116,15 @@ public:
 	}
 };
 
-/** the queue, made when the first file is to be enriched (the server asks from its own thread, one request at a time) */
+/** the queue of a plugin, made when the first file is to be enriched with it (the server asks from its own thread, one request at a time) */
 static EnrichQueue*
-Queue()
+QueueFor(const entry_ref& plugin)
 {
-	static EnrichQueue* queue = NULL;
+	static std::map<std::string, EnrichQueue*> queues;
+	const std::string key = std::to_string(plugin.device) + ":" + std::to_string(plugin.directory) + "/" + plugin.name;
+	EnrichQueue*& queue = queues[key];
 	if (queue == NULL) {
-		queue = new EnrichQueue();
+		queue = new EnrichQueue(plugin.name);
 		queue->Run();
 	}
 	return queue;
@@ -192,9 +196,12 @@ Handle(const BMessage& request, BString* detail)
 		return B_NOT_SUPPORTED;
 	}
 
-	// one after the other, in the queue: the server is not held up
-	for (BMessage& job : jobs)
-		Queue()->PostMessage(&job);
+	// one after the other, in the queue of the plugin: the server is not held up
+	for (BMessage& job : jobs) {
+		entry_ref plugin;
+		if (job.FindRef("plugin", &plugin) == B_OK)
+			QueueFor(plugin)->PostMessage(&job);
+	}
 	*detail = BString() << started << " file(s) will be enriched, one after the other";
 	return B_OK;
 }
