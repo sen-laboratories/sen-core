@@ -659,8 +659,7 @@ DeskbarView::_BuildMenu()
 	menu->AddItem(new BMenuItem((BString("Check") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
 	menu->AddItem(new BMenuItem((BString("Settings") << ellipsis).String(), new BMessage(sen::cmd::kUiShowSettings)));
 	menu->AddSeparatorItem();
-	menu->AddItem(new BMenuItem((BString("About") << ellipsis).String(), new BMessage(sen::cmd::kUiShowAbout)));
-	menu->AddItem(new BMenuItem("Restart", new BMessage(sen::cmd::kUiRequestRestart)));
+	menu->AddItem(new BMenuItem("Restart SEN Server", new BMessage(sen::cmd::kUiRequestRestart)));
 	// (the file manager of SEN restarts like the server does: a window that shows a stale icon or relation is made again)
 	static const directory_which kBin[] = {B_SYSTEM_BIN_DIRECTORY, B_USER_BIN_DIRECTORY, B_SYSTEM_NONPACKAGED_BIN_DIRECTORY, B_USER_NONPACKAGED_BIN_DIRECTORY};
 	for (directory_which place : kBin) {
@@ -670,6 +669,8 @@ DeskbarView::_BuildMenu()
 			break;
 		}
 	}
+	menu->AddSeparatorItem();
+	menu->AddItem(new BMenuItem((BString("About") << ellipsis).String(), new BMessage(sen::cmd::kUiShowAbout)));
 	menu->AddItem(new BMenuItem("Quit", new BMessage(sen::cmd::kUiRequestQuit)));
 
 	SetTargetOfAllItems(menu, this);

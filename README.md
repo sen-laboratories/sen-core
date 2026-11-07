@@ -45,7 +45,7 @@ them on every volume at start and when a volume is mounted. `create-sen-indices.
 ### The Deskbar item
 
 The server adds an item with the SEN knot to the Deskbar, like the mail server does (`src/deskbar`): a click opens the query with all SEN objects (with the SEN key, Command: the graph of the objects and relations, see below), the
-menu gives access to contexts, classifications, the Info and Check windows, the ontologies, the graph and the Settings, and has Restart and Quit. Most windows are shown by the
+menu gives access to contexts, classifications, the Info and Check windows, the ontologies, the graph and the Settings, and has Restart SEN Server, Restart Akita, About and Quit. Most windows are shown by the
 server (the item only sends messages, `src/ui`); the Settings window is the application `sen_settings` (`src/settings`) that the server starts: a tree of Core and the plugins, and the form of Shoji for the selected one (sen_core requires Shoji for it; a Shoji that is too old says so in the window). Core's settings come from the server (`kCoreSettings`, `kCoreSettingsSet`, `src/config/CoreSettings.cpp`), those of a plugin from the plugin itself (`sensei::cmd::kSettings`): the window never reads or writes a settings file, the statistics are shared with the command line (`src/stats`). The Context menu lists the contexts (the folders in `~/config/settings/sen/contexts`, with their icon, the current one marked; choosing one makes it the current one), the
 Ontologies menu the installed ones with their icon, each opening down to its types and their attributes.
 

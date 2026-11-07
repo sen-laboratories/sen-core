@@ -312,6 +312,33 @@ TEST(TheServerIsNotHeldUpWhileANavigatorWorks)
 	RemoveType(kDynamicType);
 }
 
+TEST(TheConfigOfASlowRelationIsAnsweredAtOnce)
+{
+	// the file manager makes the folder of a relation that a plugin works out first (with the config, asked for with kConfigOnly) and fetches the targets meanwhile:
+	// the config comes at once although the navigator takes four seconds (the folder has a file "slow")
+	InstallType(kDynamicType, kStubSignature);
+	Fixture f("dyn-config-only", 0);
+	entry_ref place = f.Create("place", kSourceFileType);
+	f.Create("target-a", "text/plain");
+	f.Create("slow", "text/plain");
+
+	BMessage ask(sen::cmd::kRelationsGet);
+	ask.AddRef(sen::key::kSourceRef, &place);
+	ask.AddString(sen::key::kRelationType, kDynamicType);
+	ask.AddBool(sen::key::kConfigOnly, true);
+	BMessage reply;
+	BMessenger server(sen::kServerSignature);
+	bigtime_t start = system_time();
+	CHECK(server.SendMessage(&ask, &reply, 10000000, 10000000) == B_OK);
+	CHECK(system_time() - start < 1500000);
+	CHECK_EQ(reply.GetInt32(sen::key::kResult, -1), (int32) B_OK);
+	BMessage configs, config;
+	CHECK(reply.FindMessage(sen::key::kRelationConfigMap, &configs) == B_OK && configs.FindMessage(kDynamicType, &config) == B_OK);
+	CHECK(config.GetBool(sen::conf::kDynamic, false));
+	CHECK(!reply.HasMessage(sen::key::kRelations));			// (no targets: the navigator was not asked)
+	RemoveType(kDynamicType);
+}
+
 int
 main()
 {

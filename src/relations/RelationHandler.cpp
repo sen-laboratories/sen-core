@@ -56,6 +56,8 @@ BString RelationHandler::PluginSignatureFor(const BMessage* message)
     switch (message->what) {
         case sen::cmd::kRelationsGet:
         {
+            if (message->GetBool(sen::key::kConfigOnly, false))
+                return BString();       // (nothing is asked of a plugin: answered at once)
             // a dynamic relation is worked out by the navigator of its type
             BString relationType;
             BMessage config;
@@ -750,6 +752,14 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
     if (status == B_OK) {
         reply->AddMessage(sen::key::kRelationConfigMap, &relationConfigMap);
         status = relationConfigMap.FindMessage(relationType, &relationConfig);
+    }
+
+    // only the config is wanted (the file manager makes the folder of a slow relation first and asks for its targets then)
+    if (status == B_OK && message->GetBool(sen::key::kConfigOnly, false)) {
+        char sourceId[sen::id::kLength];
+        if (GetOrCreateId(&sourceRef, sourceId, false) == B_OK)
+            reply->AddString(sen::key::kSourceId, sourceId);
+        return B_OK;
     }
 
     BMessage relations;
