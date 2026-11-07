@@ -40,4 +40,12 @@ objects.*
 examples/*
 *.hpkg
 package-build/
+# macOS leftovers: never commit
 .DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.fseventsd
+__MACOSX/
