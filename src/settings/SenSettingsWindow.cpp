@@ -64,6 +64,9 @@ enum {
 	kMsgTimeout		= 'SStm'	// nothing came for the request: serial
 };
 
+// the location server (Basho, github.com/sen-laboratories/basho): independent of SEN; its settings are shown here as those of a plugin are
+const char* const kLocationServerSignature = "application/x-vnd.basho-location_server";
+
 const bigtime_t kAnswerTimeout = 8000000;		// a plugin that has to be started may take a while
 const bigtime_t kStartTimeout = 12000000;	// (a plugin that was started for the request answers to the window, which waits this long)
 
@@ -449,6 +452,14 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	const bool hasServer = be_roster->FindApp(sen::kServerSignature, &server) == B_OK;
 	fTree->AddItem(new NodeItem("SEN", 0, false, NULL, "", hasServer ? &server : NULL));
 	fTree->AddItem(new NodeItem("Core", 1, true, sen::key::kScopeCore, "", hasServer ? &server : NULL));
+	// Location: the settings of the location server (Basho), if it is installed. It is not a plugin and not part of SEN, but it speaks the same settings protocol: the window asks
+	// it as it asks a plugin, and what the user changes goes back to it.
+	entry_ref locationServer;
+	int32 locationIndex = -1;
+	if (be_roster->FindApp(kLocationServerSignature, &locationServer) == B_OK) {
+		fTree->AddItem(new NodeItem("Location", 1, true, NULL, kLocationServerSignature, &locationServer));
+		locationIndex = fTree->CountItems() - 1;
+	}
 	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, "", NULL, sen::onto::core::mime::kPlugin));
 
 	BString givenSignature;
@@ -501,6 +512,8 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	}
 	if (node != NULL && strcmp(node, "plugins") == 0 && pluginFile == NULL)
 		select = 2;
+	if (node != NULL && strcmp(node, "location") == 0 && pluginFile == NULL && locationIndex >= 0)
+		select = locationIndex;
 	// (selected when the window is built: the message of the selection needs the form)
 	fFirstSelect = select;
 }
@@ -672,10 +685,17 @@ SettingsWindow::_Request(const Target& target)
 	ask.AddInt32("serial", serial);
 	std::map<std::string, BMessenger>::iterator session = fSessions.find(target.signature.String());
 	status_t result;
-	if (session != fSessions.end() && session->second.IsValid())
+	if (session != fSessions.end() && session->second.IsValid()) {
 		result = session->second.SendMessage(&ask);
-	else
+	} else if (target.signature == kLocationServerSignature && BMessenger(kLocationServerSignature).IsValid()) {
+		// (a server that runs once, for everybody: it is asked where it is, not started again)
+		result = BMessenger(kLocationServerSignature).SendMessage(&ask);
+	} else {
 		result = be_roster->Launch(&target.file, &ask, &fStartedTeam);
+		// (a single launch application that was started in the meantime has got the message)
+		if (result == B_ALREADY_RUNNING)
+			result = B_OK;
+	}
 	if (result != B_OK) {
 		fWaiting = false;
 		BString text(fName);

@@ -33,7 +33,7 @@ class NoteView;
 class SettingsWindow : public BWindow {
 public:
 					/** @param pluginFile a plugin to show, instead of the copy that is installed (for the developer of a plugin)
-					 *  @param node the node to select at first, `core` (default) or `plugins` */
+					 *  @param node the node to select at first, `core` (default), `plugins` or `location` */
 					SettingsWindow(const entry_ref* pluginFile = NULL, const char* node = NULL);
 	virtual			~SettingsWindow();
 
