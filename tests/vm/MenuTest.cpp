@@ -77,13 +77,15 @@ main()
 
 	int failed = 0;
 	auto check = [&](const char* what, bool ok) { printf("%s %s\n", ok ? "ok  " : "FAIL", what); if (!ok) failed++; };
-	int ontologies = Index(top, "Ontologies"), settings = Index(top, "Settings"), restart = Index(top, "Restart"), quit = Index(top, "Quit");
+	int ontologies = Index(top, "Ontologies"), settings = Index(top, "Settings"), restart = Index(top, "Restart SEN Server"), akita = Index(top, "Restart Akita"), about = Index(top, "About" B_UTF8_ELLIPSIS), quit = Index(top, "Quit");
 	int plugins = Index(top, "Plugins"), graph = Index(top, "Graph" B_UTF8_ELLIPSIS), info = Index(top, "Info" B_UTF8_ELLIPSIS),
 		check_ = Index(top, "Check" B_UTF8_ELLIPSIS);
 	// Plugins, Ontologies, Graph, a separator, then Info, Check and Settings
 	check("Plugins and Ontologies are next to each other, above the windows about SEN", plugins >= 0 && ontologies == plugins + 1
 		&& graph == ontologies + 1 && info == graph + 2 && check_ == info + 1 && settings == check_ + 1);
-	check("Restart is directly above Quit", restart >= 0 && quit == restart + 1);
+	// Settings, a separator, the restart commands (the server, then Akita if it is installed), a separator, About and Quit
+	check("the restart commands follow the separator after Settings", restart == settings + 2 && (akita < 0 || akita == restart + 1));
+	check("About is directly above Quit, after a separator that follows the restart commands", about >= 0 && quit == about + 1 && about == (akita < 0 ? restart : akita) + 2);
 	BMenuItem* item = menu->ItemAt(ontologies);
 	// the menus are items that can be chosen themselves (no "Show all" in them)
 	check("Ontologies can be chosen itself and has Update first", item != NULL && item->Message() != NULL && item->Submenu() != NULL

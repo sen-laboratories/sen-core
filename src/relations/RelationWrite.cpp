@@ -327,6 +327,13 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
         return status;
     }
 
+    // a relation that is worked out when it is asked for (the spatial ones) is stored nowhere: it cannot be made, only found
+    if (relationConfig.GetBool(sen::conf::kDynamic, false) && !relationConfig.GetBool(sen::conf::kSelf, false)) {
+        sen::reply::SetStatus(reply, sen::status::kErrForbidden);
+        sen::reply::SetDetail(reply, (BString("the relation '") << relationType << "' is worked out when it is asked for and cannot be created").String());
+        return B_NOT_ALLOWED;
+    }
+
     // properties are optional
     BMessage properties;
     message->FindMessage(sen::key::kRelationProperties, &properties);

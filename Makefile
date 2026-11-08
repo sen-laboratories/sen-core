@@ -19,6 +19,7 @@ SRCS := src/relations/RelationHandler.cpp \
 	src/migrations/Migrations.cpp \
 	src/server/Cli.cpp \
 	src/server/Enrichment.cpp \
+	src/plugins/PluginChannels.cpp \
 	src/deskbar/DeskbarView.cpp \
 	src/graph/GraphData.cpp \
 	src/ui/AboutWindow.cpp \

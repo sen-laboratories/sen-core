@@ -6,6 +6,9 @@
 #include "../server/Dump.h"
 #include <AppFileInfo.h>
 #include <cassert>
+#include <Autolock.h>
+#include <Locker.h>
+#include <Mime.h>
 #include <fs_attr.h>
 #include <FindDirectory.h>
 #include <Node.h>
@@ -22,6 +25,7 @@
 #include "QueryUtil.h"
 #include "RelationSets.h"
 #include "../server/Reply.h"
+#include "../plugins/PluginChannels.h"
 #include <sen/Sen.h>
 #include <spdlog/spdlog.h>
 
@@ -45,7 +49,62 @@ SourcesOf(const BMessage* message)
     return sources;
 }
 
+static bool IsResolvedByPlugin(const BMessage& relationConfig);
+
+BString RelationHandler::PluginSignatureFor(const BMessage* message)
+{
+    switch (message->what) {
+        case sen::cmd::kRelationsGet:
+        {
+            if (message->GetBool(sen::key::kConfigOnly, false))
+                return BString();       // (nothing is asked of a plugin: answered at once)
+            // a dynamic relation is worked out by the navigator of its type
+            BString relationType;
+            BMessage config;
+            if (message->FindString(sen::key::kRelationType, &relationType) != B_OK || GetRelationConfig(relationType.String(), &config) != B_OK
+                    || !IsResolvedByPlugin(config))
+                return BString();
+            char signature[B_MIME_TYPE_LENGTH];
+            if (BMimeType(relationType.String()).GetPreferredApp(signature) == B_OK)
+                return BString(signature);
+            return BString("sen navigators");       // (no navigator is known yet: the one that is looked for in the request has this channel)
+        }
+        case sen::cmd::kRelationsGetSelf:
+        {
+            // a self relation is worked out by the extractor that the client chose, else the one that is looked for in the request
+            BString plugin;
+            if (message->FindString(sensei::key::kPlugin, &plugin) == B_OK && !plugin.IsEmpty())
+                return plugin;
+            return BString("sen extractors");
+        }
+        default:
+            return BString();
+    }
+}
+
 void RelationHandler::MessageReceived(BMessage* message)
+{
+    // A request that needs a plugin is taken over by the channel of that plugin (a looper and thread of its own) and answered from there: the thread of the server, which
+    // is the one that gets the messages of every client and of the plugins themselves, does not wait for the plugin.
+    const BString plugin = PluginSignatureFor(message);
+    if (!plugin.IsEmpty() && be_app != NULL && be_app->CurrentMessage() == message) {
+        BMessage* detached = be_app->DetachCurrentMessage();
+        if (detached != NULL) {
+            const status_t queued = sen::plugin::Run(plugin.String(), [this, detached]() {
+                HandleRequest(detached);
+                delete detached;
+            });
+            if (queued != B_OK) {
+                HandleRequest(detached);
+                delete detached;
+            }
+            return;
+        }
+    }
+    HandleRequest(message);
+}
+
+void RelationHandler::HandleRequest(BMessage* message)
 {
     BMessage* reply = new BMessage(sen::cmd::kReplyRelations);
     status_t result = B_OK;
@@ -156,6 +215,9 @@ void RelationHandler::MessageReceived(BMessage* message)
     message->SendReply(reply);
 }
 
+static bool IsResolvedByPlugin(const BMessage& relationConfig);
+static bool IsResolvedByPluginAt(const BMessage& relationConfig, const char* sourceType);
+
 status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
@@ -190,6 +252,21 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
             }
         }
     }
+    // Relations that are worked out when they are asked for (the spatial ones: within, touches...) are stored nowhere. They are offered for every file of the types that they start
+    // at; what they find is asked of their navigator plugin when the user opens the relation (GetRelationsOfType), so nothing is worked out for a menu that is only shown.
+    if (BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &installedTypes) == B_OK && installedTypes.FindStrings("types", &installed) == B_OK) {
+        BString sourceType = GetMimeTypeForRef(&sourceRef);
+        for (int32 i = 0; i < installed.CountStrings(); i++) {
+            const BString& type = installed.StringAt(i);
+            BMessage config;
+            if (relationNames.HasString(type) || GetRelationConfig(type.String(), &config) != B_OK)
+                continue;
+            if (IsResolvedByPluginAt(config, sourceType.String())) {
+                relationNames.Add(type);
+                status = B_OK;
+            }
+        }
+    }
     if (relationNames.IsEmpty()) {
         return status;
     }
@@ -201,6 +278,11 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
             spdlog::debug("adding properties of relation {}...", relation.String());
 
             BMessage relations;
+            BMessage dynamicConfig;
+            if (GetRelationConfig(relation.String(), &dynamicConfig) == B_OK && IsResolvedByPlugin(dynamicConfig)) {
+                reply->AddMessage(relation.String(), &relations);    // (empty: worked out when it is opened)
+                continue;
+            }
             status = ReadRelationsOfType(&sourceRef, relation.String(), &relations);
             if (status != B_OK) {
                 return status;
@@ -234,11 +316,8 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
  * it cannot start at (SEN:excludeSourceTypes, which wins). A type is a MIME type or the start of one, e.g. a supertype
  * ("audio"), like the filters for the templates of a new file (see TemplateUtils in Tracker).
  */
-static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* sourceType)
+static bool MatchesSourceTypes(const BMessage& relationConfig, const char* sourceType)
 {
-    if (relationConfig.GetBool(sen::conf::kDynamic, false))
-        return false;
-
     auto matches = [&](const char* field, int32* count) {
         bool found = false;
         const char* pattern;
@@ -255,6 +334,28 @@ static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* s
     bool excluded = matches(sen::conf::kExcludeSourceTypes, &excludes);
 
     return (includes == 0 || included) && !excluded;
+}
+
+static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* sourceType)
+{
+    if (relationConfig.GetBool(sen::conf::kDynamic, false))
+        return false;
+    return MatchesSourceTypes(relationConfig, sourceType);
+}
+
+/** A relation that is worked out when it is asked for by a navigator plugin: dynamic, and not a self relation (those are the parts of a file, resolved by extractors). */
+static bool IsResolvedByPlugin(const BMessage& relationConfig)
+{
+    return relationConfig.GetBool(sen::conf::kDynamic, false) && !relationConfig.GetBool(sen::conf::kSelf, false);
+}
+
+/**
+ * Whether a relation that is worked out when asked for is offered at a file of this type: the relation types are those of the ontologies, and one that names the types that it starts at
+ * (SEN:sourceTypes) is offered only at those. The files themselves have no stored relation of it: it is there for every file of the type.
+ */
+static bool IsResolvedByPluginAt(const BMessage& relationConfig, const char* sourceType)
+{
+    return IsResolvedByPlugin(relationConfig) && relationConfig.HasString(sen::conf::kSourceTypes) && MatchesSourceTypes(relationConfig, sourceType);
 }
 
 /**
@@ -653,10 +754,21 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
         status = relationConfigMap.FindMessage(relationType, &relationConfig);
     }
 
+    // only the config is wanted (the file manager makes the folder of a slow relation first and asks for its targets then)
+    if (status == B_OK && message->GetBool(sen::key::kConfigOnly, false)) {
+        char sourceId[sen::id::kLength];
+        if (GetOrCreateId(&sourceRef, sourceId, false) == B_OK)
+            reply->AddString(sen::key::kSourceId, sourceId);
+        return B_OK;
+    }
+
     BMessage relations;
     // the targets are resolved always: a target that cannot be resolved is marked as missing (dangling relation)
     BMessage resolved;
-    status = ReadRelationsOfType(&sourceRef, relationType, &relations, &resolved, NULL);
+    if (IsResolvedByPlugin(relationConfig))
+        status = ResolveDynamicRelationsWithPlugin(&sourceRef, relationType, &relations, &resolved);    // (a dynamic relation is stored nowhere: its navigator works it out now)
+    else
+        status = ReadRelationsOfType(&sourceRef, relationType, &relations, &resolved, NULL);
     if (status == B_OK) {
         char* targetName;
         type_code targetType;
@@ -1264,6 +1376,10 @@ BString RelationHandler::GenerateId() {
  */
 status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool createIfMissing)
 {
+    // (a file gets its ID once: the server and the channels of the plugins make them at the same time)
+    static BLocker idLock("sen ids");
+    BAutolock idAutolock(idLock);
+
     status_t result;
     BNode node(ref);
 

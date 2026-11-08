@@ -13,6 +13,7 @@
 #include "../deskbar/DeskbarView.h"
 #include "SenServer.h"
 #include "Reply.h"
+#include "../plugins/PluginChannels.h"
 #include "../relations/RelationHandler.h"
 #include "../ui/FileTypesLink.h"
 
@@ -374,6 +375,8 @@ bool SenServer::QuitRequested()
 {
     fUi->CloseWindows();
     const bool quit = BApplication::QuitRequested();
+    if (quit)
+        sen::plugin::Finish();
     // (the knot stays when the server does not quit: nobody must find a server without its knot)
     if (quit)
         RemoveDeskbarItem();

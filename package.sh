@@ -33,7 +33,7 @@ ARCH=$(getarch)
 
 STAGE=package-build
 rm -rf $STAGE
-mkdir -p $STAGE/bin $STAGE/data/user_launch $STAGE/data/sen-core $STAGE/documentation/packages/sen_core
+mkdir -p $STAGE/bin $STAGE/data/user_launch $STAGE/data/sen-core/icons $STAGE/data/licenses $STAGE/documentation/packages/sen_core
 
 # the server, and the command "sen" for its options (it starts the server by its path in the package)
 cp -a $APP bin/sen_settings $STAGE/bin/
@@ -44,6 +44,11 @@ cp -a package/user_launch $STAGE/data/user_launch/sen_server
 
 # the script that repairs the indices of a system (the server and the ontology installer create them, too)
 cp -a create-sen-indices.sh $STAGE/data/sen-core/
+
+# the icon of the Library folders is a separate work under the Design Science License: it is shipped unchanged as a file of its own (its Source Data), with the notice
+# and the text of the license (also as a license of the system, where Haiku keeps them)
+cp -a data/icons/library-folder.hvif data/icons/library-folder.COPYING $STAGE/data/sen-core/icons/
+sed '1,/^-----/d' data/icons/library-folder.COPYING | sed '1{/^$/d;}' > "$STAGE/data/licenses/Design Science License"
 
 # the documentation: the page that the About window opens for donations, and the texts
 cp -a docs/support.html README.md LICENSE $STAGE/documentation/packages/sen_core/
