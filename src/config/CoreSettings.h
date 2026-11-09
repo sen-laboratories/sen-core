@@ -43,5 +43,11 @@ void DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessa
 /** As ApplySettings(), for the settings that all plugins share. */
 status_t ApplyPluginSettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused);
 
+/** The settings of the feature Enrich (the node *Enrich*; the request has `SEN:scope` = `enrich`): whether what a plugin needs enriched first is enriched when the user asks for it (`SEN:enrichOnDemand`). */
+void DescribeEnrichSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults);
+
+/** As ApplySettings(), for the settings of Enrich. */
+status_t ApplyEnrichSettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused);
+
 }	// namespace core
 }	// namespace sen

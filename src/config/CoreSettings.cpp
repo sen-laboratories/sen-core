@@ -31,6 +31,7 @@ static const char kAkitaField[] = "akita";
 static const char kLibraryNameField[] = "SEN:libraryName";
 static const char kAssociateContextField[] = "SEN:associateCurrentContext";
 static const char kExtractIntoField[] = "SEN:extractEntitiesInto";
+static const char kEnrichOnDemandField[] = "SEN:enrichOnDemand";
 static const char kAskIfSeveralField[] = "SEN:askIfSeveral";
 static const char kMaxEntitiesField[] = "SEN:maxEntities";
 
@@ -396,6 +397,47 @@ ApplyPluginSettings(SenConfigHandler* config, const BMessage& changes, std::vect
 			if (first == B_OK)
 				first = B_BAD_VALUE;
 		}
+	}
+	return first;
+}
+
+void
+DescribeEnrichSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults)
+{
+	BMessage stored;
+	config->GetConfig(&stored);
+
+	settings->MakeEmpty();
+	settings->AddBool(kEnrichOnDemandField, stored.GetBool(sen::key::kEnrichOnDemand, true));
+	defaults->MakeEmpty();
+	defaults->AddBool(kEnrichOnDemandField, true);
+
+	schema->MakeEmpty();
+	schema->AddInt32(form::kSchemaVersion, 1);
+
+	BMessage onDemand;
+	onDemand.AddString(form::kAttrLabel, "Enrich automatically on demand");
+	onDemand.AddString(form::kAttrHelp, "When you open a relation of a place that has no position yet (the things nearby), the place is enriched first (its address is looked up with "
+		"OpenStreetMap and Wikidata) and the relation is worked out afterwards. Off: you are told that the place has no position yet, and you enrich it yourself.");
+	onDemand.AddInt32(form::kAttrOrder, 0);
+	schema->AddMessage(kEnrichOnDemandField, &onDemand);
+}
+
+
+status_t
+ApplyEnrichSettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused)
+{
+	BMessage current, schema, defaults;
+	DescribeEnrichSettings(config, &current, &schema, &defaults);
+
+	BMessage updated(current);
+	status_t first = sen::settings::ApplyChanges(&updated, changes, refused);
+
+	const bool onDemand = updated.GetBool(kEnrichOnDemandField, true);
+	if (onDemand != current.GetBool(kEnrichOnDemandField, true)) {
+		BMessage change;
+		change.AddBool(sen::key::kEnrichOnDemand, onDemand);
+		config->UpdateSettings(&change);
 	}
 	return first;
 }

@@ -76,7 +76,7 @@ const bigtime_t kStartTimeout = 12000000;	// (a plugin that was started for the 
 /** What a node of the tree stands for. */
 struct SettingsWindow::Target {
 	bool		core = false;		///< the server answers (its own settings, or what all plugins share)
-	BString		scope;			///< for the server: sen::key::kScopeCore or kScopePlugins
+	BString		scope;			///< for the server: sen::key::kScopeCore, kScopePlugins or kScopeEnrich
 	BString		signature;
 	BString		name;
 	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
@@ -183,7 +183,7 @@ IconOfType(const char* mimeType, int size)
  */
 class NodeItem : public BStringItem {
 public:
-	/** @param scope what the server answers for (sen::key::kScopeCore, kScopePlugins), NULL for a plugin or a heading */
+	/** @param scope what the server answers for (sen::key::kScopeCore, kScopePlugins, kScopeEnrich), NULL for a plugin or a heading */
 	NodeItem(const char* label, uint32 level, bool selectable, const char* scope, const char* signature, const entry_ref* file = NULL, const char* iconType = NULL)
 		:
 		BStringItem(label, level, true),
@@ -468,6 +468,7 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 		givenName = PluginName(*pluginFile, &givenSignature);
 	bool givenShown = false;
 	int32 select = 1;		// (Core)
+	int32 enrichIndex = -1;
 
 	struct Plugin {
 		std::string		signature;
@@ -477,6 +478,7 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 		std::vector<entry_ref> plugins;
 		if (sen::FindPlugins(feature, &plugins) != B_OK || plugins.empty())
 			continue;
+		const bool isEnrich = strcmp(feature, sensei::feature::kEnrich) == 0;
 
 		std::map<std::string, Plugin> byName;		// (sorted by the name that is shown)
 		std::set<std::string> seen;
@@ -495,9 +497,12 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 				givenShown = true;
 			byName[name.String()] = plugin;
 		}
-		if (byName.empty())
+		// (the node Enrich has the settings of the feature, whether or not a plugin has any of its own)
+		if (byName.empty() && !isEnrich)
 			continue;
-		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, false, NULL, ""));
+		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, isEnrich, isEnrich ? sen::key::kScopeEnrich : NULL, ""));
+		if (isEnrich)
+			enrichIndex = fTree->CountItems() - 1;
 		for (const auto& plugin : byName) {
 			if (pluginFile != NULL && plugin.second.signature == givenSignature.String() && select == 1)
 				select = fTree->CountItems();
@@ -512,6 +517,8 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	}
 	if (node != NULL && strcmp(node, "plugins") == 0 && pluginFile == NULL)
 		select = 2;
+	if (node != NULL && strcmp(node, "enrich") == 0 && pluginFile == NULL && enrichIndex >= 0)
+		select = enrichIndex;
 	if (node != NULL && strcmp(node, "location") == 0 && pluginFile == NULL && locationIndex >= 0)
 		select = locationIndex;
 	// (selected when the window is built: the message of the selection needs the form)

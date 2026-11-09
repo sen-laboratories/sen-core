@@ -694,13 +694,16 @@ void SenServer::MessageReceived(BMessage* message)
         {
             result = B_OK;
             // (the server's own settings, or what all plugins share)
-            const bool plugins = strcmp(message->GetString(sen::key::kScope, sen::key::kScopeCore), sen::key::kScopePlugins) == 0;
+            const char* scope = message->GetString(sen::key::kScope, sen::key::kScopeCore);
+            const bool plugins = strcmp(scope, sen::key::kScopePlugins) == 0;
+            const bool enrich = strcmp(scope, sen::key::kScopeEnrich) == 0;
             if (message->what == sen::cmd::kCoreSettingsSet) {
                 BMessage changes;
                 std::vector<std::string> refused;
                 result = message->FindMessage(sen::settings::form::kFieldSettings, &changes);
                 if (result == B_OK) {
                     result = plugins ? sen::core::ApplyPluginSettings(senConfigHandler, changes, &refused)
+                        : enrich ? sen::core::ApplyEnrichSettings(senConfigHandler, changes, &refused)
                         : sen::core::ApplySettings(senConfigHandler, changes, &refused);
                 }
                 if (!refused.empty()) {
@@ -714,6 +717,8 @@ void SenServer::MessageReceived(BMessage* message)
             BMessage settings, schema, defaults;
             if (plugins)
                 sen::core::DescribePluginSettings(senConfigHandler, &settings, &schema, &defaults);
+            else if (enrich)
+                sen::core::DescribeEnrichSettings(senConfigHandler, &settings, &schema, &defaults);
             else
                 sen::core::DescribeSettings(senConfigHandler, &settings, &schema, &defaults);
             reply->AddMessage(sen::settings::form::kFieldSettings, &settings);
