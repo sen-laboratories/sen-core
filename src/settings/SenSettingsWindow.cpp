@@ -500,7 +500,7 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 		// (what the programs may know: a part of the settings of the server of its own, asked for by its page)
 		NodeItem* access = new NodeItem("Application access", 2, true, NULL, kLocationServerSignature, &locationServer);
 		access->SetPage("access");
-		access->UseTypeIcon("application");		// (the standard icon of an application)
+		access->UseTypeIcon("application/x-vnd.Be-elfexecutable");		// (the standard icon of an application: the three boxes)
 		fTree->AddItem(access);
 	}
 	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, "", NULL, sen::onto::core::mime::kPlugin));
