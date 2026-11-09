@@ -50,6 +50,8 @@ private:
 	void			_Request(const Target& target);
 	void			_Ready(BMessage* message);
 	void			_Changed(BMessage* message);
+	void			_Action(BMessage* message);
+	void			_SendChanges(const BMessage& changes);
 	void			_Answered(BMessage* message);
 	void			_ShowNote(const char* text, bool offerFile = false);
 	void			_Status(const char* text);

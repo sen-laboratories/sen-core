@@ -6,6 +6,7 @@
 #include "SenSettingsWindow.h"
 
 #include "../relations/QueryUtil.h"
+#include "../ui/Knot.h"
 
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
@@ -190,7 +191,8 @@ public:
 		fSelectable(selectable),
 		fScope(scope != NULL ? scope : ""),
 		fSignature(signature),
-		fIcon(NULL)
+		fIcon(NULL),
+		fIconSize(0)
 	{
 		// the icon of a file (the application), else that of a MIME type (the heading of the plugins: the type of a plugin)
 		font_height height;
@@ -202,6 +204,19 @@ public:
 		} else if (iconType != NULL) {
 			fIcon = IconOfType(iconType, size);
 		}
+		if (fIcon != NULL)
+			fIconSize = size;
+	}
+
+	/** The icon of this node is the knot of SEN (the one of the Deskbar), drawn as large as the text needs. */
+	void UseKnot()
+	{
+		font_height height;
+		be_plain_font->GetHeight(&height);
+		const int size = (int)ceilf(height.ascent + height.descent + height.leading) + 2;
+		delete fIcon;
+		fIcon = sen::ui::NewKnotBitmap();
+		fIconSize = fIcon != NULL ? size : 0;
 	}
 
 	virtual ~NodeItem() { delete fIcon; }
@@ -210,8 +225,8 @@ public:
 	{
 		BStringItem::Update(owner, font);
 		if (fIcon != NULL) {
-			SetHeight(std::max(Height(), fIcon->Bounds().Height() + 3));
-			SetWidth(Width() + fIcon->Bounds().Width() + 1 + kIconGap);
+			SetHeight(std::max(Height(), fIconSize + 3));
+			SetWidth(Width() + fIconSize + 1 + kIconGap);
 		}
 		// (what the outline list view puts before the name: the indent of the level and the latch, see BOutlineListView::LatchRect)
 		SetWidth(Width() + OutlineLevel() * be_control_look->DefaultItemSpacing() + be_plain_font->Size());
@@ -232,13 +247,14 @@ public:
 		}
 		owner->SetDrawingMode(B_OP_ALPHA);
 		owner->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-		owner->DrawBitmap(fIcon, BPoint(frame.left + 2, frame.top + (frame.Height() - fIcon->Bounds().Height()) / 2));
+		const float top = frame.top + (frame.Height() - fIconSize) / 2;
+		owner->DrawBitmap(fIcon, fIcon->Bounds(), BRect(frame.left + 2, top, frame.left + 2 + fIconSize - 1, top + fIconSize - 1), B_FILTER_BITMAP_BILINEAR);
 		owner->SetDrawingMode(B_OP_COPY);
 
 		font_height height;
 		owner->GetFontHeight(&height);
 		owner->SetHighColor(IsSelected() ? ui_color(B_LIST_SELECTED_ITEM_TEXT_COLOR) : ui_color(B_LIST_ITEM_TEXT_COLOR));
-		owner->MovePenTo(frame.left + 2 + fIcon->Bounds().Width() + 1 + kIconGap,
+		owner->MovePenTo(frame.left + 2 + fIconSize + 1 + kIconGap,
 			frame.top + (frame.Height() - (height.ascent + height.descent)) / 2 + height.ascent);
 		owner->DrawString(Text());
 		owner->SetLowColor(low);
@@ -259,6 +275,7 @@ private:
 	BString		fSignature;
 	entry_ref	fFile;
 	BBitmap*	fIcon;
+	float		fIconSize;		///< the size it is drawn in (the knot is made larger and scaled)
 };
 
 
@@ -450,7 +467,10 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	// (Core is the server: its icon)
 	entry_ref server;
 	const bool hasServer = be_roster->FindApp(sen::kServerSignature, &server) == B_OK;
-	fTree->AddItem(new NodeItem("SEN", 0, false, NULL, "", hasServer ? &server : NULL));
+	// (SEN is the knot of the Deskbar; Core, the server, has the icon of the server)
+	NodeItem* root = new NodeItem("SEN", 0, false, NULL, "");
+	root->UseKnot();
+	fTree->AddItem(root);
 	fTree->AddItem(new NodeItem("Core", 1, true, sen::key::kScopeCore, "", hasServer ? &server : NULL));
 	// Location: the settings of the location server (Basho), if it is installed. It is not a plugin and not part of SEN, but it speaks the same settings protocol: the window asks
 	// it as it asks a plugin, and what the user changes goes back to it.
@@ -586,6 +606,9 @@ SettingsWindow::MessageReceived(BMessage* message)
 			break;
 		case form::kChanged:
 			_Changed(message);
+			break;
+		case form::kAction:
+			_Action(message);
 			break;
 		case form::kRefused:
 		{
@@ -791,7 +814,30 @@ SettingsWindow::_Changed(BMessage* message)
 		sen::settings::CopyValue(settings, path, &changes, path);
 	else
 		changes = settings;
+	_SendChanges(changes);
+	_UpdateButtons();
+}
 
+
+// A button of the form was pressed (`kind = button`): the owner gets the field as `true`, as a change that it does not store, and tells in its answer what came of it (the answer
+// can take a while: a lookup on the internet). Nothing in the form is modified by it.
+void
+SettingsWindow::_Action(BMessage* message)
+{
+	const char* path;
+	if (message->FindString(form::kFieldPath, &path) != B_OK)
+		return;
+	BMessage changes;
+	changes.AddBool(path, true);
+	_Status("Waiting for the answer...");
+	_SendChanges(changes);
+}
+
+
+// Sends changes to the owner of the settings: the server (Core, Plugins, Enrich), or the plugin or server that has a session with this window.
+void
+SettingsWindow::_SendChanges(const BMessage& changes)
+{
 	BMessage set(fCore ? sen::cmd::kCoreSettingsSet : sensei::cmd::kSettingsSet);
 	if (fCore)
 		set.AddString(sen::key::kScope, fScope);
@@ -806,7 +852,6 @@ SettingsWindow::_Changed(BMessage* message)
 	}
 	if (!target.IsValid() || target.SendMessage(&set, this) != B_OK)
 		_Status("The settings could not be sent.");
-	_UpdateButtons();
 }
 
 
