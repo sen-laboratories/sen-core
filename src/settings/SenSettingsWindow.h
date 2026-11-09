@@ -67,6 +67,7 @@ private:
 	int32				fFirstSelect;		///< the node that is selected when the window is shown
 
 	BString				fSignature;			///< of what is shown: empty for Core
+	BString				fPage;				///< of an owner with several parts of its settings: the one that is shown (empty: the first)
 	BString				fName;
 	bool				fCore;				///< what is shown comes from the server (Core, or what all plugins share: see fScope)
 	BString				fScope;

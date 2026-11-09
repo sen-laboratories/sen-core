@@ -79,6 +79,7 @@ struct SettingsWindow::Target {
 	bool		core = false;		///< the server answers (its own settings, or what all plugins share)
 	BString		scope;			///< for the server: sen::key::kScopeCore, kScopePlugins or kScopeEnrich
 	BString		signature;
+	BString		page;			///< of an owner that has several: the part of its settings that is shown (Basho: `access`); empty: the first
 	BString		name;
 	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
 };
@@ -266,6 +267,11 @@ public:
 	bool			IsCore() const { return !fScope.IsEmpty(); }
 	const BString&	Scope() const { return fScope; }
 	const BString&	Signature() const { return fSignature; }
+	const BString&	Page() const { return fPage; }
+	/** a node of the same owner that shows another part of its settings (the owner is asked for the `page`) */
+	void			SetPage(const char* page) { fPage = page; }
+	/** a node below another one has no icon of its own */
+	void			NoIcon() { delete fIcon; fIcon = NULL; fIconSize = 0; }
 
 private:
 	static constexpr float	kIconGap = 4;
@@ -273,6 +279,7 @@ private:
 	bool		fSelectable;
 	BString		fScope;
 	BString		fSignature;
+	BString		fPage;
 	entry_ref	fFile;
 	BBitmap*	fIcon;
 	float		fIconSize;		///< the size it is drawn in (the knot is made larger and scaled)
@@ -479,6 +486,11 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	if (be_roster->FindApp(kLocationServerSignature, &locationServer) == B_OK) {
 		fTree->AddItem(new NodeItem("Location", 1, true, NULL, kLocationServerSignature, &locationServer));
 		locationIndex = fTree->CountItems() - 1;
+		// (what the programs may know: a part of the settings of the server of its own, asked for by its page)
+		NodeItem* access = new NodeItem("Application access", 2, true, NULL, kLocationServerSignature, &locationServer);
+		access->SetPage("access");
+		access->NoIcon();
+		fTree->AddItem(access);
 	}
 	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, "", NULL, sen::onto::core::mime::kPlugin));
 
@@ -595,6 +607,7 @@ SettingsWindow::MessageReceived(BMessage* message)
 			target.core = item->IsCore();
 				target.scope = item->Scope();
 			target.signature = item->Signature();
+			target.page = item->Page();
 			target.name = item->Text();
 			target.file = item->File();
 			_Select(&target);
@@ -665,6 +678,7 @@ SettingsWindow::_Select(const Target* target)
 	fCore = target->core;
 	fScope = target->scope;
 	fSignature = target->signature;
+	fPage = target->page;
 	fName = target->name;
 	fModified = false;
 	fHasDefaults = false;
@@ -713,6 +727,8 @@ SettingsWindow::_Request(const Target& target)
 	BMessage ask(sensei::cmd::kSettings);
 	ask.AddMessenger(sensei::key::kReplyTo, BMessenger(this));
 	ask.AddInt32("serial", serial);
+	if (!target.page.IsEmpty())
+		ask.AddString("page", target.page);
 	std::map<std::string, BMessenger>::iterator session = fSessions.find(target.signature.String());
 	status_t result;
 	if (session != fSessions.end() && session->second.IsValid()) {
@@ -841,6 +857,8 @@ SettingsWindow::_SendChanges(const BMessage& changes)
 	BMessage set(fCore ? sen::cmd::kCoreSettingsSet : sensei::cmd::kSettingsSet);
 	if (fCore)
 		set.AddString(sen::key::kScope, fScope);
+	else if (!fPage.IsEmpty())
+		set.AddString("page", fPage);
 	set.AddMessage(form::kFieldSettings, &changes);
 	BMessenger target;
 	if (fCore) {
