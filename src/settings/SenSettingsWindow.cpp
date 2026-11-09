@@ -168,7 +168,9 @@ IconOfType(const char* mimeType, int size)
 	uint8* data = NULL;
 	size_t dataSize = 0;
 	BBitmap* icon = new BBitmap(BRect(0, 0, size - 1, size - 1), B_RGBA32);
-	if (icon->InitCheck() == B_OK && type.GetIcon(&data, &dataSize) == B_OK) {
+	// (the icon of the type, else the one of its supertype: a type may have none of its own)
+	BMimeType super;
+	if (icon->InitCheck() == B_OK && (type.GetIcon(&data, &dataSize) == B_OK || (type.GetSupertype(&super) == B_OK && super.GetIcon(&data, &dataSize) == B_OK))) {
 		const status_t result = BIconUtils::GetVectorIcon(data, dataSize, icon);
 		delete[] data;
 		if (result == B_OK)
@@ -270,8 +272,17 @@ public:
 	const BString&	Page() const { return fPage; }
 	/** a node of the same owner that shows another part of its settings (the owner is asked for the `page`) */
 	void			SetPage(const char* page) { fPage = page; }
-	/** a node below another one has no icon of its own */
-	void			NoIcon() { delete fIcon; fIcon = NULL; fIconSize = 0; }
+	/** The icon of a MIME type instead of the one of the file (the node of the programs: the standard icon of an application). */
+	void
+	UseTypeIcon(const char* mimeType)
+	{
+		font_height height;
+		be_plain_font->GetHeight(&height);
+		const int size = (int)ceilf(height.ascent + height.descent + height.leading) + 2;
+		delete fIcon;
+		fIcon = IconOfType(mimeType, size);
+		fIconSize = fIcon != NULL ? size : 0;
+	}
 
 private:
 	static constexpr float	kIconGap = 4;
@@ -489,7 +500,7 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 		// (what the programs may know: a part of the settings of the server of its own, asked for by its page)
 		NodeItem* access = new NodeItem("Application access", 2, true, NULL, kLocationServerSignature, &locationServer);
 		access->SetPage("access");
-		access->NoIcon();
+		access->UseTypeIcon("application");		// (the standard icon of an application)
 		fTree->AddItem(access);
 	}
 	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, "", NULL, sen::onto::core::mime::kPlugin));
