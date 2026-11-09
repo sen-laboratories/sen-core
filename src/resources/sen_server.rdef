@@ -21,7 +21,7 @@ resource app_version {
 resource(100, "about-logo") #'bits' import "about-logo.png";
 
 /* The icon of the program: the hand with the knot, as the icons of the other servers. Made from images/sen-server_icon.svg by
-   sento/scripts/svg2hvif.py (python3 ../sento/scripts/svg2hvif.py images/sen-server_icon.svg --rdef). */
+   sento/tools/svg2hvif.py (python3 ../sento/tools/svg2hvif.py images/sen-server_icon.svg --rdef). */
 resource vector_icon array {
 	$"6E63696608010000004C01FFCB9AFF01CD9866B201CD9966B201FFFFFFF20100"
 	$"0000FF01FFFFFFB2013FC1C9FF1E021CCAA9BE6ACABBBE31CAA9BE6ACA2EBF41"
