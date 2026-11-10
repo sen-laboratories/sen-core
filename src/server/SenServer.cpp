@@ -6,6 +6,7 @@
 #include <sen/Sen.h>
 #include <sen/SenOntoCore.h>
 #include <sen/SenSettingsForm.h>
+#include <sen/SenVersion.h>
 #include "Cli.h"
 #include "Enrichment.h"
 #include "../config/CoreSettings.h"
@@ -474,7 +475,10 @@ void SenServer::MessageReceived(BMessage* message)
                     BString info(versionInfo.short_info);
                     BString version;
                     version << versionInfo.major << "." << versionInfo.middle << "." << versionInfo.minor;
-                    info << " " << version;
+                    // (the version as it is installed: 1.0.0-beta.7-6, with the stage and the revision of the package)
+                    const BString full = sen::VersionText(versionInfo, appInfo.ref);
+                    info << " " << full;
+                    reply->AddString("versionText", full.String());
 
                     reply->AddString("info", info.String());
                     reply->AddString("shortDescription", versionInfo.short_info);

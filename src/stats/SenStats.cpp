@@ -124,11 +124,13 @@ ExecutablePath(BPath* path)
 
 
 static bool
-ReadVersion(version_info* version, time_t* modified)
+ReadVersion(version_info* version, time_t* modified, entry_ref* ref = NULL)
 {
 	BPath path;
 	if (!ExecutablePath(&path))
 		return false;
+	if (ref != NULL && get_ref_for_path(path.Path(), ref) != B_OK)
+		*ref = entry_ref();
 
 	BFile file(path.Path(), B_READ_ONLY);
 	BAppFileInfo appInfo(&file);
@@ -141,9 +143,9 @@ ReadVersion(version_info* version, time_t* modified)
 
 
 static BString
-VersionNumber(const version_info& version)
+VersionNumber(const version_info& version, const entry_ref& file)
 {
-	return sen::VersionText(version);	// 1.0.0-beta.4, as the About windows of the plugins show it
+	return sen::VersionText(version, file);	// 1.0.0-beta.7-6: with the revision of the package, as the About windows of the plugins show it
 }
 
 
@@ -152,11 +154,12 @@ VersionLine()
 {
 	version_info version;
 	time_t modified;
-	if (!ReadVersion(&version, &modified))
+	entry_ref ref;
+	if (!ReadVersion(&version, &modified, &ref))
 		return BString("SEN Server (unknown version)");
 
 	BString line(version.short_info[0] != '\0' ? version.short_info : "SEN Server");
-	line << " " << VersionNumber(version);
+	line << " " << VersionNumber(version, ref);
 
 	char date[16] = "";
 	struct tm tm;
@@ -173,9 +176,10 @@ VersionOnly()
 {
 	version_info version;
 	time_t modified;
-	if (!ReadVersion(&version, &modified))
+	entry_ref ref;
+	if (!ReadVersion(&version, &modified, &ref))
 		return BString("unknown version");
-	return VersionNumber(version);
+	return VersionNumber(version, ref);
 }
 
 

@@ -38,6 +38,7 @@ public:
 	virtual			~SettingsWindow();
 
 	virtual void	MessageReceived(BMessage* message);
+	virtual void	DispatchMessage(BMessage* message, BHandler* handler);
 	virtual bool	QuitRequested();
 
 private:

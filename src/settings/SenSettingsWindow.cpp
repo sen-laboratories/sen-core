@@ -374,6 +374,28 @@ Capitalized(const char* word)
 }	// namespace
 
 
+// B_CLOSE_ON_ESCAPE closes the window before the view that has the focus sees the key: Escape that ends the editing of a value in a list or a table (it takes the change back) must not close the window.
+// Such a field is given the key, and only if it is none the window is closed.
+void
+SettingsWindow::DispatchMessage(BMessage* message, BHandler* handler)
+{
+	if (message->what == B_KEY_DOWN) {
+		const char* bytes = NULL;
+		int32 modifiers = 0;
+		BView* focus = CurrentFocus();
+		if (focus != NULL && message->FindString("bytes", &bytes) == B_OK && bytes != NULL && bytes[0] == B_ESCAPE && bytes[1] == '\0'
+				&& message->FindInt32("modifiers", &modifiers) == B_OK && (modifiers & (B_COMMAND_KEY | B_CONTROL_KEY | B_OPTION_KEY | B_SHIFT_KEY)) == 0) {
+			// (the names of the fields that the forms of Shoji put over a cell of a list or a table while it is edited)
+			if (strcmp(focus->Name(), "value editor") == 0 || strcmp(focus->Name(), "table editor") == 0) {
+				focus->KeyDown(bytes, 1);
+				return;
+			}
+		}
+	}
+	BWindow::DispatchMessage(message, handler);
+}
+
+
 SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	:
 	BWindow(BRect(140, 140, 780, 580), "SEN Settings", B_TITLED_WINDOW, B_AUTO_UPDATE_SIZE_LIMITS | B_QUIT_ON_WINDOW_CLOSE | B_CLOSE_ON_ESCAPE),
