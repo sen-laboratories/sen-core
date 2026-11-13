@@ -53,7 +53,7 @@ private:
 	void			_Ready(BMessage* message);
 	void			_Changed(BMessage* message);
 	void			_Action(BMessage* message);
-	void			_SendChanges(const BMessage& changes);
+	void			_SendChanges(const BMessage& changes, bool retry = true);
 	void			_Answered(BMessage* message);
 	void			_ShowNote(const char* text, bool offerFile = false);
 	void			_Status(const char* text);
@@ -84,6 +84,8 @@ private:
 	BMessage			fSettings;			///< as the form has them now (the last change)
 	BMessage			fSchema;
 	BMessage			fDefaultsMessage;
+	BMessage			fResend;			///< changes that could not be sent because the plugin ended its session: sent when the new session has answered
+	bool				fHasResend;
 	std::map<std::string, BMessenger> fSessions;	///< by signature: the instance of a plugin that has a settings session of this window (told when it closes)
 };
 
