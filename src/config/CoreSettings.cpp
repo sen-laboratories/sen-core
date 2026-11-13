@@ -31,6 +31,7 @@ static const char kAkitaField[] = "akita";
 static const char kLibraryNameField[] = "SEN:libraryName";
 static const char kAssociateContextField[] = "SEN:associateCurrentContext";
 static const char kExtractIntoField[] = "SEN:extractEntitiesInto";
+static const char kEnrichOnDemandField[] = "SEN:enrichOnDemand";
 static const char kAskIfSeveralField[] = "SEN:askIfSeveral";
 static const char kMaxEntitiesField[] = "SEN:maxEntities";
 
@@ -212,15 +213,13 @@ DescribeSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema,
 
 	BMessage libraryName;
 	libraryName.AddString(form::kAttrLabel, "Library name");
-	libraryName.AddString(form::kAttrHelp, "The folder in your home folder where SEN and its plugins put the entities they make (people, books, movies...). "
-		"A folder that exists is not moved.");
+	libraryName.AddString(form::kAttrHelp, "The folder in your home folder for the entities that SEN makes. A folder that exists is not moved.");
 	libraryName.AddInt32(form::kAttrOrder, 3);
 	schema->AddMessage(kLibraryNameField, &libraryName);
 
 	BMessage associate;
 	associate.AddString(form::kAttrLabel, "New objects belong to the current context");
-	associate.AddString(form::kAttrHelp, "What is made new (a file, a relation, the people of a book or a movie that a plugin makes) gets an association relation to the context that is "
-		"checked in the menu of SEN, as for a context that is locked with the Shift key. Off: only what is locked is applied. The default context is every file and is never applied.");
+	associate.AddString(form::kAttrHelp, "New things get an association to the checked context, as for a locked one (Shift). Off: only locked contexts apply.");
 	associate.AddInt32(form::kAttrOrder, 4);
 	schema->AddMessage(kAssociateContextField, &associate);
 }
@@ -325,8 +324,7 @@ DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* s
 
 	BMessage extract;
 	extract.AddString(form::kAttrLabel, "Extract entities into");
-	extract.AddString(form::kAttrHelp, "What plugins find in a file (the authors of a book, the director and cast of a movie): a file of its own for each, related to the file, "
-		"or only the names in the attributes of the file itself.");
+	extract.AddString(form::kAttrHelp, "What plugins find in a file (authors, cast): a file of its own for each, or only names in the attributes.");
 	extract.AddString(form::kAttrKind, form::kKindRadio);
 	extract.AddInt32(form::kAttrOrder, 0);
 	extract.AddString(form::kAttrChoices, sen::key::kExtractIntoFiles);
@@ -337,13 +335,13 @@ DescribePluginSettings(SenConfigHandler* config, BMessage* settings, BMessage* s
 
 	BMessage ask;
 	ask.AddString(form::kAttrLabel, "Ask which one if several are found");
-	ask.AddString(form::kAttrHelp, "A lookup (a book by its title, a movie, a paper) may have several answers. On: a window lists them and you choose. Off: the best one is taken.");
+	ask.AddString(form::kAttrHelp, "A lookup with several answers. On: you choose in a window. Off: the best one is taken.");
 	ask.AddInt32(form::kAttrOrder, 1);
 	schema->AddMessage(kAskIfSeveralField, &ask);
 
 	BMessage maximum;
 	maximum.AddString(form::kAttrLabel, "Max. number of entities to extract");
-	maximum.AddString(form::kAttrHelp, "The most entities of one type that a plugin makes of one file (the first authors of a long list, the first actors of the credits). None: no entities are made. All: no limit.");
+	maximum.AddString(form::kAttrHelp, "The most entities of one type per file. None: no entities. All: no limit.");
 	maximum.AddInt32(form::kAttrOrder, 2);
 	maximum.AddDouble(form::kAttrMin, 0);
 	maximum.AddString(form::kAttrKind, form::kKindSlider);
@@ -396,6 +394,46 @@ ApplyPluginSettings(SenConfigHandler* config, const BMessage& changes, std::vect
 			if (first == B_OK)
 				first = B_BAD_VALUE;
 		}
+	}
+	return first;
+}
+
+void
+DescribeEnrichSettings(SenConfigHandler* config, BMessage* settings, BMessage* schema, BMessage* defaults)
+{
+	BMessage stored;
+	config->GetConfig(&stored);
+
+	settings->MakeEmpty();
+	settings->AddBool(kEnrichOnDemandField, stored.GetBool(sen::key::kEnrichOnDemand, true));
+	defaults->MakeEmpty();
+	defaults->AddBool(kEnrichOnDemandField, true);
+
+	schema->MakeEmpty();
+	schema->AddInt32(form::kSchemaVersion, 1);
+
+	BMessage onDemand;
+	onDemand.AddString(form::kAttrLabel, "Enrich automatically on demand");
+	onDemand.AddString(form::kAttrHelp, "Opening a relation of a place without a position enriches the place first. Off: you are told to do it yourself.");
+	onDemand.AddInt32(form::kAttrOrder, 0);
+	schema->AddMessage(kEnrichOnDemandField, &onDemand);
+}
+
+
+status_t
+ApplyEnrichSettings(SenConfigHandler* config, const BMessage& changes, std::vector<std::string>* refused)
+{
+	BMessage current, schema, defaults;
+	DescribeEnrichSettings(config, &current, &schema, &defaults);
+
+	BMessage updated(current);
+	status_t first = sen::settings::ApplyChanges(&updated, changes, refused);
+
+	const bool onDemand = updated.GetBool(kEnrichOnDemandField, true);
+	if (onDemand != current.GetBool(kEnrichOnDemandField, true)) {
+		BMessage change;
+		change.AddBool(sen::key::kEnrichOnDemand, onDemand);
+		config->UpdateSettings(&change);
 	}
 	return first;
 }

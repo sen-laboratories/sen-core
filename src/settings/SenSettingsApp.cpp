@@ -23,7 +23,7 @@ public:
 	SettingsApp() : BApplication(sen::kSettingsSignature), fWindow(NULL), fHasPlugin(false) {}
 
 	/** `sen_settings --plugin <file>`: shows the settings of that plugin file instead of the installed copy of its signature (for the developer of a plugin);
-	 *  `--node core|plugins` starts with that node selected (Core is the first) */
+	 *  `--node core|plugins|enrich|location` starts with that node selected (Core is the first) */
 	virtual void ArgvReceived(int32 argc, char** argv)
 	{
 		for (int32 i = 1; i + 1 < argc; i++) {

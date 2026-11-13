@@ -11,7 +11,8 @@ TYPE = APP
 APP_MIME_SIG = application/x-vnd.sen-labs.sen-settings
 
 SRCS := src/settings/SenSettingsApp.cpp \
-	src/settings/SenSettingsWindow.cpp
+	src/settings/SenSettingsWindow.cpp \
+	src/ui/Knot.cpp
 
 RDEFS = src/resources/sen_settings.rdef
 

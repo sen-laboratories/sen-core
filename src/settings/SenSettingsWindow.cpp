@@ -6,6 +6,7 @@
 #include "SenSettingsWindow.h"
 
 #include "../relations/QueryUtil.h"
+#include "../ui/Knot.h"
 
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
@@ -64,6 +65,9 @@ enum {
 	kMsgTimeout		= 'SStm'	// nothing came for the request: serial
 };
 
+// the location server (Basho, github.com/sen-laboratories/basho): independent of SEN; its settings are shown here as those of a plugin are
+const char* const kLocationServerSignature = "application/x-vnd.basho-location_server";
+
 const bigtime_t kAnswerTimeout = 8000000;		// a plugin that has to be started may take a while
 const bigtime_t kStartTimeout = 12000000;	// (a plugin that was started for the request answers to the window, which waits this long)
 
@@ -73,8 +77,9 @@ const bigtime_t kStartTimeout = 12000000;	// (a plugin that was started for the 
 /** What a node of the tree stands for. */
 struct SettingsWindow::Target {
 	bool		core = false;		///< the server answers (its own settings, or what all plugins share)
-	BString		scope;			///< for the server: sen::key::kScopeCore or kScopePlugins
+	BString		scope;			///< for the server: sen::key::kScopeCore, kScopePlugins or kScopeEnrich
 	BString		signature;
+	BString		page;			///< of an owner that has several: the part of its settings that is shown (Basho: `access`); empty: the first
 	BString		name;
 	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
 };
@@ -163,7 +168,9 @@ IconOfType(const char* mimeType, int size)
 	uint8* data = NULL;
 	size_t dataSize = 0;
 	BBitmap* icon = new BBitmap(BRect(0, 0, size - 1, size - 1), B_RGBA32);
-	if (icon->InitCheck() == B_OK && type.GetIcon(&data, &dataSize) == B_OK) {
+	// (the icon of the type, else the one of its supertype: a type may have none of its own)
+	BMimeType super;
+	if (icon->InitCheck() == B_OK && (type.GetIcon(&data, &dataSize) == B_OK || (type.GetSupertype(&super) == B_OK && super.GetIcon(&data, &dataSize) == B_OK))) {
 		const status_t result = BIconUtils::GetVectorIcon(data, dataSize, icon);
 		delete[] data;
 		if (result == B_OK)
@@ -180,14 +187,15 @@ IconOfType(const char* mimeType, int size)
  */
 class NodeItem : public BStringItem {
 public:
-	/** @param scope what the server answers for (sen::key::kScopeCore, kScopePlugins), NULL for a plugin or a heading */
+	/** @param scope what the server answers for (sen::key::kScopeCore, kScopePlugins, kScopeEnrich), NULL for a plugin or a heading */
 	NodeItem(const char* label, uint32 level, bool selectable, const char* scope, const char* signature, const entry_ref* file = NULL, const char* iconType = NULL)
 		:
 		BStringItem(label, level, true),
 		fSelectable(selectable),
 		fScope(scope != NULL ? scope : ""),
 		fSignature(signature),
-		fIcon(NULL)
+		fIcon(NULL),
+		fIconSize(0)
 	{
 		// the icon of a file (the application), else that of a MIME type (the heading of the plugins: the type of a plugin)
 		font_height height;
@@ -199,6 +207,19 @@ public:
 		} else if (iconType != NULL) {
 			fIcon = IconOfType(iconType, size);
 		}
+		if (fIcon != NULL)
+			fIconSize = size;
+	}
+
+	/** The icon of this node is the knot of SEN (the one of the Deskbar), drawn as large as the text needs. */
+	void UseKnot()
+	{
+		font_height height;
+		be_plain_font->GetHeight(&height);
+		const int size = (int)ceilf(height.ascent + height.descent + height.leading) + 2;
+		delete fIcon;
+		fIcon = sen::ui::NewKnotBitmap();
+		fIconSize = fIcon != NULL ? size : 0;
 	}
 
 	virtual ~NodeItem() { delete fIcon; }
@@ -207,8 +228,8 @@ public:
 	{
 		BStringItem::Update(owner, font);
 		if (fIcon != NULL) {
-			SetHeight(std::max(Height(), fIcon->Bounds().Height() + 3));
-			SetWidth(Width() + fIcon->Bounds().Width() + 1 + kIconGap);
+			SetHeight(std::max(Height(), fIconSize + 3));
+			SetWidth(Width() + fIconSize + 1 + kIconGap);
 		}
 		// (what the outline list view puts before the name: the indent of the level and the latch, see BOutlineListView::LatchRect)
 		SetWidth(Width() + OutlineLevel() * be_control_look->DefaultItemSpacing() + be_plain_font->Size());
@@ -229,13 +250,14 @@ public:
 		}
 		owner->SetDrawingMode(B_OP_ALPHA);
 		owner->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
-		owner->DrawBitmap(fIcon, BPoint(frame.left + 2, frame.top + (frame.Height() - fIcon->Bounds().Height()) / 2));
+		const float top = frame.top + (frame.Height() - fIconSize) / 2;
+		owner->DrawBitmap(fIcon, fIcon->Bounds(), BRect(frame.left + 2, top, frame.left + 2 + fIconSize - 1, top + fIconSize - 1), B_FILTER_BITMAP_BILINEAR);
 		owner->SetDrawingMode(B_OP_COPY);
 
 		font_height height;
 		owner->GetFontHeight(&height);
 		owner->SetHighColor(IsSelected() ? ui_color(B_LIST_SELECTED_ITEM_TEXT_COLOR) : ui_color(B_LIST_ITEM_TEXT_COLOR));
-		owner->MovePenTo(frame.left + 2 + fIcon->Bounds().Width() + 1 + kIconGap,
+		owner->MovePenTo(frame.left + 2 + fIconSize + 1 + kIconGap,
 			frame.top + (frame.Height() - (height.ascent + height.descent)) / 2 + height.ascent);
 		owner->DrawString(Text());
 		owner->SetLowColor(low);
@@ -247,6 +269,20 @@ public:
 	bool			IsCore() const { return !fScope.IsEmpty(); }
 	const BString&	Scope() const { return fScope; }
 	const BString&	Signature() const { return fSignature; }
+	const BString&	Page() const { return fPage; }
+	/** a node of the same owner that shows another part of its settings (the owner is asked for the `page`) */
+	void			SetPage(const char* page) { fPage = page; }
+	/** The icon of a MIME type instead of the one of the file (the node of the programs: the standard icon of an application). */
+	void
+	UseTypeIcon(const char* mimeType)
+	{
+		font_height height;
+		be_plain_font->GetHeight(&height);
+		const int size = (int)ceilf(height.ascent + height.descent + height.leading) + 2;
+		delete fIcon;
+		fIcon = IconOfType(mimeType, size);
+		fIconSize = fIcon != NULL ? size : 0;
+	}
 
 private:
 	static constexpr float	kIconGap = 4;
@@ -254,8 +290,10 @@ private:
 	bool		fSelectable;
 	BString		fScope;
 	BString		fSignature;
+	BString		fPage;
 	entry_ref	fFile;
 	BBitmap*	fIcon;
+	float		fIconSize;		///< the size it is drawn in (the knot is made larger and scaled)
 };
 
 
@@ -334,6 +372,28 @@ Capitalized(const char* word)
 }
 
 }	// namespace
+
+
+// B_CLOSE_ON_ESCAPE closes the window before the view that has the focus sees the key: Escape that ends the editing of a value in a list or a table (it takes the change back) must not close the window.
+// Such a field is given the key, and only if it is none the window is closed.
+void
+SettingsWindow::DispatchMessage(BMessage* message, BHandler* handler)
+{
+	if (message->what == B_KEY_DOWN) {
+		const char* bytes = NULL;
+		int32 modifiers = 0;
+		BView* focus = CurrentFocus();
+		if (focus != NULL && message->FindString("bytes", &bytes) == B_OK && bytes != NULL && bytes[0] == B_ESCAPE && bytes[1] == '\0'
+				&& message->FindInt32("modifiers", &modifiers) == B_OK && (modifiers & (B_COMMAND_KEY | B_CONTROL_KEY | B_OPTION_KEY | B_SHIFT_KEY)) == 0) {
+			// (the names of the fields that the forms of Shoji put over a cell of a list or a table while it is edited)
+			if (strcmp(focus->Name(), "value editor") == 0 || strcmp(focus->Name(), "table editor") == 0) {
+				focus->KeyDown(bytes, 1);
+				return;
+			}
+		}
+	}
+	BWindow::DispatchMessage(message, handler);
+}
 
 
 SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
@@ -447,8 +507,24 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	// (Core is the server: its icon)
 	entry_ref server;
 	const bool hasServer = be_roster->FindApp(sen::kServerSignature, &server) == B_OK;
-	fTree->AddItem(new NodeItem("SEN", 0, false, NULL, "", hasServer ? &server : NULL));
+	// (SEN is the knot of the Deskbar; Core, the server, has the icon of the server)
+	NodeItem* root = new NodeItem("SEN", 0, false, NULL, "");
+	root->UseKnot();
+	fTree->AddItem(root);
 	fTree->AddItem(new NodeItem("Core", 1, true, sen::key::kScopeCore, "", hasServer ? &server : NULL));
+	// Location: the settings of the location server (Basho), if it is installed. It is not a plugin and not part of SEN, but it speaks the same settings protocol: the window asks
+	// it as it asks a plugin, and what the user changes goes back to it.
+	entry_ref locationServer;
+	int32 locationIndex = -1;
+	if (be_roster->FindApp(kLocationServerSignature, &locationServer) == B_OK) {
+		fTree->AddItem(new NodeItem("Location", 1, true, NULL, kLocationServerSignature, &locationServer));
+		locationIndex = fTree->CountItems() - 1;
+		// (what the programs may know: a part of the settings of the server of its own, asked for by its page)
+		NodeItem* access = new NodeItem("Application access", 2, true, NULL, kLocationServerSignature, &locationServer);
+		access->SetPage("access");
+		access->UseTypeIcon("application/x-vnd.Be-elfexecutable");		// (the standard icon of an application: the three boxes)
+		fTree->AddItem(access);
+	}
 	fTree->AddItem(new NodeItem("Plugins", 0, true, sen::key::kScopePlugins, "", NULL, sen::onto::core::mime::kPlugin));
 
 	BString givenSignature;
@@ -457,6 +533,7 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 		givenName = PluginName(*pluginFile, &givenSignature);
 	bool givenShown = false;
 	int32 select = 1;		// (Core)
+	int32 enrichIndex = -1;
 
 	struct Plugin {
 		std::string		signature;
@@ -466,6 +543,7 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 		std::vector<entry_ref> plugins;
 		if (sen::FindPlugins(feature, &plugins) != B_OK || plugins.empty())
 			continue;
+		const bool isEnrich = strcmp(feature, sensei::feature::kEnrich) == 0;
 
 		std::map<std::string, Plugin> byName;		// (sorted by the name that is shown)
 		std::set<std::string> seen;
@@ -484,9 +562,12 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 				givenShown = true;
 			byName[name.String()] = plugin;
 		}
-		if (byName.empty())
+		// (the node Enrich has the settings of the feature, whether or not a plugin has any of its own)
+		if (byName.empty() && !isEnrich)
 			continue;
-		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, false, NULL, ""));
+		fTree->AddItem(new NodeItem(Capitalized(feature).String(), 1, isEnrich, isEnrich ? sen::key::kScopeEnrich : NULL, ""));
+		if (isEnrich)
+			enrichIndex = fTree->CountItems() - 1;
 		for (const auto& plugin : byName) {
 			if (pluginFile != NULL && plugin.second.signature == givenSignature.String() && select == 1)
 				select = fTree->CountItems();
@@ -501,6 +582,10 @@ SettingsWindow::_BuildTree(const entry_ref* pluginFile, const char* node)
 	}
 	if (node != NULL && strcmp(node, "plugins") == 0 && pluginFile == NULL)
 		select = 2;
+	if (node != NULL && strcmp(node, "enrich") == 0 && pluginFile == NULL && enrichIndex >= 0)
+		select = enrichIndex;
+	if (node != NULL && strcmp(node, "location") == 0 && pluginFile == NULL && locationIndex >= 0)
+		select = locationIndex;
 	// (selected when the window is built: the message of the selection needs the form)
 	fFirstSelect = select;
 }
@@ -555,6 +640,7 @@ SettingsWindow::MessageReceived(BMessage* message)
 			target.core = item->IsCore();
 				target.scope = item->Scope();
 			target.signature = item->Signature();
+			target.page = item->Page();
 			target.name = item->Text();
 			target.file = item->File();
 			_Select(&target);
@@ -566,6 +652,9 @@ SettingsWindow::MessageReceived(BMessage* message)
 			break;
 		case form::kChanged:
 			_Changed(message);
+			break;
+		case form::kAction:
+			_Action(message);
 			break;
 		case form::kRefused:
 		{
@@ -622,6 +711,7 @@ SettingsWindow::_Select(const Target* target)
 	fCore = target->core;
 	fScope = target->scope;
 	fSignature = target->signature;
+	fPage = target->page;
 	fName = target->name;
 	fModified = false;
 	fHasDefaults = false;
@@ -670,12 +760,21 @@ SettingsWindow::_Request(const Target& target)
 	BMessage ask(sensei::cmd::kSettings);
 	ask.AddMessenger(sensei::key::kReplyTo, BMessenger(this));
 	ask.AddInt32("serial", serial);
+	if (!target.page.IsEmpty())
+		ask.AddString("page", target.page);
 	std::map<std::string, BMessenger>::iterator session = fSessions.find(target.signature.String());
 	status_t result;
-	if (session != fSessions.end() && session->second.IsValid())
+	if (session != fSessions.end() && session->second.IsValid()) {
 		result = session->second.SendMessage(&ask);
-	else
+	} else if (target.signature == kLocationServerSignature && BMessenger(kLocationServerSignature).IsValid()) {
+		// (a server that runs once, for everybody: it is asked where it is, not started again)
+		result = BMessenger(kLocationServerSignature).SendMessage(&ask);
+	} else {
 		result = be_roster->Launch(&target.file, &ask, &fStartedTeam);
+		// (a single launch application that was started in the meantime has got the message)
+		if (result == B_ALREADY_RUNNING)
+			result = B_OK;
+	}
 	if (result != B_OK) {
 		fWaiting = false;
 		BString text(fName);
@@ -764,10 +863,35 @@ SettingsWindow::_Changed(BMessage* message)
 		sen::settings::CopyValue(settings, path, &changes, path);
 	else
 		changes = settings;
+	_SendChanges(changes);
+	_UpdateButtons();
+}
 
+
+// A button of the form was pressed (`kind = button`): the owner gets the field as `true`, as a change that it does not store, and tells in its answer what came of it (the answer
+// can take a while: a lookup on the internet). Nothing in the form is modified by it.
+void
+SettingsWindow::_Action(BMessage* message)
+{
+	const char* path;
+	if (message->FindString(form::kFieldPath, &path) != B_OK)
+		return;
+	BMessage changes;
+	changes.AddBool(path, true);
+	_Status("Waiting for the answer...");
+	_SendChanges(changes);
+}
+
+
+// Sends changes to the owner of the settings: the server (Core, Plugins, Enrich), or the plugin or server that has a session with this window.
+void
+SettingsWindow::_SendChanges(const BMessage& changes)
+{
 	BMessage set(fCore ? sen::cmd::kCoreSettingsSet : sensei::cmd::kSettingsSet);
 	if (fCore)
 		set.AddString(sen::key::kScope, fScope);
+	else if (!fPage.IsEmpty())
+		set.AddString("page", fPage);
 	set.AddMessage(form::kFieldSettings, &changes);
 	BMessenger target;
 	if (fCore) {
@@ -779,7 +903,6 @@ SettingsWindow::_Changed(BMessage* message)
 	}
 	if (!target.IsValid() || target.SendMessage(&set, this) != B_OK)
 		_Status("The settings could not be sent.");
-	_UpdateButtons();
 }
 
 

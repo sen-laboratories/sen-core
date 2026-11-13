@@ -33,11 +33,12 @@ class NoteView;
 class SettingsWindow : public BWindow {
 public:
 					/** @param pluginFile a plugin to show, instead of the copy that is installed (for the developer of a plugin)
-					 *  @param node the node to select at first, `core` (default) or `plugins` */
+					 *  @param node the node to select at first, `core` (default), `plugins` or `location` */
 					SettingsWindow(const entry_ref* pluginFile = NULL, const char* node = NULL);
 	virtual			~SettingsWindow();
 
 	virtual void	MessageReceived(BMessage* message);
+	virtual void	DispatchMessage(BMessage* message, BHandler* handler);
 	virtual bool	QuitRequested();
 
 private:
@@ -50,6 +51,8 @@ private:
 	void			_Request(const Target& target);
 	void			_Ready(BMessage* message);
 	void			_Changed(BMessage* message);
+	void			_Action(BMessage* message);
+	void			_SendChanges(const BMessage& changes);
 	void			_Answered(BMessage* message);
 	void			_ShowNote(const char* text, bool offerFile = false);
 	void			_Status(const char* text);
@@ -65,6 +68,7 @@ private:
 	int32				fFirstSelect;		///< the node that is selected when the window is shown
 
 	BString				fSignature;			///< of what is shown: empty for Core
+	BString				fPage;				///< of an owner with several parts of its settings: the one that is shown (empty: the first)
 	BString				fName;
 	bool				fCore;				///< what is shown comes from the server (Core, or what all plugins share: see fScope)
 	BString				fScope;

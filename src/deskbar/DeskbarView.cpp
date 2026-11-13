@@ -5,6 +5,7 @@
 
 #include "DeskbarView.h"
 
+#include "../config/Library.h"
 #include "../ui/Knot.h"
 
 #include <sen/Sen.h>
@@ -49,6 +50,7 @@ const char* const kItemName = "sen_server";
 
 /** the most entities of a classification that are listed in its menu; the rest is in the query that opens with the first item */
 static const int32 kMaxEntities = 30;
+static const int32 kMaxFolderEntries = 60;
 
 
 extern "C" _EXPORT BView* instantiate_deskbar_item(float maxWidth, float maxHeight);
@@ -210,6 +212,13 @@ DeskbarView::IsServerCommand(uint32 command)
 void
 DeskbarView::MessageReceived(BMessage* message)
 {
+	if (message->what == B_REFS_RECEIVED) {
+		// an item of the Library menu: a folder opens in the file manager, a file in its application (this is for the user, not for the server)
+		entry_ref ref;
+		for (int32 index = 0; message->FindRef("refs", index, &ref) == B_OK; index++)
+			be_roster->Launch(&ref);
+		return;
+	}
 	if (!IsServerCommand(message->what)) {
 		BView::MessageReceived(message);
 		return;
@@ -393,6 +402,120 @@ DeskbarView::_AddContextMenu(BMenu* menu)
 	contexts->SetTargetForItems(this);
 	// (choosing the menu itself opens the folder of the contexts)
 	menu->AddItem(new IconItem(contexts, new BMessage(sen::cmd::kUiOpenContexts), IconOfType(sen::mime::kContext)));
+}
+
+
+/**
+ * The contents of a folder as a menu, nested to any depth like the navigation menus of Tracker: the items are made when the menu opens (a folder is not read before it is looked into),
+ * the folders first, then the files, hidden ones left out; a folder is a menu again, and choosing it opens the folder; choosing a file opens it.
+ */
+class FolderMenu : public BMenu {
+public:
+	FolderMenu(const entry_ref& folder, BHandler* target)
+		:
+		BMenu(folder.name),
+		fFolder(folder),
+		fTarget(target),
+		fFilled(false)
+	{
+	}
+
+	virtual void AttachedToWindow()
+	{
+		if (!fFilled)
+			_Fill();
+		BMenu::AttachedToWindow();
+	}
+
+	/** the item for a folder or a file: the icon of the entry, a menu for a folder. The message opens the entry. */
+	static BMenuItem* ItemFor(const entry_ref& ref, bool isFolder, BHandler* target)
+	{
+		BMessage* open = new BMessage(B_REFS_RECEIVED);
+		open->AddRef("refs", &ref);
+		BBitmap* icon = IconOfEntry(ref);
+		BMenuItem* item;
+		if (isFolder)
+			item = new IconItem(new FolderMenu(ref, target), open, icon);
+		else
+			item = new IconItem(ref.name, open, icon);
+		item->SetTarget(target);
+		return item;
+	}
+
+private:
+	void _Fill()
+	{
+		fFilled = true;
+		struct Entry {
+			entry_ref	ref;
+			bool		folder;
+		};
+		std::vector<Entry> entries;
+		BDirectory directory(&fFolder);
+		entry_ref ref;
+		while (directory.GetNextRef(&ref) == B_OK) {
+			if (ref.name[0] == '.')
+				continue;
+			BEntry entry(&ref, true);
+			entries.push_back(Entry{ref, entry.IsDirectory()});
+		}
+		std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+			return a.folder != b.folder ? a.folder : strcasecmp(a.ref.name, b.ref.name) < 0;
+		});
+		int32 listed = 0;
+		for (const Entry& entry : entries) {
+			if (listed++ >= kMaxFolderEntries)
+				break;
+			AddItem(ItemFor(entry.ref, entry.folder, fTarget));
+		}
+		if (entries.empty()) {
+			BMenuItem* empty = new BMenuItem("(empty)", NULL);
+			empty->SetEnabled(false);
+			AddItem(empty);
+		} else if ((int32)entries.size() > kMaxFolderEntries) {
+			// (the rest is in the folder: the item opens it)
+			BMessage* open = new BMessage(B_REFS_RECEIVED);
+			open->AddRef("refs", &fFolder);
+			BMenuItem* more = new BMenuItem((BString("More") << B_UTF8_ELLIPSIS).String(), open);
+			more->SetTarget(fTarget);
+			AddSeparatorItem();
+			AddItem(more);
+		}
+	}
+
+	entry_ref	fFolder;
+	BHandler*	fTarget;
+	bool		fFilled;
+};
+
+
+/** The Library of the current context as a menu below the contexts: its folders and what is in them, to any depth; choosing the Library itself opens its folder. It is not there, or shown
+ *  as not to be chosen, if the Library has not been made yet (it is made when the first entity of a type is). */
+void
+DeskbarView::_AddLibraryMenu(BMenu* menu)
+{
+	BMessage settings;
+	BPath settingsPath = SettingsPath();
+	if (settingsPath.InitCheck() == B_OK && settingsPath.Append(sen::config::kSettingsFile) == B_OK) {
+		BFile file(settingsPath.Path(), B_READ_ONLY);
+		if (file.InitCheck() != B_OK || settings.Unflatten(&file) != B_OK)
+			settings.MakeEmpty();
+	}
+	BPath folder;
+	std::string context;
+	entry_ref ref;
+	const bool found = sen::library::Resolve(settings, NULL, NULL, false, &folder, &context) == B_OK && get_ref_for_path(folder.Path(), &ref) == B_OK
+		&& BEntry(&ref, true).IsDirectory();
+	if (!found) {
+		BMenuItem* none = new BMenuItem("Library", NULL);
+		none->SetEnabled(false);
+		menu->AddItem(none);
+		return;
+	}
+	BMenuItem* item = FolderMenu::ItemFor(ref, true, this);
+	item->Submenu()->SetName("Library");
+	item->SetLabel("Library");
+	menu->AddItem(item);
 }
 
 
@@ -677,6 +800,7 @@ DeskbarView::_BuildMenu()
 	menu->SetFont(be_plain_font);
 
 	_AddContextMenu(menu);
+	_AddLibraryMenu(menu);
 	menu->AddSeparatorItem();
 
 	int32 before = menu->CountItems();
