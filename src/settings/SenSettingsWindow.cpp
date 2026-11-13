@@ -62,7 +62,8 @@ enum {
 	kMsgRevert		= 'SSrv',
 	kMsgDefaults	= 'SSdf',
 	kMsgOpenFile	= 'SSof',
-	kMsgTimeout		= 'SStm'	// nothing came for the request: serial
+	kMsgTimeout		= 'SStm',	// nothing came for the request: serial
+	kMsgAbout		= 'SSab'	// the (i) of a plugin was clicked
 };
 
 // the location server (Basho, github.com/sen-laboratories/basho): independent of SEN; its settings are shown here as those of a plugin are
@@ -82,6 +83,89 @@ struct SettingsWindow::Target {
 	BString		page;			///< of an owner that has several: the part of its settings that is shown (Basho: `access`); empty: the first
 	BString		name;
 	entry_ref	file;			///< of the plugin: what is started (its signature may be that of another copy)
+};
+
+
+/**
+ * The (i) in the top right corner of the page of a plugin: a click asks for the About window of the plugin (the message kMsgAbout to the window). It is there only for a plugin
+ * (SetActive), and is blank for everything else, so that the form does not move when another item is chosen.
+ */
+class InfoButton : public BView {
+public:
+	InfoButton(const char* name, BMessage* message)
+		:
+		BView(name, B_WILL_DRAW | B_FULL_UPDATE_ON_RESIZE),
+		fMessage(message),
+		fActive(false),
+		fHover(false)
+	{
+		SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
+		SetLowUIColor(B_PANEL_BACKGROUND_COLOR);
+		const float size = _Size();
+		SetExplicitMinSize(BSize(size, size));
+		SetExplicitMaxSize(BSize(size, size));
+		SetExplicitPreferredSize(BSize(size, size));
+	}
+
+	~InfoButton() { delete fMessage; }
+
+	void SetActive(bool active)
+	{
+		if (active == fActive)
+			return;
+		fActive = active;
+		fHover = false;
+		if (active)
+			SetToolTip("About this plugin");
+		else
+			SetToolTip((const char*)NULL);
+		Invalidate();
+	}
+
+	virtual void Draw(BRect)
+	{
+		if (!fActive)
+			return;
+		const BRect circle = Bounds().InsetByCopy(1, 1);
+		const float d = circle.Width();
+		SetDrawingMode(B_OP_COPY);
+		SetHighUIColor(fHover ? B_LINK_HOVER_COLOR : B_LINK_TEXT_COLOR);
+		FillEllipse(circle);
+		// (the i in the colour of the page: the dot and the stem)
+		SetHighUIColor(B_PANEL_BACKGROUND_COLOR);
+		const float cx = (circle.left + circle.right) / 2;
+		const float dot = ceilf(d * 0.16f);
+		FillEllipse(BRect(cx - dot / 2, circle.top + d * 0.2f, cx + dot / 2, circle.top + d * 0.2f + dot));
+		const float stem = ceilf(d * 0.14f);
+		FillRect(BRect(floorf(cx - stem / 2), circle.top + d * 0.2f + dot + 1.5f, floorf(cx - stem / 2) + stem - 1, circle.bottom - d * 0.2f));
+	}
+
+	virtual void MouseMoved(BPoint, uint32 transit, const BMessage*)
+	{
+		const bool inside = fActive && transit != B_EXITED_VIEW && transit != B_OUTSIDE_VIEW;
+		if (inside != fHover) {
+			fHover = inside;
+			Invalidate();
+		}
+	}
+
+	virtual void MouseDown(BPoint)
+	{
+		if (fActive && Window() != NULL)
+			Window()->PostMessage(fMessage);
+	}
+
+private:
+	static float _Size()
+	{
+		font_height height;
+		be_plain_font->GetHeight(&height);
+		return ceilf(height.ascent + height.descent + height.leading) + 2;
+	}
+
+	BMessage*	fMessage;
+	bool		fActive;
+	bool		fHover;
 };
 
 
@@ -406,6 +490,7 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fRevert(NULL),
 	fDefaults(NULL),
 	fNote(NULL),
+	fInfo(NULL),
 	fFirstSelect(1),
 	fCore(true),
 	fHasDefaults(false),
@@ -442,6 +527,13 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	buttons->GroupLayout()->AddView(fRevert);
 
 	fNote = new NoteView("note");
+
+	// the (i) of a plugin, in the top right corner of its page
+	fInfo = new InfoButton("about", new BMessage(kMsgAbout));
+	BGroupView* header = new BGroupView(B_HORIZONTAL, 0);
+	header->GroupLayout()->AddItem(BSpaceLayoutItem::CreateGlue());
+	header->GroupLayout()->AddView(fInfo);
+	fPane->GroupLayout()->AddView(header);
 
 	if (fForm != NULL)
 		fPane->GroupLayout()->AddView(fForm);
@@ -684,6 +776,18 @@ SettingsWindow::MessageReceived(BMessage* message)
 				_Status("");
 			}
 			break;
+		case kMsgAbout:
+		{
+			// the plugins are multiple launch applications: this starts one instance that shows its About window and ends with it (the session of this window is not touched)
+			BMessage about(B_ABOUT_REQUESTED);
+			status_t result = be_roster->Launch(&fFile, &about);
+			if (result != B_OK && result != B_ALREADY_RUNNING) {
+				BString text("The About window of ");
+				text << fName << " could not be opened: " << strerror(result);
+				_Status(text.String());
+			}
+			break;
+		}
 		case kMsgOpenFile:
 		{
 			BPath path;
@@ -713,7 +817,10 @@ SettingsWindow::_Select(const Target* target)
 	fSignature = target->signature;
 	fPage = target->page;
 	fName = target->name;
+	fFile = target->file;
 	fModified = false;
+	// (Basho's server has no About window of its own: it is not a plugin of SEN)
+	fInfo->SetActive(!target->core && !target->signature.IsEmpty() && target->signature != kLocationServerSignature && BEntry(&target->file).Exists());
 	fHasDefaults = false;
 	_Status("");
 	_Request(*target);

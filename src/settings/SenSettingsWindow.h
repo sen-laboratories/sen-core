@@ -23,6 +23,7 @@ namespace sen {
 namespace settings {
 
 class NoteView;
+class InfoButton;
 
 /**
  * The window of the settings of SEN and of its plugins (docs/spec-settings-and-message-template.md in sento, section 6): a tree of what has settings on the left (SEN > Core,
@@ -65,11 +66,13 @@ private:
 	BButton*			fRevert;
 	BButton*			fDefaults;
 	NoteView*			fNote;
+	InfoButton*			fInfo;				///< the (i) that opens the About window of the plugin that is shown
 	int32				fFirstSelect;		///< the node that is selected when the window is shown
 
 	BString				fSignature;			///< of what is shown: empty for Core
 	BString				fPage;				///< of an owner with several parts of its settings: the one that is shown (empty: the first)
 	BString				fName;
+	entry_ref			fFile;				///< of what is shown (a plugin: the application that is started)
 	bool				fCore;				///< what is shown comes from the server (Core, or what all plugins share: see fScope)
 	BString				fScope;
 	bool				fHasDefaults;
