@@ -11,7 +11,7 @@ resource app_version {
 	 minor = 0,
 	 // the version is the one of the server (see sen_server.rdef): the same package
 	 variety = B_APPV_BETA,
-	 internal = 8,
+	 internal = 7,
 	 short_info = "SEN Settings",
 	 long_info = "The settings of SEN and its plugins."
 };
