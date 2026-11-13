@@ -499,6 +499,7 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fStartedTeam(-1),
 	fSerial(0),
 	fHasResend(false),
+	fActionPending(false),
 	fTimeout(NULL)
 {
 	fTree = new BOutlineListView("tree", B_SINGLE_SELECTION_LIST);
@@ -819,6 +820,8 @@ SettingsWindow::_Select(const Target* target)
 	fPage = target->page;
 	fName = target->name;
 	fFile = target->file;
+	fActionPending = false;
+	fHasResend = false;
 	fModified = false;
 	// (Basho's server has no About window of its own: it is not a plugin of SEN)
 	fInfo->SetActive(!target->core && !target->signature.IsEmpty() && target->signature != kLocationServerSignature && BEntry(&target->file).Exists());
@@ -996,7 +999,8 @@ SettingsWindow::_Action(BMessage* message)
 	// (a button that has a line of its own for what came of it says there that the answer is awaited: the status line of the window is then for nothing else, and is cleared)
 	BMessage attributes;
 	const bool hasLine = fSchema.FindMessage(path, &attributes) == B_OK && attributes.HasString(form::kAttrShows);
-	_Status(hasLine ? "" : "Waiting for the answer...");
+	_Status(hasLine ? "" : "Waiting for reply...");
+	fActionPending = hasLine;
 	_SendChanges(changes);
 }
 
@@ -1036,6 +1040,11 @@ SettingsWindow::_SendChanges(const BMessage& changes, bool retry)
 			return;
 		}
 		_Status("The settings could not be sent.");
+		if (fActionPending) {
+			// (the button that was greyed is enabled again)
+			fActionPending = false;
+			form::SetData(fForm, fSettings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
+		}
 	}
 }
 
@@ -1052,9 +1061,14 @@ SettingsWindow::_Answered(BMessage* message)
 		_Status("");
 
 	BMessage settings;
-	if (message->FindMessage(form::kFieldSettings, &settings) == B_OK && !settings.HasSameData(fSettings, true, true)) {
+	const bool have = message->FindMessage(form::kFieldSettings, &settings) == B_OK;
+	const bool changed = have && !settings.HasSameData(fSettings, true, true);
+	if (changed)
 		fSettings = settings;
-		form::SetData(fForm, settings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
+	// (a button that was pressed is enabled again by making the form again, also when the answer says the same as before)
+	if (changed || fActionPending) {
+		fActionPending = false;
+		form::SetData(fForm, fSettings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
 	}
 }
 

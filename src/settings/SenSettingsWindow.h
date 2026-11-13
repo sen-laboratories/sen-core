@@ -86,6 +86,7 @@ private:
 	BMessage			fDefaultsMessage;
 	BMessage			fResend;			///< changes that could not be sent because the plugin ended its session: sent when the new session has answered
 	bool				fHasResend;
+	bool				fActionPending;		///< a button was pressed and its answer is awaited: the form is made again from the answer (the button is greyed meanwhile), even if nothing changed
 	std::map<std::string, BMessenger> fSessions;	///< by signature: the instance of a plugin that has a settings session of this window (told when it closes)
 };
 
