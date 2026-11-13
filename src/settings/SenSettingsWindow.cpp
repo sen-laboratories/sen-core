@@ -1001,6 +1001,7 @@ SettingsWindow::_Action(BMessage* message)
 	const bool hasLine = fSchema.FindMessage(path, &attributes) == B_OK && attributes.HasString(form::kAttrShows);
 	_Status(hasLine ? "" : "Waiting for reply...");
 	fActionPending = hasLine;
+	fActionPath = path;
 	_SendChanges(changes);
 }
 
@@ -1043,7 +1044,7 @@ SettingsWindow::_SendChanges(const BMessage& changes, bool retry)
 		if (fActionPending) {
 			// (the button that was greyed is enabled again)
 			fActionPending = false;
-			form::SetData(fForm, fSettings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
+			form::ActionDone(fForm, fActionPath.String());
 		}
 	}
 }
@@ -1065,10 +1066,13 @@ SettingsWindow::_Answered(BMessage* message)
 	const bool changed = have && !settings.HasSameData(fSettings, true, true);
 	if (changed)
 		fSettings = settings;
-	// (a button that was pressed is enabled again by making the form again, also when the answer says the same as before)
-	if (changed || fActionPending) {
+	// New data make the form again (which also enables a button that was pressed); an answer that says what the form has only ends the waiting of the button
+	if (changed) {
 		fActionPending = false;
 		form::SetData(fForm, fSettings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
+	} else if (fActionPending) {
+		fActionPending = false;
+		form::ActionDone(fForm, fActionPath.String());
 	}
 }
 
