@@ -4,6 +4,7 @@
  */
 
 #include <sen/Sen.h>
+#include <sen/SenAttributes.h>
 #include <sen/SenOntoCore.h>
 #include <sen/SenSettingsForm.h>
 #include <sen/SenVersion.h>
@@ -258,7 +259,7 @@ void SenServer::EnsureIndices(dev_t device)
 
 	for (unsigned i = 0; i < sen::onto::core::kIndexCount; i++) {
 		const sen::onto::core::Index& index = sen::onto::core::kIndices[i];
-		if (fs_create_index(device, index.name, index.type, 0) == 0) {
+		if (fs_create_index(device, index.name, sen::IndexTypeOf(index.type), 0) == 0) {
 			spdlog::info("created index {} on volume {}", index.name, (int)device);
 		} else if (errno != B_FILE_EXISTS) {
 			spdlog::error("failed to create index {} on volume {}: {}", index.name, (int)device, strerror(errno));
