@@ -64,6 +64,11 @@ public:
 
         /** @return the MIME type of a file, guessed if it has none; empty if there is none */
         BString     GetMimeTypeForRef       (const entry_ref* ref);
+        /**
+         * @return the types that a file is looked up by: its technical type (the MIME type, `application/pdf`), then its semantic type (`META:TYPE`, `entity/...`, `document/...`) if it has
+         * one that is another. The types of a relation (SEN:sourceTypes...) and of a plugin (its file types) are matched against both: whatever they name is meant.
+         */
+        std::vector<BString> GetTypesForRef (const entry_ref* ref);
         status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
                                                    const BMessage* pluginConfig,
                                                    BMessage* reply);

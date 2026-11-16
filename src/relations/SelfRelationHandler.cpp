@@ -39,14 +39,21 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
 		return status;
 	}
 
-    BString sourceTypeString = GetMimeTypeForRef(&sourceRef);
-    const char* sourceType = sourceTypeString.String();
-
-    // query for all compatible extractors and return their generated collected output type
-    spdlog::debug("query for extractors to handle file type {}", sourceType);
+    // the extractors that handle the technical type of the file (application/pdf) or its semantic type (document/...): the first type that has one
     BMessage pluginConfig;
-
-    status = GetPluginsForTypeAndFeature(sourceType, sensei::feature::kExtract, &pluginConfig);
+    BString sourceTypeString = GetMimeTypeForRef(&sourceRef);
+    status = B_OK;
+    for (const BString& type : GetTypesForRef(&sourceRef)) {
+        spdlog::debug("query for extractors to handle file type {}", type.String());
+        BMessage found;
+        status = GetPluginsForTypeAndFeature(type.String(), sensei::feature::kExtract, &found);
+        if (status == B_OK && found.HasMessage(sensei::key::kTypesPlugins)) {
+            pluginConfig = found;
+            sourceTypeString = type;
+            break;
+        }
+    }
+    const char* sourceType = sourceTypeString.String();
     if (status != B_OK) {
         return status;
     }
@@ -735,6 +742,18 @@ BString RelationHandler::GetMimeTypeForRef(const entry_ref *ref) {
 
     spdlog::error("could not get MIME type for source node {}", ref->name);
     return BString();
+}
+
+std::vector<BString> RelationHandler::GetTypesForRef(const entry_ref *ref) {
+    std::vector<BString> types;
+    BString technical = GetMimeTypeForRef(ref);
+    if (!technical.IsEmpty())
+        types.push_back(technical);
+    BNode node(ref);
+    BString semantic;
+    if (node.InitCheck() == B_OK && node.ReadAttrString(sensei::key::kSemanticType, &semantic) == B_OK && !semantic.IsEmpty() && semantic != technical)
+        types.push_back(semantic);
+    return types;
 }
 
 
