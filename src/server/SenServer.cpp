@@ -764,6 +764,7 @@ void SenServer::MessageReceived(BMessage* message)
         case sen::cmd::kRelationsGetAll:
         case sen::cmd::kRelationsGetSelf:
         case sen::cmd::kRelationsGetAllSelf:
+        case sen::cmd::kRelationsMaterialise:
         case sen::cmd::kRelationsGetCompatible:
         case sen::cmd::kRelationsGetCompatibleTypes:
 		case sen::cmd::kRelationAdd:

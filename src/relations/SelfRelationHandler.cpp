@@ -5,6 +5,9 @@
 
 #include "../server/Dump.h"
 #include <cassert>
+#include <cctype>
+#include <string>
+#include <vector>
 
 #include <AppFileInfo.h>
 #include <fs_attr.h>
@@ -22,6 +25,7 @@
 #include <Volume.h>
 
 #include "RelationHandler.h"
+#include "AttrSnapshot.h"
 #include "RelationSets.h"
 #include "QueryUtil.h"
 #include "../server/Reply.h"
@@ -29,6 +33,7 @@
 #include "../config/SenConfigHandler.h"
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
+#include <sen/SenOntoCore.h>
 #include <spdlog/spdlog.h>
 
 status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* reply) {
@@ -804,22 +809,8 @@ status_t RelationHandler::ResolveDynamicRelationsWithPlugin(const entry_ref* sou
 
     // The Library folders of the entity types of the relation: the plugin may have to make an entity (a place that is missing), and cannot ask the server for the folder, which waits
     // for its answer. The server knows them: here they are.
-    BMessage config, libraries;
-    if (fConfig != NULL && GetRelationConfig(relationType, &config) == B_OK) {
-        BMessage settings;
-        fConfig->GetConfig(&settings);
-        for (const char* field : {sen::conf::kSourceTypes, sen::conf::kTargetTypes}) {
-            const char* type;
-            for (int32 index = 0; config.FindString(field, index, &type) == B_OK; index++) {
-                BPath folder;
-                std::string context;
-                entry_ref folderRef;
-                if (strncmp(type, "entity/", 7) == 0 && !libraries.HasRef(type)
-                        && sen::library::Resolve(settings, "", type, true, &folder, &context) == B_OK && get_ref_for_path(folder.Path(), &folderRef) == B_OK)
-                    libraries.AddRef(type, &folderRef);
-            }
-        }
-    }
+    BMessage libraries;
+    GetLibrariesFor(relationType, &libraries);
     request.AddMessage(sensei::key::kLibraries, &libraries);
 
     BMessenger pluginMessenger(pluginSig, pluginTeam);
@@ -866,5 +857,202 @@ status_t RelationHandler::ResolveDynamicRelationsWithPlugin(const entry_ref* sou
         found++;
     }
     spdlog::debug("plugin {} found {} target(s) of {} for {}", pluginSig, found, relationType, sourceRef->name);
+    return B_OK;
+}
+
+
+void RelationHandler::GetLibrariesFor(const char* relationType, BMessage* libraries)
+{
+    BMessage config;
+    if (fConfig == NULL || GetRelationConfig(relationType, &config) != B_OK)
+        return;
+    BMessage settings;
+    fConfig->GetConfig(&settings);
+    for (const char* field : {sen::conf::kSourceTypes, sen::conf::kTargetTypes, sen::conf::kMaterialiseAs}) {
+        const char* type;
+        for (int32 index = 0; config.FindString(field, index, &type) == B_OK; index++) {
+            BPath folder;
+            std::string context;
+            entry_ref folderRef;
+            if (strncmp(type, "entity/", 7) == 0 && !libraries->HasRef(type)
+                    && sen::library::Resolve(settings, "", type, true, &folder, &context) == B_OK && get_ref_for_path(folder.Path(), &folderRef) == B_OK)
+                libraries->AddRef(type, &folderRef);
+        }
+    }
+}
+
+
+void RelationHandler::RemoveStaleSets(const entry_ref& source, const char* relationType, const char* keepTargetId, const BMessage& item)
+{
+    BMessage forward;
+    if (ReadRelationMessage(source, relationType, &forward) != B_OK)
+        return;
+
+    struct Stale { std::string targetId, relationId; };
+    std::vector<Stale> stale;
+    char* name;
+    type_code type;
+    for (int32 i = 0; forward.GetInfo(B_MESSAGE_TYPE, i, &name, &type) == B_OK; i++) {
+        if (strcmp(name, keepTargetId) == 0)
+            continue;
+        // gone: no file has the ID any more, or it is in the Trash (only that: a copy that is kept elsewhere is no stale relation)
+        entry_ref ref;
+        bool gone = false;
+        status_t found = QueryForUniqueSenId(name, &ref);
+        if (found == B_ENTRY_NOT_FOUND) {
+            gone = true;
+        } else if (found == B_OK) {
+            BPath refPath(&ref);
+            std::string path = refPath.Path() != NULL ? refPath.Path() : "";
+            for (char& c : path)
+                c = (char)tolower((unsigned char)c);
+            gone = path.find("/trash/") != std::string::npos;
+        }
+        if (!gone)
+            continue;
+        int32 sets = sen::relation::CountSets(forward, name);
+        for (int32 s = 0; s < sets; s++) {
+            BMessage set;
+            if (sen::relation::GetSet(forward, name, s, &set) != B_OK)
+                continue;
+            // the same item: what the plugin said of it (its identifier) is the same in the set
+            int32 compared = 0;
+            bool same = true;
+            char* field;
+            type_code fieldType;
+            for (int32 f = 0; same && item.GetInfo(B_STRING_TYPE, f, &field, &fieldType) == B_OK; f++) {
+                if (strcmp(field, sen::onto::core::attr::kRelProvenance) == 0)
+                    continue;
+                compared++;
+                same = strcmp(set.GetString(field, ""), item.GetString(field, "")) == 0;
+            }
+            if (same && compared > 0)
+                stale.push_back({name, set.GetString(sen::key::kRelationId, "")});
+        }
+    }
+    for (const Stale& each : stale) {
+        sen::AttrSnapshot tx;
+        BString removed;
+        if (RemoveRelationTx(source, relationType, each.targetId.c_str(), each.relationId.c_str(), false, &tx, &removed, true) != B_OK)
+            tx.Restore();
+        else
+            spdlog::debug("took away the relation {} from {} to the entity {} that is gone", relationType, source.name, each.targetId);
+    }
+}
+
+
+status_t RelationHandler::MaterialiseItems(const BMessage* message, BMessage* reply)
+{
+    entry_ref sourceRef;
+    BString relationType;
+    if (message->FindRef(sen::key::kSourceRef, &sourceRef) != B_OK || message->FindString(sen::key::kRelationType, &relationType) != B_OK)
+        return B_BAD_VALUE;
+
+    // only a relation that says what its items stand for has entities to make: for any other the file of the relation is what is kept
+    BMessage config;
+    status_t result = GetRelationConfig(relationType.String(), &config);
+    if (result != B_OK)
+        return result;
+    if (!config.HasString(sen::conf::kMaterialiseAs))
+        return B_NOT_SUPPORTED;
+
+    // the plugin of the relation: the one that is its preferred application (the extractor of a contained relation)
+    BMimeType type(relationType.String());
+    char pluginSig[B_MIME_TYPE_LENGTH];
+    if (type.InitCheck() != B_OK || type.GetPreferredApp(pluginSig) != B_OK) {
+        spdlog::warn("no plugin makes the entities of the relation type {}", relationType.String());
+        return B_NAME_NOT_FOUND;
+    }
+
+    team_id pluginTeam = -1;
+    result = be_roster->Launch(pluginSig, (BMessage*)NULL, &pluginTeam);
+    if (result != B_OK) {
+        spdlog::error("failed to launch plugin {}: {}", pluginSig, strerror(result));
+        return result;
+    }
+
+    BMessage request(sensei::cmd::kMaterialise);
+    request.AddRef("refs", &sourceRef);
+    request.AddString(sen::key::kRelationType, relationType);
+    BMessage libraries;
+    GetLibrariesFor(relationType.String(), &libraries);
+    // what is dropped in a folder is made there: the folder is the Library of the entity type for this request
+    entry_ref destination;
+    if (message->FindRef(sen::key::kDestinationRef, &destination) == B_OK) {
+        const char* entityType = config.GetString(sen::conf::kMaterialiseAs, "");
+        libraries.RemoveName(entityType);
+        libraries.AddRef(entityType, &destination);
+        request.AddRef(sen::key::kDestinationRef, &destination);
+    }
+    request.AddMessage(sensei::key::kLibraries, &libraries);
+    BMessage item;
+    int32 items = 0;
+    for (int32 index = 0; message->FindMessage(sen::key::kRelationProperties, index, &item) == B_OK; index++) {
+        request.AddMessage(sensei::key::kItems, &item);
+        items++;
+    }
+    if (items == 0) {
+        kill_team(pluginTeam);
+        return B_BAD_VALUE;
+    }
+
+    BMessenger pluginMessenger(pluginSig, pluginTeam);
+    BMessage pluginReply;
+    PluginReplyCollector* collector = new PluginReplyCollector();
+    collector->Run();
+    result = pluginMessenger.SendMessage(&request, BMessenger(collector));
+    if (result == B_OK)
+        result = collector->WaitForReply(&pluginReply, pluginTeam, kResolveLimit);
+    if (collector->Lock())
+        collector->Quit();
+    if (result != B_OK) {
+        spdlog::error("failed to communicate with plugin {}: {}", pluginSig, strerror(result));
+        if (result == B_TIMED_OUT)
+            kill_team(pluginTeam);
+        return result;
+    }
+    result = pluginReply.GetInt32(sensei::key::kResult, B_OK);
+    if (result != B_OK) {
+        spdlog::error("plugin {} could not make the entities of {}: {}", pluginSig, relationType.String(), strerror(result));
+        return result;
+    }
+
+    // the entity is a part of the file that it was made from: the relation Contains of the core ontology says so (the file contains it, and it is contained by the file), stored like
+    // any other. The item that it is of is kept with it
+    BMessage containsConfig;
+    const bool storeContains = GetRelationConfig(sen::onto::core::mime::kContains, &containsConfig) == B_OK;
+
+    // for each item that has an entity: the file of it, with its SEN:ID, and the item that it is of
+    BMessage target;
+    for (int32 index = 0; pluginReply.FindMessage(sensei::key::kTargets, index, &target) == B_OK; index++) {
+        entry_ref targetRef;
+        if (target.FindRef(sen::key::kTargetRef, &targetRef) != B_OK || !BEntry(&targetRef).Exists())
+            continue;
+        char targetId[sen::id::kLength];
+        if (GetOrCreateId(&targetRef, targetId, true) == B_OK) {
+            target.RemoveName(sen::key::kTargetId);
+            target.AddString(sen::key::kTargetId, targetId);
+        }
+        if (storeContains) {
+            // the properties of the relation are what the plugin says besides the entity and the item (its identifier): the id of the item is made new at every listing, so it is not kept
+            BMessage properties(target);
+            properties.RemoveName(sen::key::kTargetRef);
+            properties.RemoveName(sen::key::kItemId);
+            properties.RemoveName(sen::key::kTargetId);
+            properties.RemoveName(sen::onto::core::attr::kRelProvenance);
+            properties.AddString(sen::onto::core::attr::kRelProvenance, pluginSig);
+            sen::AttrSnapshot tx;
+            BString relationId;
+            bool created = false;
+            if (AddRelationTx(sourceRef, targetRef, sen::onto::core::mime::kContains, properties, containsConfig, &tx, &relationId, &created) != B_OK) {
+                tx.Restore();
+                spdlog::warn("could not store that {} contains the entity {}", sourceRef.name, targetRef.name);
+            } else {
+                // (an entity that was deleted and is made again is a new file with a new SEN:ID: the relation to the old one is replaced, not kept beside it)
+                RemoveStaleSets(sourceRef, sen::onto::core::mime::kContains, targetId, properties);
+            }
+        }
+        reply->AddMessage(sensei::key::kTargets, &target);
+    }
     return B_OK;
 }

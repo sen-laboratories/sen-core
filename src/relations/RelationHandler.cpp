@@ -77,6 +77,15 @@ BString RelationHandler::PluginSignatureFor(const BMessage* message)
                 return plugin;
             return BString("sen extractors");
         }
+        case sen::cmd::kRelationsMaterialise:
+        {
+            // the entities of the items are made by the plugin of the relation (its preferred application)
+            BString relationType;
+            char signature[B_MIME_TYPE_LENGTH];
+            if (message->FindString(sen::key::kRelationType, &relationType) == B_OK && BMimeType(relationType.String()).GetPreferredApp(signature) == B_OK)
+                return BString(signature);
+            return BString();
+        }
         default:
             return BString();
     }
@@ -137,6 +146,11 @@ void RelationHandler::HandleRequest(BMessage* message)
         case sen::cmd::kRelationsGetAllSelf:
         {
             result = GetSelfRelations(message, reply);
+            break;
+        }
+        case sen::cmd::kRelationsMaterialise:
+        {
+            result = MaterialiseItems(message, reply);
             break;
         }
         case sen::cmd::kRelationsGetCompatible:
