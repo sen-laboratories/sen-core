@@ -101,6 +101,31 @@ status_t RelationHandler::GetSelfRelations(const BMessage* message, BMessage* re
     if (! defaultType.IsEmpty())
         relationTypes.Add(defaultType);
 
+    // a relation that names the types of the files that it is for (SEN:sourceTypes) is not offered for a file that has been identified as something else: the single event of a calendar
+    // file has no events to open (the calendar of several events is the one that has). A file that was not identified (no semantic type) keeps all that its extractor offers.
+    {
+        BString semantic;
+        BNode node(&sourceRef);
+        if (node.InitCheck() == B_OK && node.ReadAttrString(sensei::key::kSemanticType, &semantic) == B_OK && !semantic.IsEmpty()) {
+            BStringList kept;
+            for (int32 i = 0; i < relationTypes.CountStrings(); i++) {
+                const BString& relationType = relationTypes.StringAt(i);
+                BMessage config;
+                bool offered = true;
+                if (GetRelationConfig(relationType.String(), &config) == B_OK && config.HasString(sen::conf::kSourceTypes)) {
+                    offered = false;
+                    const char* pattern;
+                    for (int32 index = 0; config.FindString(sen::conf::kSourceTypes, index, &pattern) == B_OK; index++) {
+                        offered = offered || semantic.IStartsWith(pattern) || sourceTypeString.IStartsWith(pattern);
+                    }
+                }
+                if (offered)
+                    kept.Add(relationType);
+            }
+            relationTypes = kept;
+        }
+    }
+
     reply->AddStrings(sen::key::kRelations, relationTypes);
 
     // get relation configs (always needed for self relations)

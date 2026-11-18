@@ -772,8 +772,13 @@ bool RelationHandler::HasReverseRelations(const entry_ref* ref, const char* rela
     std::vector<entry_ref> files;
     if (sen::QueryAllVolumes(sen::idlist::ContainsPredicate(ListAttrFor(relationType), sourceId).c_str(), &files) != B_OK)
         return false;
+    // (the list of a file holds the targets of ALL its relations: only a file that has this type of relation to the file counts, or every type that is stored at one side only
+    // would be offered for each file that something points to)
     for (const entry_ref& file : files) {
-        if (!(file == *ref))
+        if (file == *ref)
+            continue;
+        BMessage stored;
+        if (ReadRelationMessage(file, relationType, &stored) == B_OK && sen::relation::CountSets(stored, sourceId) > 0)
             return true;
     }
     return false;
