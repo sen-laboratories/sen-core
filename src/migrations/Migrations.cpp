@@ -18,6 +18,7 @@
 
 #include <sen/Sen.h>
 #include <sen/SenList.h>
+#include <sen/SenOntoCore.h>
 #include <sen/SenOntoPeople.h>
 
 #include "../relations/QueryUtil.h"
@@ -290,11 +291,66 @@ NamesOptionalStep(const OptionalStep& step, const char* word)
 }
 
 
+/**
+ * 2: the relations of the ontologies (an ontology provides a type, a type refers to another: the Dependency and the Reference) were made by the installer with no
+ * provenance when the program that made them had gone before the server looked at who it was. The server keeps the ontologies up to date: it signs them.
+ */
+Counts
+OntologyProvenance(bool dryRun)
+{
+	Counts counts;
+	std::vector<entry_ref> objects;
+	status_t result = sen::QueryAllVolumes((BString(sen::attr::kId) << "==*").String(), &objects);
+	if (result != B_OK) {
+		spdlog::error("migration: the SEN objects could not be looked up: {}", strerror(result));
+		counts.failed++;
+		return counts;
+	}
+
+	for (const entry_ref& object : objects) {
+		BNode node(&object);
+		if (node.InitCheck() != B_OK)
+			continue;
+		for (const char* type : {sen::onto::core::mime::kDependency, sen::onto::core::mime::kReference}) {
+			const BString attribute = RelationAttribute(type);
+			BMessage sets;
+			if (!ReadMessage(node, attribute.String(), &sets))
+				continue;
+
+			bool changed = false;
+			char* target;
+			type_code code;
+			int32 count;
+			for (int32 index = 0; sets.GetInfo(B_MESSAGE_TYPE, index, &target, &code, &count) == B_OK; index++) {
+				for (int32 each = 0; each < count; each++) {
+					BMessage set;
+					if (sets.FindMessage(target, each, &set) != B_OK || set.HasString(sen::onto::core::attr::kRelProvenance))
+						continue;
+					set.AddString(sen::onto::core::attr::kRelProvenance, sen::kServerSignature);
+					sets.ReplaceMessage(target, each, &set);
+					changed = true;
+				}
+			}
+			if (!changed)
+				continue;
+			if (!dryRun && !WriteMessage(node, attribute.String(), sets)) {
+				spdlog::error("migration: could not write {} of {}", attribute.String(), object.name);
+				counts.failed++;
+				continue;
+			}
+			counts.changed++;
+		}
+	}
+	return counts;
+}
+
+
 const std::vector<Step>&
 Steps()
 {
 	static const std::vector<Step> steps = {
 		{1, "personal-relation", "the relation type person.knows is person (PersonalRelation) now", PersonalRelation},
+		{2, "ontology-provenance", "the relations of the ontologies that have no provenance are signed by the server", OntologyProvenance},
 	};
 	return steps;
 }

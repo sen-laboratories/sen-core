@@ -347,9 +347,12 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
 
     // who made it: a program that says so keeps what it said, else the sender of the request (a relation that exists already keeps its first creator)
     if (!properties.HasString(sen::onto::core::attr::kRelProvenance)) {
-        const BString creator = SenderOf(message);
-        if (!creator.IsEmpty())
-            properties.AddString(sen::onto::core::attr::kRelProvenance, creator);
+        BString creator = SenderOf(message);
+        // (nobody can be named when the program that sent the request has gone already, as the installer of the ontologies has when the server looks at who it was: the server keeps the
+        // ontologies up to date and made it, so it signs it)
+        if (creator.IsEmpty())
+            creator = sen::kServerSignature;
+        properties.AddString(sen::onto::core::attr::kRelProvenance, creator);
     }
 
     // what is related is put into the sticky classifications: the relation lists them (not those of the ontologies, and not the associations)
