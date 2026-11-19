@@ -34,7 +34,7 @@ const char* const kStubSignature = "application/x-vnd.sen-plugin.sen-labs.test-d
 
 /** a relation type like those of the ontologies: dynamic, starting at files of one type, ending at places (an entity type, so the server gives the Library folder) */
 void
-InstallType(const char* typeName, const char* preferredApp)
+InstallType(const char* typeName, const char* preferredApp, const char* sourceAttribute = NULL)
 {
 	BMimeType type(typeName);
 	type.Delete();
@@ -52,7 +52,11 @@ InstallType(const char* typeName, const char* preferredApp)
 	config.AddBool(sen::conf::kDynamic, true);
 	config.AddMessage(sen::conf::kRelation, &label);
 	config.AddMessage(sen::conf::kInverse, &inverse);
-	config.AddString(sen::conf::kSourceTypes, kSourceFileType);
+	// (a type that starts at files that have an attribute, whatever their type, names no types)
+	if (sourceAttribute != NULL)
+		config.AddString(sen::conf::kSourceAttributes, sourceAttribute);
+	else
+		config.AddString(sen::conf::kSourceTypes, kSourceFileType);
 	config.AddString(sen::conf::kTargetTypes, sen::onto::spatial::mime::kPlace);
 	config.AddString(sen::conf::kGroup, "Test");
 
@@ -140,6 +144,25 @@ TEST(ADynamicRelationIsOfferedForTheFilesItStartsAt)
 
 	BMessage forOther = Send(sen::cmd::kRelationsGetAll, &other, NULL);
 	CHECK(TypesOf(forOther).count(kDynamicType) == 0);
+	RemoveType(kDynamicType);
+}
+
+TEST(ADynamicRelationIsOfferedAtEveryFileThatHasItsAttribute)
+{
+	// the temporal relations start at anything that has a start (SEN:sourceAttributes), not only at events
+	InstallType(kDynamicType, kStubSignature, "test:startsHere");
+	Fixture f("dyn-attribute", 0);
+	entry_ref plain = f.Create("plain-text", "text/plain");
+	entry_ref picture = f.Create("picture", "image/png");
+	entry_ref without = f.Create("without", "text/plain");
+	const int32 moment = 1;
+	BNode(&plain).WriteAttr("test:startsHere", B_INT32_TYPE, 0, &moment, sizeof(moment));
+	BNode(&picture).WriteAttr("test:startsHere", B_INT32_TYPE, 0, &moment, sizeof(moment));
+
+	CHECK(TypesOf(Send(sen::cmd::kRelationsGetAll, &plain, NULL)).count(kDynamicType) == 1);
+	CHECK(TypesOf(Send(sen::cmd::kRelationsGetAll, &picture, NULL)).count(kDynamicType) == 1);
+	CHECK(TypesOf(Send(sen::cmd::kRelationsGetAll, &without, NULL)).count(kDynamicType) == 0);
+
 	RemoveType(kDynamicType);
 }
 

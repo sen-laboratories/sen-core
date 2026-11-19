@@ -230,7 +230,7 @@ void RelationHandler::HandleRequest(BMessage* message)
 }
 
 static bool IsResolvedByPlugin(const BMessage& relationConfig);
-static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes);
+static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes, const entry_ref& source);
 
 status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
@@ -275,7 +275,7 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
             BMessage config;
             if (relationNames.HasString(type) || GetRelationConfig(type.String(), &config) != B_OK)
                 continue;
-            if (IsResolvedByPluginAt(config, sourceTypes)) {
+            if (IsResolvedByPluginAt(config, sourceTypes, sourceRef)) {
                 relationNames.Add(type);
                 status = B_OK;
             }
@@ -369,9 +369,34 @@ static bool IsResolvedByPlugin(const BMessage& relationConfig)
  * Whether a relation that is worked out when asked for is offered at a file of this type: the relation types are those of the ontologies, and one that names the types that it starts at
  * (SEN:sourceTypes) is offered only at those. The files themselves have no stored relation of it: it is there for every file of the type.
  */
-static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes)
+static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes, const entry_ref& source)
 {
-    return IsResolvedByPlugin(relationConfig) && relationConfig.HasString(sen::conf::kSourceTypes) && MatchesSourceTypes(relationConfig, sourceTypes);
+    if (!IsResolvedByPlugin(relationConfig))
+        return false;
+    const bool byTypes = relationConfig.HasString(sen::conf::kSourceTypes);
+    const bool byAttributes = relationConfig.HasString(sen::conf::kSourceAttributes);
+    if (!byTypes && !byAttributes)
+        return false;
+    if (byTypes && MatchesSourceTypes(relationConfig, sourceTypes))
+        return true;
+    if (!byAttributes)
+        return false;
+
+    // a file that has one of the attributes is a start of the relation, whatever its type (the temporal relations at anything that has a start); the excluded types still win
+    BNode node(&source);
+    if (node.InitCheck() != B_OK)
+        return false;
+    bool has = false;
+    const char* attribute;
+    for (int32 index = 0; !has && relationConfig.FindString(sen::conf::kSourceAttributes, index, &attribute) == B_OK; index++) {
+        attr_info info;
+        has = node.GetAttrInfo(attribute, &info) == B_OK;
+    }
+    if (!has)
+        return false;
+    BMessage withoutTypes(relationConfig);
+    withoutTypes.RemoveName(sen::conf::kSourceTypes);
+    return MatchesSourceTypes(withoutTypes, sourceTypes);
 }
 
 /**
