@@ -8,7 +8,7 @@
  * tested without the network and without places. For the source file it finds the files of its folder that are called `target*` (sorted by name) and answers each as a target; the first,
  * the third... have the label `within`, the second, the fourth... the label `contains`. Each target has the property `SEN:REL:Note` that says what the request held: `libraries=<n>` is the
  * number of Library folders that the server gave (sensei::key::kLibraries), `folder=<name>` the name of the folder of the first, so the test sees that they reach the plugin.
- * If the folder has a file called `slow`, the plugin takes four seconds to answer (a web service that is busy): the test sees that the server is not held up meanwhile.
+ * If the folder has a file called `notfound`, the plugin answers B_ENTRY_NOT_FOUND (nothing found). If the folder has a file called `slow`, the plugin takes four seconds to answer (a web service that is busy): the test sees that the server is not held up meanwhile.
  */
 #include <Application.h>
 #include <Directory.h>
@@ -54,6 +54,9 @@ public:
 				directory.SetTo(&parent);
 			if (directory.Contains("slow"))
 				snooze(4000000);
+			// (a navigator that says "nothing to find" with B_ENTRY_NOT_FOUND: the file has no targets, which is no error)
+			if (directory.Contains("notfound"))
+				result = B_ENTRY_NOT_FOUND;
 			std::vector<entry_ref> targets;
 			entry_ref each;
 			while (directory.GetNextRef(&each) == B_OK) {

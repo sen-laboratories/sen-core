@@ -880,6 +880,11 @@ status_t RelationHandler::ResolveDynamicRelationsWithPlugin(const entry_ref* sou
         return result;
     }
     result = pluginReply.GetInt32(sensei::key::kResult, B_OK);
+    // (a navigator that says that there is nothing to find has found no targets: an empty relation, which is no error)
+    if (result == B_ENTRY_NOT_FOUND) {
+        spdlog::debug("plugin {} found nothing of {} for {}", pluginSig, relationType, sourceRef->name);
+        return B_OK;
+    }
     if (result != B_OK) {
         spdlog::error("plugin {} could not resolve {} of {}: {}", pluginSig, relationType, sourceRef->name, strerror(result));
         return result;

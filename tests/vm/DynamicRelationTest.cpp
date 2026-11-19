@@ -236,6 +236,19 @@ TEST(AFileWithNoTargetsHasNoRelationsAndNoError)
 	RemoveType(kDynamicType);
 }
 
+TEST(ANavigatorThatFindsNothingGivesAnEmptyRelationNotAnError)
+{
+	InstallType(kDynamicType, kStubSignature);
+	Fixture f("dyn-notfound", 0);
+	entry_ref place = f.Create("place", kSourceFileType);
+	f.Create("notfound", "text/plain");
+	BMessage reply = Send(sen::cmd::kRelationsGet, &place, kDynamicType);
+	CHECK_EQ(reply.GetInt32(sen::key::kResult, -1), (int32) B_OK);
+	Answer answer = Get(place, kDynamicType);
+	CHECK(answer.labels.empty());
+	RemoveType(kDynamicType);
+}
+
 TEST(ThePluginIsGivenTheLibraryFolders)
 {
 	// the server waits for the plugin, so the plugin cannot ask it for the Library: it is in the request (sensei::key::kLibraries), a folder for each entity type of the relation
