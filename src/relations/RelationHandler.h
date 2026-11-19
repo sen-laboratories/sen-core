@@ -69,9 +69,11 @@ public:
          * one that is another. The types of a relation (SEN:sourceTypes...) and of a plugin (its file types) are matched against both: whatever they name is meant.
          */
         std::vector<BString> GetTypesForRef (const entry_ref* ref);
+        /** @param relationConfig the configuration of the relation type that is asked for: its label is the kind of every item that the plugin finds (contains) */
         status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
                                                    const BMessage* pluginConfig,
-                                                   BMessage* reply);
+                                                   BMessage* reply,
+                                                   const BMessage* relationConfig = NULL);
         /**
          * @brief The files that a dynamic relation (not a self relation: the spatial ones) relates a file to, asked of the navigator plugin that handles the type.
          *

@@ -208,7 +208,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 	if (GetMessageParameter(message, sensei::key::kPlugin, &pluginTypeParam, NULL, true)  == B_OK) {
         const char* pluginSig = pluginTypeParam.String();
         spdlog::debug("got plugin signature {}, jumping to launch plugin.", pluginSig);
-		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
+		return ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply, &relationConfig);
 	}
 
     // get type->plugin map
@@ -232,7 +232,7 @@ status_t RelationHandler::GetSelfRelationsOfType (const BMessage* message, BMess
 
     const char* pluginSig = pluginType.String();
 
-    result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply);
+    result = ResolveSelfRelationsWithPlugin(pluginSig, &sourceRef, &pluginConfig, reply, &relationConfig);
     if (result != B_OK) {
         spdlog::error("failed to resolve relations of type {} with plugin {}: {}", relationType, pluginSig, strerror(result));
         return result;
@@ -310,11 +310,31 @@ private:
 }   // namespace
 
 //TODO: move to separate class and support dynamic relations via plugins for all relation types!
+/**
+ * What the server adds to every item that an extractor found (the parts of a file): who made the relation, the plugin, and the kind of the relation, which is the label of its type
+ * (the relation Contains says "contains": the file contains the item). What the plugin said itself is kept.
+ */
+static void
+FillExtractedItems(BMessage* items, const char* pluginSig, const char* kind)
+{
+    BMessage item;
+    for (int32 index = 0; items->FindMessage(sen::key::kRelations, index, &item) == B_OK; index++) {
+        if (!item.HasString(sen::onto::core::attr::kRelProvenance))
+            item.AddString(sen::onto::core::attr::kRelProvenance, pluginSig);
+        if (kind[0] != '\0' && !item.HasString(sen::attr::kRelationKind))
+            item.AddString(sen::attr::kRelationKind, kind);
+        FillExtractedItems(&item, pluginSig, kind);
+        items->ReplaceMessage(sen::key::kRelations, index, &item);
+    }
+}
+
+
 status_t RelationHandler::ResolveSelfRelationsWithPlugin(
     const char* pluginSig,
     const entry_ref* sourceRef,
     const BMessage* pluginConfig,
-    BMessage* reply)
+    BMessage* reply,
+    const BMessage* relationConfig)
 {
     spdlog::debug("got plugin app signature: {}", pluginSig);
 
@@ -425,6 +445,12 @@ status_t RelationHandler::ResolveSelfRelationsWithPlugin(
         sen::DumpMessage(pluginReplyTransformed);
         return result;
     }
+
+    BString kind;
+    BMessage labelMessage;
+    if (relationConfig != NULL && relationConfig->FindMessage(sen::conf::kRelation, &labelMessage) == B_OK)
+        kind = labelMessage.GetString(sen::attr::kRelationLabel, "");
+    FillExtractedItems(&pluginReplyTransformed, pluginSig, kind.String());
 
     reply->what = sensei::cmd::kResult;
     reply->AddRef("refs", sourceRef);
@@ -1042,7 +1068,7 @@ status_t RelationHandler::MaterialiseItems(const BMessage* message, BMessage* re
         return result;
     }
 
-    // the entity is a part of the file that it was made from: the relation Contains of the core ontology says so (the file contains it, and it is contained by the file), stored like
+    // the entity is a part of the file that it was made from: the relation Contains of the core ontology says so (the file contains it, and it is contained in the file), stored like
     // any other. The item that it is of is kept with it
     BMessage containsConfig;
     const bool storeContains = GetRelationConfig(sen::onto::core::mime::kContains, &containsConfig) == B_OK;
@@ -1066,6 +1092,11 @@ status_t RelationHandler::MaterialiseItems(const BMessage* message, BMessage* re
             properties.RemoveName(sen::key::kTargetId);
             properties.RemoveName(sen::onto::core::attr::kRelProvenance);
             properties.AddString(sen::onto::core::attr::kRelProvenance, pluginSig);
+            // (the kind of the relation is its label, as for the items of the extractor: "contains"; the entity has the inverse one, "contained in")
+            BMessage containsLabel;
+            if (!properties.HasString(sen::attr::kRelationKind) && containsConfig.FindMessage(sen::conf::kRelation, &containsLabel) == B_OK
+                    && containsLabel.GetString(sen::attr::kRelationLabel, "")[0] != '\0')
+                properties.AddString(sen::attr::kRelationKind, containsLabel.GetString(sen::attr::kRelationLabel, ""));
             sen::AttrSnapshot tx;
             BString relationId;
             bool created = false;

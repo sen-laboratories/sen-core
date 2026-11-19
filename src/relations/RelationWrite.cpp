@@ -163,6 +163,13 @@ BMessage RelationHandler::InverseProperties(const BMessage& relationConfig, cons
         if (label[0] != '\0') {
             inverse.RemoveName(sen::attr::kRelationLabel);
             inverse.AddString(sen::attr::kRelationLabel, label);
+            // (a relation whose kind is its label, "contains", has the label of the other direction as its kind at the other end, "contained in")
+            BMessage forwardLabel;
+            if (properties.HasString(sen::attr::kRelationKind) && relationConfig.FindMessage(sen::conf::kRelation, &forwardLabel) == B_OK
+                    && strcmp(properties.GetString(sen::attr::kRelationKind, ""), forwardLabel.GetString(sen::attr::kRelationLabel, "")) == 0) {
+                inverse.RemoveName(sen::attr::kRelationKind);
+                inverse.AddString(sen::attr::kRelationKind, label);
+            }
         }
     }
     return inverse;
