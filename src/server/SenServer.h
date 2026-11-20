@@ -66,4 +66,5 @@ private:
     bool                fOntologyUpdating;
     /** @brief Packages changed while an update was running: another one follows. */
     bool                fOntologyPending;
+    bool                fOntologyForce;        ///< the next update is the whole check, also when nothing seems to have changed (the menu: Update)
 };
