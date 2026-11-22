@@ -289,6 +289,8 @@ void SenServer::ReadyToRun()
         Quit();
     }
 
+    fUi->RememberCurrentContext();
+
     // the data that older versions made: renamed relation types and the like
     fWorker->Post([config = senConfigHandler]() { return RunMigrations(config); }, BMessenger(this));
 
@@ -620,6 +622,7 @@ void SenServer::MessageReceived(BMessage* message)
                         break;
                     }
                     case B_ENTRY_MOVED: {
+                        fUi->ContextEntryMoved(message);
                         // packages are moved into place when they have been downloaded or are changed
                         BString name = message->GetString("name", "");
                         dev_t device = message->GetInt32("device", -1);

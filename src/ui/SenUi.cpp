@@ -28,6 +28,7 @@
 #include <String.h>
 
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <Invoker.h>
 #include <Message.h>
 #include <MimeType.h>
@@ -55,6 +56,8 @@ SenUi::SenUi(SenConfigHandler* config, RelationHandler* relations)
 	fRelations(relations),
 	fQuitFallback(NULL)
 {
+	fCurrentContext.device = -1;
+	fCurrentContext.node = -1;
 }
 
 
@@ -354,20 +357,28 @@ SenUi::_OpenContexts()
  * A new context: the folder of it is made in the folder of the contexts (New Context, New Context 2... the first name that is free), and that folder is shown in Tracker with the new one selected and its
  * name being edited, as a new classification is when it is made from a menu.
  */
+static BPath ContextPath(const char* name);
+static void SetSticky(const char* context, bool sticky);
+
+
 void
 SenUi::_NewContext()
 {
 	entry_ref context;
+	BString name;
 	status_t result = B_FILE_EXISTS;
 	for (int number = 1; number < 100 && result == B_FILE_EXISTS; number++) {
-		BString name("New Context");
+		name = "New Context";
 		if (number > 1)
 			name << " " << number;
 		result = fConfig->CreateContext(name.String(), &context);
 	}
 
-	if (result == B_OK)
+	if (result == B_OK) {
+		// the new context is the one that is meant from now on (and the rename that follows is followed)
+		_MakeCurrent(name.String());
 		result = OpenInTrackerEditing(context);
+	}
 	_Report("make a new context", result);
 }
 
@@ -421,7 +432,14 @@ SenUi::_SetContext(const BMessage* message)
 			return;		// (let go: the current context stays)
 	}
 
-	// the others let go
+	_MakeCurrent(name);
+}
+
+
+/** Makes the context the current one; the sticky ones other than it let go. */
+void
+SenUi::_MakeCurrent(const char* name)
+{
 	BPath folder = ContextPath("");
 	BDirectory contexts(folder.Path());
 	entry_ref ref;
@@ -430,6 +448,48 @@ SenUi::_SetContext(const BMessage* message)
 			SetSticky(ref.name, false);
 	}
 
+	BMessage change;
+	change.AddString(sen::key::kCurrentContext, name);
+	fConfig->UpdateSettings(&change);
+	RememberCurrentContext();
+}
+
+
+/** The folder of the current context is known by its node, so that a rename (the new context is renamed right after it was made) is followed. */
+void
+SenUi::RememberCurrentContext()
+{
+	fCurrentContext = node_ref();
+	fCurrentContext.node = -1;
+	BMessage settings;
+	fConfig->GetConfig(&settings);
+	BPath path = ContextPath(settings.GetString(sen::key::kCurrentContext, sen::config::kContextDefault));
+	struct stat st;
+	if (path.InitCheck() == B_OK && stat(path.Path(), &st) == 0) {
+		fCurrentContext.device = st.st_dev;
+		fCurrentContext.node = st.st_ino;
+	}
+}
+
+
+/** A folder of the contexts was renamed: if it is the current one, the setting follows it (the name is the one thing that the current context is known by). */
+void
+SenUi::ContextEntryMoved(const BMessage* monitor)
+{
+	BPath folder = ContextPath("");
+	struct stat st;
+	if (fCurrentContext.node < 0 || folder.InitCheck() != B_OK || stat(folder.Path(), &st) != 0)
+		return;
+	if (monitor->GetInt32("device", -1) != fCurrentContext.device || monitor->GetInt64("node", -1) != fCurrentContext.node
+			|| monitor->GetInt64("from directory", -1) != (int64) st.st_ino || monitor->GetInt64("to directory", -1) != (int64) st.st_ino)
+		return;
+
+	const char* name = monitor->GetString("name", "");
+	BMessage settings;
+	fConfig->GetConfig(&settings);
+	if (name[0] == '\0' || strcmp(name, settings.GetString(sen::key::kCurrentContext, "")) == 0)
+		return;
+	spdlog::info("the current context was renamed to \"{}\"", name);
 	BMessage change;
 	change.AddString(sen::key::kCurrentContext, name);
 	fConfig->UpdateSettings(&change);
