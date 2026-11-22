@@ -64,9 +64,16 @@ public:
 
         /** @return the MIME type of a file, guessed if it has none; empty if there is none */
         BString     GetMimeTypeForRef       (const entry_ref* ref);
+        /**
+         * @return the types that a file is looked up by: its technical type (the MIME type, `application/pdf`), then its semantic type (`META:TYPE`, `entity/...`, `document/...`) if it has
+         * one that is another. The types of a relation (SEN:sourceTypes...) and of a plugin (its file types) are matched against both: whatever they name is meant.
+         */
+        std::vector<BString> GetTypesForRef (const entry_ref* ref);
+        /** @param relationConfig the configuration of the relation type that is asked for: its label is the kind of every item that the plugin finds (contains) */
         status_t    ResolveSelfRelationsWithPlugin(const char* pluginSig, const entry_ref* sourceRef,
                                                    const BMessage* pluginConfig,
-                                                   BMessage* reply);
+                                                   BMessage* reply,
+                                                   const BMessage* relationConfig = NULL);
         /**
          * @brief The files that a dynamic relation (not a self relation: the spatial ones) relates a file to, asked of the navigator plugin that handles the type.
          *
@@ -75,6 +82,19 @@ public:
          * @return B_OK (also if nothing is found), B_NAME_NOT_FOUND if no navigator handles the type, or the error of the plugin
          */
         status_t    ResolveDynamicRelationsWithPlugin(const entry_ref* sourceRef, const char* relationType, BMessage* relations, BMessage* idToRefMap);
+        /**
+         * @brief The Library folders of the entity types that a relation is between or stands for (the source types, the target types, `SEN:materialiseAs`): a field for each type that
+         * holds the folder as a ref. A plugin that makes entities is given them (sensei::key::kLibraries): it cannot ask the server, which waits for its answer.
+         */
+        void        GetLibrariesFor(const char* relationType, BMessage* libraries);
+        /**
+         * @brief Makes the entities that the items of a relation with `SEN:materialiseAs` stand for (sen::cmd::kRelationsMaterialise), by the plugin of the relation (sensei::cmd::kMaterialise).
+         * The reply has a sensei::key::kTargets message for each item that has an entity (its ref and `SEN:ID`, the item).
+         * @return B_NOT_SUPPORTED if the relation has no `SEN:materialiseAs`
+         */
+        status_t    MaterialiseItems(const BMessage* message, BMessage* reply);
+        /** takes away the stored relations from @p source to entities of the same item (all the properties in @p item are those of the set) that are gone (not found, or in the Trash), except the one to @p keepTargetId */
+        void        RemoveStaleSets(const entry_ref& source, const char* relationType, const char* keepTargetId, const BMessage& item);
 
 /**
  * The requests that need a plugin are handed to the channel of that plugin (src/plugins/PluginChannels.h) and answered from its thread; the others are handled at once.

@@ -77,6 +77,15 @@ BString RelationHandler::PluginSignatureFor(const BMessage* message)
                 return plugin;
             return BString("sen extractors");
         }
+        case sen::cmd::kRelationsMaterialise:
+        {
+            // the entities of the items are made by the plugin of the relation (its preferred application)
+            BString relationType;
+            char signature[B_MIME_TYPE_LENGTH];
+            if (message->FindString(sen::key::kRelationType, &relationType) == B_OK && BMimeType(relationType.String()).GetPreferredApp(signature) == B_OK)
+                return BString(signature);
+            return BString();
+        }
         default:
             return BString();
     }
@@ -137,6 +146,11 @@ void RelationHandler::HandleRequest(BMessage* message)
         case sen::cmd::kRelationsGetAllSelf:
         {
             result = GetSelfRelations(message, reply);
+            break;
+        }
+        case sen::cmd::kRelationsMaterialise:
+        {
+            result = MaterialiseItems(message, reply);
             break;
         }
         case sen::cmd::kRelationsGetCompatible:
@@ -216,7 +230,7 @@ void RelationHandler::HandleRequest(BMessage* message)
 }
 
 static bool IsResolvedByPlugin(const BMessage& relationConfig);
-static bool IsResolvedByPluginAt(const BMessage& relationConfig, const char* sourceType);
+static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes, const entry_ref& source);
 
 status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
@@ -255,13 +269,13 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
     // Relations that are worked out when they are asked for (the spatial ones: within, touches...) are stored nowhere. They are offered for every file of the types that they start
     // at; what they find is asked of their navigator plugin when the user opens the relation (GetRelationsOfType), so nothing is worked out for a menu that is only shown.
     if (BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &installedTypes) == B_OK && installedTypes.FindStrings("types", &installed) == B_OK) {
-        BString sourceType = GetMimeTypeForRef(&sourceRef);
+        std::vector<BString> sourceTypes = GetTypesForRef(&sourceRef);
         for (int32 i = 0; i < installed.CountStrings(); i++) {
             const BString& type = installed.StringAt(i);
             BMessage config;
             if (relationNames.HasString(type) || GetRelationConfig(type.String(), &config) != B_OK)
                 continue;
-            if (IsResolvedByPluginAt(config, sourceType.String())) {
+            if (IsResolvedByPluginAt(config, sourceTypes, sourceRef)) {
                 relationNames.Add(type);
                 status = B_OK;
             }
@@ -316,15 +330,17 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
  * it cannot start at (SEN:excludeSourceTypes, which wins). A type is a MIME type or the start of one, e.g. a supertype
  * ("audio"), like the filters for the templates of a new file (see TemplateUtils in Tracker).
  */
-static bool MatchesSourceTypes(const BMessage& relationConfig, const char* sourceType)
+static bool MatchesSourceTypes(const BMessage& relationConfig, const std::vector<BString>& sourceTypes)
 {
+    // (a file has a technical type and may have a semantic one: it matches if either does)
     auto matches = [&](const char* field, int32* count) {
         bool found = false;
         const char* pattern;
         *count = 0;
         for (int32 index = 0; relationConfig.FindString(field, index, &pattern) == B_OK; index++) {
             (*count)++;
-            found = found || BString(sourceType).IStartsWith(pattern);
+            for (const BString& type : sourceTypes)
+                found = found || type.IStartsWith(pattern);
         }
         return found;
     };
@@ -336,11 +352,11 @@ static bool MatchesSourceTypes(const BMessage& relationConfig, const char* sourc
     return (includes == 0 || included) && !excluded;
 }
 
-static bool IsCompatibleWithSource(const BMessage& relationConfig, const char* sourceType)
+static bool IsCompatibleWithSource(const BMessage& relationConfig, const std::vector<BString>& sourceTypes)
 {
     if (relationConfig.GetBool(sen::conf::kDynamic, false))
         return false;
-    return MatchesSourceTypes(relationConfig, sourceType);
+    return MatchesSourceTypes(relationConfig, sourceTypes);
 }
 
 /** A relation that is worked out when it is asked for by a navigator plugin: dynamic, and not a self relation (those are the parts of a file, resolved by extractors). */
@@ -353,16 +369,41 @@ static bool IsResolvedByPlugin(const BMessage& relationConfig)
  * Whether a relation that is worked out when asked for is offered at a file of this type: the relation types are those of the ontologies, and one that names the types that it starts at
  * (SEN:sourceTypes) is offered only at those. The files themselves have no stored relation of it: it is there for every file of the type.
  */
-static bool IsResolvedByPluginAt(const BMessage& relationConfig, const char* sourceType)
+static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes, const entry_ref& source)
 {
-    return IsResolvedByPlugin(relationConfig) && relationConfig.HasString(sen::conf::kSourceTypes) && MatchesSourceTypes(relationConfig, sourceType);
+    if (!IsResolvedByPlugin(relationConfig))
+        return false;
+    const bool byTypes = relationConfig.HasString(sen::conf::kSourceTypes);
+    const bool byAttributes = relationConfig.HasString(sen::conf::kSourceAttributes);
+    if (!byTypes && !byAttributes)
+        return false;
+    if (byTypes && MatchesSourceTypes(relationConfig, sourceTypes))
+        return true;
+    if (!byAttributes)
+        return false;
+
+    // a file that has one of the attributes is a start of the relation, whatever its type (the temporal relations at anything that has a start); the excluded types still win
+    BNode node(&source);
+    if (node.InitCheck() != B_OK)
+        return false;
+    bool has = false;
+    const char* attribute;
+    for (int32 index = 0; !has && relationConfig.FindString(sen::conf::kSourceAttributes, index, &attribute) == B_OK; index++) {
+        attr_info info;
+        has = node.GetAttrInfo(attribute, &info) == B_OK;
+    }
+    if (!has)
+        return false;
+    BMessage withoutTypes(relationConfig);
+    withoutTypes.RemoveName(sen::conf::kSourceTypes);
+    return MatchesSourceTypes(withoutTypes, sourceTypes);
 }
 
 /**
  * Whether a relation can end at a file of this type: the types in SEN:targetTypes if it names any, else (a relation that is stored at the target, too, as
  * it is by default) the types that it can start at; not those that it excludes (SEN:excludeTargetTypes, and for such a relation SEN:excludeSourceTypes).
  */
-static bool IsCompatibleWithTarget(const BMessage& relationConfig, const char* targetType)
+static bool IsCompatibleWithTarget(const BMessage& relationConfig, const std::vector<BString>& targetTypes)
 {
     auto matches = [&](const char* field, int32* count) {
         bool found = false;
@@ -370,7 +411,8 @@ static bool IsCompatibleWithTarget(const BMessage& relationConfig, const char* t
         *count = 0;
         for (int32 index = 0; relationConfig.FindString(field, index, &pattern) == B_OK; index++) {
             (*count)++;
-            found = found || BString(targetType).IStartsWith(pattern);
+            for (const BString& type : targetTypes)
+                found = found || type.IStartsWith(pattern);
         }
         return found;
     };
@@ -396,7 +438,7 @@ status_t RelationHandler::GetAllRelationsOfSelection(const BMessage* message, co
 {
     BStringList names;
     BMessage configs;
-    std::vector<BString> fileTypes;
+    std::vector<std::vector<BString>> fileTypes;
     bool first = true;
 
     for (const entry_ref& source : sources) {
@@ -406,8 +448,10 @@ status_t RelationHandler::GetAllRelationsOfSelection(const BMessage* message, co
         single.RemoveName(sen::key::kWithConfigs);
         single.AddBool(sen::key::kWithConfigs, true);
 
-        BString type = GetMimeTypeForRef(&source);
-        fileTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
+        std::vector<BString> types = GetTypesForRef(&source);
+        if (types.empty())
+            types.push_back(BString("application/octet-stream"));
+        fileTypes.push_back(types);
 
         // (a file that has none, or cannot be read, has none in common with the others)
         BMessage one;
@@ -447,8 +491,8 @@ status_t RelationHandler::GetAllRelationsOfSelection(const BMessage* message, co
             BMessage restrictions(config);
             restrictions.RemoveName(sen::conf::kDynamic);
             for (size_t file = 0; fits && file < fileTypes.size(); file++) {
-                fits = IsCompatibleWithSource(restrictions, fileTypes[file].String())
-                    || IsCompatibleWithTarget(restrictions, fileTypes[file].String());
+                fits = IsCompatibleWithSource(restrictions, fileTypes[file])
+                    || IsCompatibleWithTarget(restrictions, fileTypes[file]);
             }
         }
         if (!fits) {
@@ -566,7 +610,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         return status;
     }
 
-    std::vector<BString> sourceTypes, targetTypes;
+    std::vector<std::vector<BString>> sourceTypes, targetTypes;    // (for each file: its technical and its semantic type)
     entry_ref ref;
     for (int32 index = 0; message->FindRef(sen::key::kSourceRef, index, &ref) == B_OK; index++) {
         BNode node(&ref);
@@ -576,16 +620,20 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
             return status;
         }
         // a file without a type: what the MIME database makes of its name and content
-        BString type = GetMimeTypeForRef(&ref);
-        sourceTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
+        std::vector<BString> types = GetTypesForRef(&ref);
+        if (types.empty())
+            types.push_back(BString("application/octet-stream"));
+        sourceTypes.push_back(types);
     }
     for (int32 index = 0; message->FindRef(sen::key::kTargetRef, index, &ref) == B_OK; index++) {
-        BString type = GetMimeTypeForRef(&ref);
-        targetTypes.push_back(type.IsEmpty() ? BString("application/octet-stream") : type);
+        std::vector<BString> types = GetTypesForRef(&ref);
+        if (types.empty())
+            types.push_back(BString("application/octet-stream"));
+        targetTypes.push_back(types);
     }
     bool betweenFiles = !targetTypes.empty();
     spdlog::debug("searching for relations compatible with {} source(s) and {} target(s), first source {}...",
-        sourceTypes.size(), targetTypes.size(), sourceTypes[0].String());
+        sourceTypes.size(), targetTypes.size(), sourceTypes[0][0].String());
 
     BMessage relationTypes;
     status = BMimeType::GetInstalledTypes(sen::mime::kRelationSupertype, &relationTypes);
@@ -617,11 +665,11 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
         // a relation without a config (not registered yet) has no restrictions
         if (hasConfig) {
             for (size_t s = 0; compatible && s < sourceTypes.size(); s++)
-                compatible = IsCompatibleWithSource(config, sourceTypes[s].String());
+                compatible = IsCompatibleWithSource(config, sourceTypes[s]);
             // (the opposite direction is stored at the target, too, unless the relation says it is not: see IsCompatibleWithTarget)
             if (compatible && betweenFiles) {
                 for (size_t t = 0; compatible && t < targetTypes.size(); t++)
-                    compatible = IsCompatibleWithTarget(config, targetTypes[t].String());
+                    compatible = IsCompatibleWithTarget(config, targetTypes[t]);
             }
         }
 
@@ -629,14 +677,14 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
             bool association = type == sen::mime::kAssociationRelation;
             for (size_t s = 0; compatible && s < sourceTypes.size(); s++) {
                 for (size_t t = 0; compatible && t < targetTypes.size(); t++) {
-                    bool sourceLabel = isClassification(sourceTypes[s]), targetLabel = isClassification(targetTypes[t]);
+                    bool sourceLabel = isClassification(sourceTypes[s][0]), targetLabel = isClassification(targetTypes[t][0]);
                     compatible = association ? sourceLabel != targetLabel : sourceLabel == targetLabel;
                 }
             }
         }
 
         if (!compatible) {
-            spdlog::debug("relation {} is not compatible with {}.", type.String(), sourceTypes[0].String());
+            spdlog::debug("relation {} is not compatible with {}.", type.String(), sourceTypes[0][0].String());
             continue;
         }
         types.Add(type);
@@ -651,7 +699,7 @@ status_t RelationHandler::GetCompatibleRelations(const BMessage* message, BMessa
     reply->what = sen::cmd::kReplyRelations;
     reply->AddStrings(sen::key::kRelations, types);
     reply->AddString(sen::key::kDetail, BString("got ")
-                    << types.CountStrings() << " relation(s) compatible with " << sourceTypes[0] << " from " << sourceRef.name);
+                    << types.CountStrings() << " relation(s) compatible with " << sourceTypes[0][0] << " from " << sourceRef.name);
 
     return B_OK;
 }

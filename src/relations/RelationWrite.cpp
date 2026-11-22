@@ -163,6 +163,13 @@ BMessage RelationHandler::InverseProperties(const BMessage& relationConfig, cons
         if (label[0] != '\0') {
             inverse.RemoveName(sen::attr::kRelationLabel);
             inverse.AddString(sen::attr::kRelationLabel, label);
+            // (a relation whose kind is its label, "contains", has the label of the other direction as its kind at the other end, "contained in")
+            BMessage forwardLabel;
+            if (properties.HasString(sen::attr::kRelationKind) && relationConfig.FindMessage(sen::conf::kRelation, &forwardLabel) == B_OK
+                    && strcmp(properties.GetString(sen::attr::kRelationKind, ""), forwardLabel.GetString(sen::attr::kRelationLabel, "")) == 0) {
+                inverse.RemoveName(sen::attr::kRelationKind);
+                inverse.AddString(sen::attr::kRelationKind, label);
+            }
         }
     }
     return inverse;
@@ -340,9 +347,12 @@ status_t RelationHandler::AddRelation(const BMessage* message, BMessage* reply)
 
     // who made it: a program that says so keeps what it said, else the sender of the request (a relation that exists already keeps its first creator)
     if (!properties.HasString(sen::onto::core::attr::kRelProvenance)) {
-        const BString creator = SenderOf(message);
-        if (!creator.IsEmpty())
-            properties.AddString(sen::onto::core::attr::kRelProvenance, creator);
+        BString creator = SenderOf(message);
+        // (nobody can be named when the program that sent the request has gone already, as the installer of the ontologies has when the server looks at who it was: the server keeps the
+        // ontologies up to date and made it, so it signs it)
+        if (creator.IsEmpty())
+            creator = sen::kServerSignature;
+        properties.AddString(sen::onto::core::attr::kRelProvenance, creator);
     }
 
     // what is related is put into the sticky classifications: the relation lists them (not those of the ontologies, and not the associations)
@@ -772,8 +782,13 @@ bool RelationHandler::HasReverseRelations(const entry_ref* ref, const char* rela
     std::vector<entry_ref> files;
     if (sen::QueryAllVolumes(sen::idlist::ContainsPredicate(ListAttrFor(relationType), sourceId).c_str(), &files) != B_OK)
         return false;
+    // (the list of a file holds the targets of ALL its relations: only a file that has this type of relation to the file counts, or every type that is stored at one side only
+    // would be offered for each file that something points to)
     for (const entry_ref& file : files) {
-        if (!(file == *ref))
+        if (file == *ref)
+            continue;
+        BMessage stored;
+        if (ReadRelationMessage(file, relationType, &stored) == B_OK && sen::relation::CountSets(stored, sourceId) > 0)
             return true;
     }
     return false;

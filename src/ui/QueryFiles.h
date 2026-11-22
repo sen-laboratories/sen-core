@@ -22,6 +22,9 @@ status_t MakeQueryFile(const char* name, const char* predicate, entry_ref* ref, 
 /** Ask Tracker to open the file (a query shows its results in a window). */
 status_t OpenInTracker(const entry_ref& ref);
 
+/** Ask Tracker to open the folder that holds the file, with the file selected and its name being edited (a file that was just made, to be named). */
+status_t OpenInTrackerEditing(const entry_ref& file);
+
 /**
  * Ask Tracker (Akita) to open the folder of the relations of a type of a file: the files that a classification has, for the association relation. A
  * Tracker that does not know the request (stock Tracker) gives B_NOT_SUPPORTED.

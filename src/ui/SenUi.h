@@ -6,6 +6,7 @@
 
 #include <MessageRunner.h>
 #include <Messenger.h>
+#include <Node.h>
 
 class BMessage;
 class BWindow;
@@ -31,6 +32,12 @@ public:
 	/** Close the windows. */
 	void			CloseWindows();
 
+	/** Note the folder of the current context (call when the settings are loaded). */
+	void			RememberCurrentContext();
+
+	/** A node monitor message `B_ENTRY_MOVED`: a renamed current context stays the current one. */
+	void			ContextEntryMoved(const BMessage* monitor);
+
 private:
 	void			_Show(BMessenger* window, BWindow* (SenUi::*make)(), uint32 activate);
 	BWindow*		_MakeInfo();
@@ -46,12 +53,14 @@ private:
 	void			_OpenPlugins();
 	void			_ShowPluginAbout(const BMessage* message);
 	void			_SetContext(const BMessage* message);
+	void			_MakeCurrent(const char* name);
 	void			_AskToQuit();
 	void			_Quit();
 	void			_Restart();
 	/** restarts Akita with its own command (`akita restart`), which quits it and starts it again */
 	void			_RestartAkita();
 	void			_OpenContexts();
+	void			_NewContext();
 	void			_OpenOntologies();
 	void			_OpenOntology(const BMessage* message);
 	void			_OpenType(const BMessage* message);
@@ -63,6 +72,7 @@ private:
 	BMessenger			fCheck;
 	BMessenger			fAbout;
 	BMessenger			fGraph;
+	node_ref			fCurrentContext;
 	/** @brief When the server was asked to stop but is no service of the launch daemon, it quits by itself after a moment. */
 	BMessageRunner*		fQuitFallback;
 };

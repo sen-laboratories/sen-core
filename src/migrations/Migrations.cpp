@@ -14,10 +14,14 @@
 
 #include <string.h>
 
+#include <map>
+#include <string>
+
 #include <spdlog/spdlog.h>
 
 #include <sen/Sen.h>
 #include <sen/SenList.h>
+#include <sen/SenOntoCore.h>
 #include <sen/SenOntoPeople.h>
 
 #include "../relations/QueryUtil.h"
@@ -290,11 +294,141 @@ NamesOptionalStep(const OptionalStep& step, const char* word)
 }
 
 
+/**
+ * 2: the relations of the ontologies (an ontology provides a type, a type refers to another: the Dependency and the Reference) were made by the installer with no
+ * provenance when the program that made them had gone before the server looked at who it was. The server keeps the ontologies up to date: it signs them.
+ */
+Counts
+OntologyProvenance(bool dryRun)
+{
+	Counts counts;
+	std::vector<entry_ref> objects;
+	status_t result = sen::QueryAllVolumes((BString(sen::attr::kId) << "==*").String(), &objects);
+	if (result != B_OK) {
+		spdlog::error("migration: the SEN objects could not be looked up: {}", strerror(result));
+		counts.failed++;
+		return counts;
+	}
+
+	for (const entry_ref& object : objects) {
+		BNode node(&object);
+		if (node.InitCheck() != B_OK)
+			continue;
+		for (const char* type : {sen::onto::core::mime::kDependency, sen::onto::core::mime::kReference}) {
+			const BString attribute = RelationAttribute(type);
+			BMessage sets;
+			if (!ReadMessage(node, attribute.String(), &sets))
+				continue;
+
+			bool changed = false;
+			char* target;
+			type_code code;
+			int32 count;
+			for (int32 index = 0; sets.GetInfo(B_MESSAGE_TYPE, index, &target, &code, &count) == B_OK; index++) {
+				for (int32 each = 0; each < count; each++) {
+					BMessage set;
+					if (sets.FindMessage(target, each, &set) != B_OK || set.HasString(sen::onto::core::attr::kRelProvenance))
+						continue;
+					set.AddString(sen::onto::core::attr::kRelProvenance, sen::kServerSignature);
+					sets.ReplaceMessage(target, each, &set);
+					changed = true;
+				}
+			}
+			if (!changed)
+				continue;
+			if (!dryRun && !WriteMessage(node, attribute.String(), sets)) {
+				spdlog::error("migration: could not write {} of {}", attribute.String(), object.name);
+				counts.failed++;
+				continue;
+			}
+			counts.changed++;
+		}
+	}
+	return counts;
+}
+
+
+/**
+ * 3: the relations of the ontologies to their types show what the type is: the description of the type in the MIME database (the long one, else the short one) is the Description of the
+ * relation (SEN:REL:Desc), as the installer makes it now.
+ */
+Counts
+OntologyDescriptions(bool dryRun)
+{
+	Counts counts;
+	std::vector<entry_ref> objects;
+	status_t result = sen::QueryAllVolumes((BString(sen::attr::kId) << "==*").String(), &objects);
+	if (result != B_OK) {
+		spdlog::error("migration: the SEN objects could not be looked up: {}", strerror(result));
+		counts.failed++;
+		return counts;
+	}
+
+	// the files by their SEN:ID (the targets of the relations are kept by it)
+	std::map<std::string, entry_ref> byId;
+	for (const entry_ref& object : objects) {
+		BNode node(&object);
+		BString id;
+		if (node.InitCheck() == B_OK && node.ReadAttrString(sen::attr::kId, &id) == B_OK && !id.IsEmpty())
+			byId[id.String()] = object;
+	}
+
+	for (const entry_ref& object : objects) {
+		BNode node(&object);
+		if (node.InitCheck() != B_OK)
+			continue;
+		for (const char* type : {sen::onto::core::mime::kDependency, sen::onto::core::mime::kReference}) {
+			const BString attribute = RelationAttribute(type);
+			BMessage sets;
+			if (!ReadMessage(node, attribute.String(), &sets))
+				continue;
+
+			bool changed = false;
+			char* target;
+			type_code code;
+			int32 count;
+			for (int32 index = 0; sets.GetInfo(B_MESSAGE_TYPE, index, &target, &code, &count) == B_OK; index++) {
+				auto found = byId.find(target);
+				if (found == byId.end())
+					continue;
+				BNode typeNode(&found->second);
+				BString description;
+				if (typeNode.InitCheck() != B_OK)
+					continue;
+				if (typeNode.ReadAttrString("META:L:DESC", &description) != B_OK || description.IsEmpty())
+					typeNode.ReadAttrString("META:S:DESC", &description);
+				if (description.IsEmpty())
+					continue;
+				for (int32 each = 0; each < count; each++) {
+					BMessage set;
+					if (sets.FindMessage(target, each, &set) != B_OK || set.HasString(sen::onto::core::attr::kRelDesc))
+						continue;
+					set.AddString(sen::onto::core::attr::kRelDesc, description.String());
+					sets.ReplaceMessage(target, each, &set);
+					changed = true;
+				}
+			}
+			if (!changed)
+				continue;
+			if (!dryRun && !WriteMessage(node, attribute.String(), sets)) {
+				spdlog::error("migration: could not write {} of {}", attribute.String(), object.name);
+				counts.failed++;
+				continue;
+			}
+			counts.changed++;
+		}
+	}
+	return counts;
+}
+
+
 const std::vector<Step>&
 Steps()
 {
 	static const std::vector<Step> steps = {
 		{1, "personal-relation", "the relation type person.knows is person (PersonalRelation) now", PersonalRelation},
+		{2, "ontology-provenance", "the relations of the ontologies that have no provenance are signed by the server", OntologyProvenance},
+		{3, "ontology-descriptions", "the relations of the ontologies show the description of their type", OntologyDescriptions},
 	};
 	return steps;
 }

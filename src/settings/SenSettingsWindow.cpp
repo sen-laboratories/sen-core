@@ -498,6 +498,8 @@ SettingsWindow::SettingsWindow(const entry_ref* pluginFile, const char* node)
 	fWaiting(false),
 	fStartedTeam(-1),
 	fSerial(0),
+	fHasResend(false),
+	fActionPending(false),
 	fTimeout(NULL)
 {
 	fTree = new BOutlineListView("tree", B_SINGLE_SELECTION_LIST);
@@ -818,6 +820,8 @@ SettingsWindow::_Select(const Target* target)
 	fPage = target->page;
 	fName = target->name;
 	fFile = target->file;
+	fActionPending = false;
+	fHasResend = false;
 	fModified = false;
 	// (Basho's server has no About window of its own: it is not a plugin of SEN)
 	fInfo->SetActive(!target->core && !target->signature.IsEmpty() && target->signature != kLocationServerSignature && BEntry(&target->file).Exists());
@@ -937,6 +941,7 @@ SettingsWindow::_Ready(BMessage* message)
 			text << ": " << (result == B_TIMED_OUT ? "does not answer." : strerror(result));
 		_ShowNote(text.String());
 		_Status("");
+		fHasResend = false;
 		return;
 	}
 
@@ -951,6 +956,12 @@ SettingsWindow::_Ready(BMessage* message)
 		fForm->Show();
 	_Status("");
 	_UpdateButtons();
+	if (fHasResend) {
+		fHasResend = false;
+		BMessage again(fResend);
+		fResend.MakeEmpty();
+		_SendChanges(again, false);
+	}
 }
 
 
@@ -985,14 +996,19 @@ SettingsWindow::_Action(BMessage* message)
 		return;
 	BMessage changes;
 	changes.AddBool(path, true);
-	_Status("Waiting for the answer...");
+	// (a button that has a line of its own for what came of it says there that the answer is awaited: the status line of the window is then for nothing else, and is cleared)
+	BMessage attributes;
+	const bool hasLine = fSchema.FindMessage(path, &attributes) == B_OK && attributes.HasString(form::kAttrShows);
+	_Status(hasLine ? "" : "Waiting for reply...");
+	fActionPending = hasLine;
+	fActionPath = path;
 	_SendChanges(changes);
 }
 
 
 // Sends changes to the owner of the settings: the server (Core, Plugins, Enrich), or the plugin or server that has a session with this window.
 void
-SettingsWindow::_SendChanges(const BMessage& changes)
+SettingsWindow::_SendChanges(const BMessage& changes, bool retry)
 {
 	BMessage set(fCore ? sen::cmd::kCoreSettingsSet : sensei::cmd::kSettingsSet);
 	if (fCore)
@@ -1008,8 +1024,29 @@ SettingsWindow::_SendChanges(const BMessage& changes)
 		if (session != fSessions.end())
 			target = session->second;
 	}
-	if (!target.IsValid() || target.SendMessage(&set, this) != B_OK)
+	if (!target.IsValid() || target.SendMessage(&set, this) != B_OK) {
+		// A plugin ends its session when nothing was said to it for a minute (a page that is only looked at): it is started again, and what was to be sent goes after its answer.
+		if (retry && !fCore && !fSignature.IsEmpty() && !fWaiting) {
+			fResend = changes;
+			fHasResend = true;
+			fSessions.erase(fSignature.String());
+			Target again;
+			again.core = false;
+			again.scope = fScope;
+			again.signature = fSignature;
+			again.page = fPage;
+			again.name = fName;
+			again.file = fFile;
+			_Request(again);
+			return;
+		}
 		_Status("The settings could not be sent.");
+		if (fActionPending) {
+			// (the button that was greyed is enabled again)
+			fActionPending = false;
+			form::ActionDone(fForm, fActionPath.String());
+		}
+	}
 }
 
 
@@ -1025,9 +1062,17 @@ SettingsWindow::_Answered(BMessage* message)
 		_Status("");
 
 	BMessage settings;
-	if (message->FindMessage(form::kFieldSettings, &settings) == B_OK && !settings.HasSameData(fSettings, true, true)) {
+	const bool have = message->FindMessage(form::kFieldSettings, &settings) == B_OK;
+	const bool changed = have && !settings.HasSameData(fSettings, true, true);
+	if (changed)
 		fSettings = settings;
-		form::SetData(fForm, settings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
+	// New data make the form again (which also enables a button that was pressed); an answer that says what the form has only ends the waiting of the button
+	if (changed) {
+		fActionPending = false;
+		form::SetData(fForm, fSettings, fSchema.IsEmpty() ? NULL : &fSchema, fHasDefaults ? &fDefaultsMessage : NULL, BMessenger(this), true, fName.String());
+	} else if (fActionPending) {
+		fActionPending = false;
+		form::ActionDone(fForm, fActionPath.String());
 	}
 }
 

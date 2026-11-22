@@ -4,6 +4,7 @@
  */
 
 #include <sen/Sen.h>
+#include <sen/SenAttributes.h>
 #include <sen/SenOntoCore.h>
 #include <sen/SenSettingsForm.h>
 #include <sen/SenVersion.h>
@@ -82,7 +83,7 @@ static bool FindOntologyInstaller(BPath* path)
 }
 
 /** runs the installer, in the worker of the server (it talks to this server to relate the ontologies to their types); the message that it returns tells the server how it went */
-static BMessage* RunOntologyUpdate()
+static BMessage* RunOntologyUpdate(bool force)
 {
 	int32 result = 0;
 	BPath installer;
@@ -92,6 +93,8 @@ static BMessage* RunOntologyUpdate()
 		BPath log;
 		BString command;
 		command << "'" << installer.Path() << "' --update";
+		if (force)
+			command << " --force";
 		if (find_directory(B_USER_SETTINGS_DIRECTORY, &log) == B_OK && log.Append("sen/ontologies-update.log") == B_OK)
 			command << " > '" << log.Path() << "' 2>&1";
 		result = system(command.String());
@@ -207,6 +210,7 @@ SenServer::SenServer() : BApplication(sen::kServerSignature)
     fOntologyTimer = NULL;
     fOntologyUpdating = false;
     fOntologyPending = false;
+    fOntologyForce = false;
 
 	// watch all mounted volumes for new entries to ensure that copies get their own SEN:ID, and be told about volumes that
 	// are mounted later
@@ -258,7 +262,7 @@ void SenServer::EnsureIndices(dev_t device)
 
 	for (unsigned i = 0; i < sen::onto::core::kIndexCount; i++) {
 		const sen::onto::core::Index& index = sen::onto::core::kIndices[i];
-		if (fs_create_index(device, index.name, index.type, 0) == 0) {
+		if (fs_create_index(device, index.name, sen::IndexTypeOf(index.type), 0) == 0) {
 			spdlog::info("created index {} on volume {}", index.name, (int)device);
 		} else if (errno != B_FILE_EXISTS) {
 			spdlog::error("failed to create index {} on volume {}: {}", index.name, (int)device, strerror(errno));
@@ -284,6 +288,8 @@ void SenServer::ReadyToRun()
         spdlog::critical("critical error, aborting.");
         Quit();
     }
+
+    fUi->RememberCurrentContext();
 
     // the data that older versions made: renamed relation types and the like
     fWorker->Post([config = senConfigHandler]() { return RunMigrations(config); }, BMessenger(this));
@@ -354,12 +360,14 @@ void SenServer::StartOntologyUpdate()
         fOntologyPending = true;
         return;
     }
-    if (fWorker->Post(RunOntologyUpdate, BMessenger(this)) != B_OK) {
+    const bool force = fOntologyForce;
+    if (fWorker->Post([force]() { return RunOntologyUpdate(force); }, BMessenger(this)) != B_OK) {
         spdlog::warn("could not start the ontology update");
         return;
     }
     fOntologyUpdating = true;
     fOntologyPending = false;
+    fOntologyForce = false;
 }
 
 void SenServer::RemoveDeskbarItem()
@@ -443,8 +451,10 @@ void SenServer::MessageReceived(BMessage* message)
 			StartOntologyUpdate();
 		return;
 	}
-	// the menu: now, not when a package changes (the update does nothing if the ontologies are up to date)
+	// the menu: now, not when a package changes
+	// (the menu asks for the whole check: the installer does nothing when it finds that nothing changed since its last complete update, and a person who chooses Update wants it looked at)
 	if (message->what == sen::cmd::kUiUpdateOntologies) {
+		fOntologyForce = true;
 		ScheduleOntologyUpdate(200000, 1);
 		return;
 	}
@@ -612,6 +622,7 @@ void SenServer::MessageReceived(BMessage* message)
                         break;
                     }
                     case B_ENTRY_MOVED: {
+                        fUi->ContextEntryMoved(message);
                         // packages are moved into place when they have been downloaded or are changed
                         BString name = message->GetString("name", "");
                         dev_t device = message->GetInt32("device", -1);
@@ -763,6 +774,7 @@ void SenServer::MessageReceived(BMessage* message)
         case sen::cmd::kRelationsGetAll:
         case sen::cmd::kRelationsGetSelf:
         case sen::cmd::kRelationsGetAllSelf:
+        case sen::cmd::kRelationsMaterialise:
         case sen::cmd::kRelationsGetCompatible:
         case sen::cmd::kRelationsGetCompatibleTypes:
 		case sen::cmd::kRelationAdd:

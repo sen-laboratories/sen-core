@@ -45,16 +45,32 @@ TypeOf(const entry_ref& ref)
 	return BString(type);
 }
 
-/** the first plugin of those that enrich that says that it handles the type */
+/** the semantic type of a file (META:TYPE) if it has one that is not its technical type, else empty */
+static BString
+SemanticTypeOf(const entry_ref& ref, const BString& technical)
+{
+	BString semantic;
+	BNode node(&ref);
+	if (node.InitCheck() != B_OK || node.ReadAttrString(sensei::key::kSemanticType, &semantic) != B_OK || semantic == technical)
+		return BString();
+	return semantic;
+}
+
+/**
+ * The first plugin of those that enrich that says that it handles the type of the file: its technical type (application/pdf), or its semantic type (document/...) that an earlier enrichment
+ * has set: a plugin names what it supports, either one.
+ */
 static bool
-PluginFor(const std::vector<entry_ref>& plugins, const BString& type, entry_ref* found)
+PluginFor(const std::vector<entry_ref>& plugins, const BString& type, const BString& semanticType, entry_ref* found)
 {
 	for (const entry_ref& plugin : plugins) {
 		BFile file(&plugin, B_READ_ONLY);
 		if (file.InitCheck() != B_OK)
 			continue;
 		BAppFileInfo info(&file);
-		if (info.InitCheck() == B_OK && info.IsSupportedType(type.String())) {
+		if (info.InitCheck() != B_OK)
+			continue;
+		if (info.IsSupportedType(type.String()) || (!semanticType.IsEmpty() && info.IsSupportedType(semanticType.String()))) {
 			*found = plugin;
 			return true;
 		}
@@ -152,7 +168,7 @@ Handle(const BMessage& request, BString* detail)
 		files++;
 		const BString type = TypeOf(ref);
 		entry_ref plugin;
-		if (type.IsEmpty() || !PluginFor(plugins, type, &plugin)) {
+		if (type.IsEmpty() || !PluginFor(plugins, type, SemanticTypeOf(ref, type), &plugin)) {
 			spdlog::info("enrich: no plugin handles '{}' (type '{}')", ref.name, type.String());
 			unhandled++;
 			if (!unhandledNames.IsEmpty())
