@@ -8,9 +8,11 @@
 #include <sen/Sen.h>
 
 #include <Directory.h>
+#include <Entry.h>
 #include <File.h>
 #include <FindDirectory.h>
 #include <Messenger.h>
+#include <Node.h>
 #include <NodeInfo.h>
 #include <Path.h>
 #include <String.h>
@@ -66,6 +68,34 @@ MakeQueryFile(const char* name, const char* predicate, entry_ref* ref, const cha
 
 	BEntry entry(&folder, fileName.String());
 	return entry.GetRef(ref);
+}
+
+
+status_t
+OpenInTrackerEditing(const entry_ref& file)
+{
+	BMessenger tracker(kTrackerSignature);
+	if (!tracker.IsValid())
+		return B_NOT_INITIALIZED;
+
+	BEntry entry(&file);
+	BEntry parent;
+	entry_ref folder;
+	node_ref node;
+	status_t result = entry.GetParent(&parent);
+	if (result == B_OK)
+		result = parent.GetRef(&folder);
+	if (result == B_OK)
+		result = entry.GetNodeRef(&node);
+	if (result != B_OK)
+		return result;
+
+	// (as the file manager's own jump to a new entity: the folder is opened, the item is selected and its name is edited)
+	BMessage open(B_REFS_RECEIVED);
+	open.AddRef("refs", &folder);
+	open.AddData("nodeRefToSelect", B_RAW_TYPE, &node, sizeof(node_ref));
+	open.AddData("nodeRefToEdit", B_RAW_TYPE, &node, sizeof(node_ref));
+	return tracker.SendMessage(&open);
 }
 
 

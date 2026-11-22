@@ -25,6 +25,17 @@ public:
      */
     status_t    UpdateSettings(const BMessage* changes);
 
+    /**
+     * creates a new context with the given name (a folder in the folder of the contexts), returns the `entry_ref` of it.
+     * Fails with B_FILE_EXISTS if the context exists already. Only touches the file system: can be called from any thread (the Deskbar menu's New... does).
+     *
+     * @param name  the custom name of the context
+     * @param ref   an optional `entry_ref` to hold the resulting context dir ref
+     *
+     * @return `B_OK` or the status code of the last error.
+     */
+    status_t    CreateContext(const char* name, entry_ref* ref = NULL);
+
 virtual         ~SenConfigHandler();
 
 virtual	void	MessageReceived(BMessage* message);
@@ -35,17 +46,6 @@ private:
     status_t    LoadSettings(BMessage* message);
 
     status_t    SaveSettings(const BMessage* message);
-
-    /**
-     * creates a new context with the given name, returns the `entry_ref` of the new file.
-     * Fails if context directory already exists.
-     *
-     * @param name  the custom name of the context
-     * @param ref   an optional `entry_ref` to hold the resulting context dir ref
-     *
-     * @return `B_OK` or the status code of the last error.
-     */
-    status_t    CreateContext(const char* name, entry_ref* ref = NULL);
 
     /**
      * shortcut to quickly resolve the corresponding directory for the given context.

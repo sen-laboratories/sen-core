@@ -115,6 +115,9 @@ SenUi::Handle(BMessage* message)
 		case sen::cmd::kUiOpenContexts:
 			_OpenContexts();
 			return true;
+		case sen::cmd::kUiNewContext:
+			_NewContext();
+			return true;
 		case sen::cmd::kUiOpenOntologies:
 			_OpenOntologies();
 			return true;
@@ -344,6 +347,28 @@ SenUi::_OpenContexts()
 	if (result == B_OK)
 		result = OpenInTracker(folder);
 	_Report("open the contexts", result);
+}
+
+
+/**
+ * A new context: the folder of it is made in the folder of the contexts (New Context, New Context 2... the first name that is free), and that folder is shown in Tracker with the new one selected and its
+ * name being edited, as a new classification is when it is made from a menu.
+ */
+void
+SenUi::_NewContext()
+{
+	entry_ref context;
+	status_t result = B_FILE_EXISTS;
+	for (int number = 1; number < 100 && result == B_FILE_EXISTS; number++) {
+		BString name("New Context");
+		if (number > 1)
+			name << " " << number;
+		result = fConfig->CreateContext(name.String(), &context);
+	}
+
+	if (result == B_OK)
+		result = OpenInTrackerEditing(context);
+	_Report("make a new context", result);
 }
 
 

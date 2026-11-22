@@ -200,6 +200,7 @@ DeskbarView::IsServerCommand(uint32 command)
 		case sen::cmd::kUiOpenClassified:
 		case sen::cmd::kUiSetContext:
 		case sen::cmd::kUiOpenContexts:
+		case sen::cmd::kUiNewContext:
 		case sen::cmd::kUiOpenPlugins:
 		case sen::cmd::kUiShowPluginAbout:
 			return true;
@@ -377,6 +378,9 @@ DeskbarView::_AddContextMenu(BMenu* menu)
 	}
 
 	BMenu* contexts = new BMenu("Context");
+	// (a new one first, with a line under it that sets it apart from the contexts that there are: the folder of the contexts opens with it made, and its name is edited)
+	contexts->AddItem(new BMenuItem("New" B_UTF8_ELLIPSIS, new BMessage(sen::cmd::kUiNewContext)));
+	contexts->AddSeparatorItem();
 	for (const std::string& name : names) {
 		BMessage* message = new BMessage(sen::cmd::kUiSetContext);
 		message->AddString(sen::key::kContext, name.c_str());

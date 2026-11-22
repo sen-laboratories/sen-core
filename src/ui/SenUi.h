@@ -52,6 +52,7 @@ private:
 	/** restarts Akita with its own command (`akita restart`), which quits it and starts it again */
 	void			_RestartAkita();
 	void			_OpenContexts();
+	void			_NewContext();
 	void			_OpenOntologies();
 	void			_OpenOntology(const BMessage* message);
 	void			_OpenType(const BMessage* message);
