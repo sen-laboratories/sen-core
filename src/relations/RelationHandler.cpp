@@ -232,6 +232,44 @@ void RelationHandler::HandleRequest(BMessage* message)
 static bool IsResolvedByPlugin(const BMessage& relationConfig);
 static bool IsResolvedByPluginAt(const BMessage& relationConfig, const std::vector<BString>& sourceTypes, const entry_ref& source);
 
+/**
+ * A relation that is `SEN:inverseOnly` is offered from the side of its target only: the relations of a file that say its forward direction (the label of the relation: "contains") are left out,
+ * the ones of the opposite direction ("contained in") are kept. The forward direction is what the self relation of the file shows ("Open contained").
+ * @param relations target ID -> the properties of its relations (sets), as ReadRelationsOfType() gives them; the hidden ones are taken out of it
+ * @return the number of sets that are left
+ */
+static int32
+DropHiddenDirection(const BMessage& relationConfig, BMessage* relations)
+{
+    char* name;
+    type_code type;
+    int32 count = 0;
+    if (!relationConfig.GetBool(sen::conf::kInverseOnly, false))
+        return relations->CountNames(B_MESSAGE_TYPE);
+    BMessage forward;
+    BString forwardLabel;
+    if (relationConfig.FindMessage(sen::conf::kRelation, &forward) == B_OK)
+        forwardLabel = forward.GetString(sen::attr::kRelationLabel, "");
+    if (forwardLabel.IsEmpty())
+        return relations->CountNames(B_MESSAGE_TYPE);
+
+    BMessage kept;
+    int32 sets = 0;
+    for (int32 i = 0; relations->GetInfo(B_MESSAGE_TYPE, i, &name, &type, &count) == B_OK; i++) {
+        for (int32 set = 0; set < count; set++) {
+            BMessage properties;
+            if (relations->FindMessage(name, set, &properties) != B_OK)
+                continue;
+            if (forwardLabel == properties.GetString(sen::attr::kRelationKind, ""))
+                continue;
+            kept.AddMessage(name, &properties);
+            sets++;
+        }
+    }
+    *relations = kept;
+    return sets;
+}
+
 status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref sourceRef;
@@ -281,6 +319,14 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
             }
         }
     }
+    // a relation that is offered from the side of its target only is not there for a file that has only the forward direction of it (the file contains the parts: Open contained shows them)
+    for (int32 i = relationNames.CountStrings() - 1; i >= 0; i--) {
+        BMessage config, relations;
+        if (GetRelationConfig(relationNames.StringAt(i).String(), &config) != B_OK || !config.GetBool(sen::conf::kInverseOnly, false))
+            continue;
+        if (ReadRelationsOfType(&sourceRef, relationNames.StringAt(i).String(), &relations) == B_OK && DropHiddenDirection(config, &relations) == 0)
+            relationNames.Remove(i);
+    }
     if (relationNames.IsEmpty()) {
         return status;
     }
@@ -301,6 +347,7 @@ status_t RelationHandler::GetAllRelations(const BMessage* message, BMessage* rep
             if (status != B_OK) {
                 return status;
             }
+            DropHiddenDirection(dynamicConfig, &relations);
             reply->AddMessage(relation.String(), new BMessage(relations));
         }
     }
@@ -817,6 +864,16 @@ status_t RelationHandler::GetRelationsOfType(const BMessage* message, BMessage* 
         status = ResolveDynamicRelationsWithPlugin(&sourceRef, relationType, &relations, &resolved);    // (a dynamic relation is stored nowhere: its navigator works it out now)
     else
         status = ReadRelationsOfType(&sourceRef, relationType, &relations, &resolved, NULL);
+    if (status == B_OK && !IsResolvedByPlugin(relationConfig)) {
+        // (what is offered from the side of the target only: the part that the file contains is left out, with the files that it resolved)
+        DropHiddenDirection(relationConfig, &relations);
+        char* resolvedName;
+        type_code resolvedType;
+        for (int32 i = resolved.CountNames(B_REF_TYPE) - 1; i >= 0; i--) {
+            if (resolved.GetInfo(B_REF_TYPE, i, &resolvedName, &resolvedType) == B_OK && !relations.HasMessage(resolvedName))
+                resolved.RemoveName(resolvedName);
+        }
+    }
     if (status == B_OK) {
         char* targetName;
         type_code targetType;
