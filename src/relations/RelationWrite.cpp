@@ -27,6 +27,7 @@
 #include <Path.h>
 #include <String.h>
 
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -816,13 +817,16 @@ status_t RelationHandler::ResolveReverseRelations(const entry_ref* ref, const ch
     relationConfig.FindMessage(sen::conf::kInverse, &inverseConfig);
     const char* inverseLabel = inverseConfig.GetString(sen::attr::kRelationLabel, "");
 
+    // (a query can report the same file more than once: the sets of a file are added once. The identity in the graph is the SEN:ID, which every file that is found has: it is
+    // what the query was for, and what the relations are keyed by)
+    std::set<std::string> seen;
     for (const entry_ref& file : files) {
         if (file == *ref)
             continue;
 
         char fileId[sen::id::kLength];
         BMessage stored;
-        if (GetOrCreateId(&file, fileId, false) != B_OK || ReadRelationMessage(file, relationType, &stored) != B_OK)
+        if (GetOrCreateId(&file, fileId, false) != B_OK || !seen.insert(fileId).second || ReadRelationMessage(file, relationType, &stored) != B_OK)
             continue;
 
         int32 sets = sen::relation::CountSets(stored, sourceId);
