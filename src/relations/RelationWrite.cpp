@@ -242,13 +242,21 @@ status_t RelationHandler::AddRelationTx(const entry_ref& source, const entry_ref
     if (status == B_NAME_IN_USE) {
         spdlog::debug("relation {} to {} with the same properties exists already.", relationType, targetId);
         // one that was made before relations knew their creator learns it now (both directions); the one that has it keeps it
-        if (sen::relation::FillProvenance(&forward, targetId, properties)) {
+        // (and a higher estimate of how sure it is, in both directions: never a lower one, and never a change of a relation that a person made or confirmed)
+        const bool filled = sen::relation::FillProvenance(&forward, targetId, properties);
+        const bool merged = sen::relation::MergeConfidence(&forward, targetId, properties);
+        if (filled || merged) {
             status = StoreRelationMessage(source, relationType, forward, tx);
             if (status == B_OK && ShouldWriteInverse(relationConfig, sourceType, targetType) && ! (source == target)) {
                 BMessage inverse;
                 status = ReadRelationMessage(target, relationType, &inverse);
-                if (status == B_OK && sen::relation::FillProvenance(&inverse, sourceId, InverseProperties(relationConfig, properties)))
-                    status = StoreRelationMessage(target, relationType, inverse, tx);
+                if (status == B_OK) {
+                    const BMessage inverseProperties = InverseProperties(relationConfig, properties);
+                    const bool inverseFilled = sen::relation::FillProvenance(&inverse, sourceId, inverseProperties);
+                    const bool inverseMerged = sen::relation::MergeConfidence(&inverse, sourceId, inverseProperties);
+                    if (inverseFilled || inverseMerged)
+                        status = StoreRelationMessage(target, relationType, inverse, tx);
+                }
             }
             return status;
         }

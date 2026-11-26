@@ -5,6 +5,7 @@
 #include "RelationSets.h"
 
 #include <sen/Sen.h>
+#include <sen/SenConfidence.h>
 #include <sen/SenOntoCore.h>
 
 namespace sen {
@@ -21,12 +22,13 @@ WithoutId(const BMessage& set)
     return copy;
 }
 
-/** the properties that make two sets the same: without the relation id, and without the provenance (who made a relation does not make it another one) */
+/** the properties that make two sets the same: without the relation id, and without the provenance and the confidence (who made a relation, and how sure it is, do not make it another one) */
 BMessage
 Identity(const BMessage& set)
 {
     BMessage copy(WithoutId(set));
     copy.RemoveName(onto::core::attr::kRelProvenance);
+    copy.RemoveName(onto::core::attr::kRelConfidence);
     return copy;
 }
 
@@ -84,6 +86,32 @@ FillProvenance(BMessage* relations, const char* targetId, const BMessage& proper
             existing.AddString(onto::core::attr::kRelProvenance, creator);
             return relations->ReplaceMessage(targetId, i, &existing) == B_OK;
         }
+    }
+    return false;
+}
+
+bool
+MergeConfidence(BMessage* relations, const char* targetId, const BMessage& properties)
+{
+    float incoming;
+    if (properties.FindFloat(onto::core::attr::kRelConfidence, &incoming) != B_OK)
+        return false;
+
+    const BMessage wanted = Identity(properties);
+    const int32 count = CountSets(*relations, targetId);
+    for (int32 i = 0; i < count; i++) {
+        BMessage existing;
+        if (relations->FindMessage(targetId, i, &existing) != B_OK || !Identity(existing).HasSameData(wanted))
+            continue;
+        float stored;
+        // (a relation without a value was made or confirmed by a person, or by a source that states it: it stays so)
+        if (existing.FindFloat(onto::core::attr::kRelConfidence, &stored) != B_OK)
+            return false;
+        const float merged = (float)confidence::Merge(stored, incoming);
+        if (merged == stored)
+            return false;
+        existing.ReplaceFloat(onto::core::attr::kRelConfidence, merged);
+        return relations->ReplaceMessage(targetId, i, &existing) == B_OK;
     }
     return false;
 }

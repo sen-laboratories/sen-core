@@ -123,6 +123,65 @@ TEST(ARelationFromBeforeProvenanceLearnsItsCreatorWhenItIsMadeAgain)
 	CHECK_STR(set.GetString(sen::onto::core::attr::kRelProvenance, ""), "relation-test");
 }
 
+// adds the relation with a confidence (a program's estimate: see SenConfidence.h)
+static void
+AddWithConfidence(const Fixture& f, float confidence)
+{
+	BMessage properties;
+	properties.AddFloat(sen::onto::core::attr::kRelConfidence, confidence);
+	BMessage add(sen::cmd::kRelationAdd), reply;
+	add.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	add.AddString(sen::key::kRelationType, kReference);
+	add.AddRef(sen::key::kTargetRef, &f.refs[1]);
+	add.AddMessage(sen::key::kRelationProperties, &properties);
+	BMessenger(sen::kServerSignature).SendMessage(&add, &reply);
+}
+
+// -1: the relation has no confidence
+static float
+ConfidenceOf(const Fixture& f, int side)
+{
+	BMessage relations = Stored(f.refs[side], kReference), set;
+	if (relations.FindMessage(IdOf(f.refs[1 - side]).c_str(), &set) != B_OK)
+		return -2;
+	float value;
+	return set.FindFloat(sen::onto::core::attr::kRelConfidence, &value) == B_OK ? value : -1;
+}
+
+TEST(TheConfidenceOfARelationOnlyGoesUpAndIsNotPartOfItsIdentity)
+{
+	Fixture f("confidence", 2);
+	AddWithConfidence(f, 0.5f);
+	CHECK_EQ(ConfidenceOf(f, 0), 0.5f);
+	CHECK_EQ(ConfidenceOf(f, 1), 0.5f);
+
+	// more evidence: the same relation, a higher estimate on both sides
+	AddWithConfidence(f, 0.8f);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
+	CHECK_EQ(Sets(f.refs[1], kReference, IdOf(f.refs[0])), 1);
+	CHECK_EQ(ConfidenceOf(f, 0), 0.8f);
+	CHECK_EQ(ConfidenceOf(f, 1), 0.8f);
+
+	// a lower one later (an enrichment with less to go on) changes nothing
+	AddWithConfidence(f, 0.6f);
+	CHECK_EQ(ConfidenceOf(f, 0), 0.8f);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
+
+	// a relation that a person made (no value) stays so, whatever an enrichment estimates
+	Fixture g("confidence-asserted", 2);
+	Send(sen::cmd::kRelationAdd, &g.refs[0], kReference, &g.refs[1]);
+	AddWithConfidence(g, 0.9f);
+	CHECK_EQ(Sets(g.refs[0], kReference, IdOf(g.refs[1])), 1);
+	CHECK_EQ(ConfidenceOf(g, 0), -1.0f);
+	CHECK_EQ(ConfidenceOf(g, 1), -1.0f);
+
+	// and one that was confirmed (1) is never lowered
+	Fixture h("confidence-confirmed", 2);
+	AddWithConfidence(h, 1.0f);
+	AddWithConfidence(h, 0.3f);
+	CHECK_EQ(ConfidenceOf(h, 0), 1.0f);
+}
+
 TEST(SeveralRelationsToOneTargetGetRelationIdsInStepWithTheirOppositeDirection)
 {
 	Fixture f("several", 2);

@@ -60,6 +60,17 @@ status_t AddSet(BMessage* relations, const char* targetId, const BMessage& prope
 bool FillProvenance(BMessage* relations, const char* targetId, const BMessage& properties);
 
 /**
+ * @brief Updates the confidence (`SEN:REL:Confidence`) of the set that is the same as @p properties, when the relation is made again with a higher estimate.
+ *
+ * How sure a program is does not make a relation another one (see AddSet()). The stored value goes up to the new estimate and never down (sen::confidence::Merge()); a relation that has
+ * no value (made or confirmed by a person, or stated by its source) is left as it is, and so is one that has the value 1.
+ *
+ * @param properties the properties of the relation that is made again; without a confidence nothing is changed
+ * @return true if a set was changed (the relations have to be stored)
+ */
+bool MergeConfidence(BMessage* relations, const char* targetId, const BMessage& properties);
+
+/**
  * @brief Find the set of one relation.
  *
  * @param relationId the relation id, or empty if the target has only one set
