@@ -182,6 +182,29 @@ TEST(TheConfidenceOfARelationOnlyGoesUpAndIsNotPartOfItsIdentity)
 	CHECK_EQ(ConfidenceOf(h, 0), 1.0f);
 }
 
+TEST(RemoveAllAlsoTakesAwayTheOneWayRelationsThatOtherFilesHaveToTheFile)
+{
+	// an association is stored with the file that has it only: the label knows nothing of it, so removing everything of the label has to look for the files
+	Fixture f("removeall-incoming", 2);
+	entry_ref label = f.Create("label", kLabelType);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kAssociation, &label);
+	Send(sen::cmd::kRelationAdd, &f.refs[1], kAssociation, &label);
+	std::string labelId = IdOf(label);
+	CHECK(sen::idlist::Contains(List(f.refs[0], sen::attr::kMeta), labelId));
+	CHECK(sen::idlist::Contains(List(f.refs[1], sen::attr::kMeta), labelId));
+
+	BMessage reply = Send(sen::cmd::kRelationsRemoveAll, &label, NULL);
+	CHECK_EQ(SenStatus(reply), sen::status::kOk);
+	CHECK(!sen::idlist::Contains(List(f.refs[0], sen::attr::kMeta), labelId));
+	CHECK(!sen::idlist::Contains(List(f.refs[1], sen::attr::kMeta), labelId));
+	CHECK(!IdOf(label).empty());		// the label keeps its identity
+
+	// the other files keep what is theirs
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+	Send(sen::cmd::kRelationsRemoveAll, &label, NULL);
+	CHECK_EQ(Sets(f.refs[0], kReference, IdOf(f.refs[1])), 1);
+}
+
 TEST(SeveralRelationsToOneTargetGetRelationIdsInStepWithTheirOppositeDirection)
 {
 	Fixture f("several", 2);

@@ -166,6 +166,14 @@ private:
         /** the relations of unidirectional types that point to a file, found by query for its ID in SEN:META / SEN:TO */
         status_t    ResolveReverseRelations(const entry_ref* ref, const char* relationType, const BMessage& relationConfig,
                                             BMessage* relations, BMessage* idToRefMap);
+        /**
+         * Removes the relations that other files have TO this file and that are stored only with them: the unidirectional types (an Affiliation of a person with an institution, an association with a
+         * context), which the target knows nothing of. The files that list it are found by query for its ID in SEN:TO and SEN:META. Bidirectional relations are gone with the ones of the file itself.
+         * @param onlyType a relation type, or NULL for all
+         * @param removed gets the number of relations removed added to it
+         */
+        status_t    RemoveIncomingRelations(const entry_ref& target, const char* onlyType, bool allowReadOnly,
+                                            sen::AttrSnapshot* tx, int32* removed);
         /** whether a file of the ID of this one lists it as a target of a relation of the type (what ResolveReverseRelations() would find) */
         bool        HasReverseRelations(const entry_ref* ref, const char* relationType);
 

@@ -560,6 +560,60 @@ status_t RelationHandler::RemoveRelation(const BMessage* message, BMessage* repl
     return B_OK;
 }
 
+status_t RelationHandler::RemoveIncomingRelations(const entry_ref& target, const char* onlyType, bool allowReadOnly,
+                                                  sen::AttrSnapshot* tx, int32* removed)
+{
+    char targetId[sen::id::kLength];
+    status_t status = GetOrCreateId(&target, targetId, false);
+    if (status == B_ENTRY_NOT_FOUND || status == B_NAME_NOT_FOUND)
+        return B_OK;    // no ID: nothing can point to the file
+    if (status != B_OK)
+        return status;
+
+    // the files that list the target: relations are in SEN:TO, associations and classifications in SEN:META
+    std::vector<entry_ref> files;
+    for (const char* list : {sen::attr::kTo, sen::attr::kMeta}) {
+        BString predicate("(");
+        predicate << sen::idlist::ContainsPredicate(list, targetId).c_str() << ")";
+        std::vector<entry_ref> found;
+        if (sen::QueryAllVolumes(predicate.String(), &found) == B_OK)
+            files.insert(files.end(), found.begin(), found.end());
+    }
+
+    // (a query can report a file more than once, and the same file for both lists: the SEN:ID is the identity)
+    std::set<std::string> seen;
+    for (const entry_ref& file : files) {
+        if (file == target)
+            continue;
+        char fileId[sen::id::kLength];
+        if (GetOrCreateId(&file, fileId, false) != B_OK || !seen.insert(fileId).second)
+            continue;
+
+        BStringList types;
+        if (onlyType != NULL)
+            types.Add(onlyType);
+        else
+            ReadRelationNames(&file, &types);
+
+        for (int32 t = 0; t < types.CountStrings(); t++) {
+            BMessage stored;
+            if (ReadRelationMessage(file, types.StringAt(t).String(), &stored) != B_OK || sen::relation::CountSets(stored, targetId) == 0)
+                continue;
+
+            BString removedId;
+            status = RemoveRelationTx(file, types.StringAt(t).String(), targetId, "", true, tx, &removedId, allowReadOnly);
+            if (status == B_NOT_ALLOWED) {
+                status = B_OK;      // read-only relations stay
+                continue;
+            }
+            if (status != B_OK)
+                return status;
+            (*removed)++;
+        }
+    }
+    return B_OK;
+}
+
 status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* reply)
 {
     entry_ref source;
@@ -622,6 +676,10 @@ status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* 
             removed++;
         }
     }
+
+    // what other files have to this one and keep only with themselves (the one-way relations): not for a clean-up of stale relations, the file is there
+    if (status == B_OK && !staleOnly)
+        status = RemoveIncomingRelations(source, onlyType.IsEmpty() ? NULL : onlyType.String(), message->GetBool(sen::key::kOverride, false), &tx, &removed);
 
     if (status != B_OK) {
         tx.Restore();
