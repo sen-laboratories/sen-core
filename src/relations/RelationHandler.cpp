@@ -1208,29 +1208,39 @@ status_t RelationHandler::GetMessageParameter(
 }
 
 status_t RelationHandler::GetRelationConfigs(const BStringList* relations, BMessage* relationConfigs) {
-    status_t status = B_OK;
-
     for (int i = 0; i < relations->CountStrings(); i++) {
         BString relation = relations->StringAt(i);
         BMessage relationConf;
 
-        status = GetRelationConfig(relation.String(), &relationConf);
+        status_t status = GetRelationConfig(relation.String(), &relationConf);
 
         spdlog::debug("got relation config for type {}:", relation.String());
         sen::DumpMessage(relationConf);
 
-        if (status == B_OK) {
-            status = relationConfigs->AddMessage(relation.String(), &relationConf);
-        } else {
-            spdlog::error("failed to get relation config for type {}: {}", relation.String(), strerror(status));
-            continue;
+        if (status != B_OK) {
+            // A config that cannot be read now (the MIME database is being written by the installer of the ontologies, say) must not take the others with it, nor leave the type without
+            // a name: the menus show what the name says. The type is named by its description, else by the last part of its name; the rest is what the config says when it can be read.
+            spdlog::error("failed to get relation config for type {}: {}, naming it only", relation.String(), strerror(status));
+            relationConf = BMessage();
+            char shortName[B_MIME_TYPE_LENGTH];
+            shortName[0] = '\0';
+            BMimeType(relation.String()).GetShortDescription(shortName);
+            if (shortName[0] == '\0') {
+                const char* dot = strrchr(relation.String(), '.');
+                strlcpy(shortName, dot != NULL ? dot + 1 : relation.String(), sizeof(shortName));
+                if (shortName[0] >= 'a' && shortName[0] <= 'z')
+                    shortName[0] = (char)(shortName[0] - 'a' + 'A');
+            }
+            relationConf.AddString(sen::key::kRelationName, shortName);
         }
+        relationConfigs->AddMessage(relation.String(), &relationConf);
     }
 
     spdlog::debug("collected relation configs in msg:");
     sen::DumpMessage(relationConfigs);
 
-    return status;
+    // (a type that could not be read has its name; the answer has the configs that there are)
+    return B_OK;
 }
 
 status_t RelationHandler::GetRelationConfig(const char* mimeType, BMessage* relationConfig)
