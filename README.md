@@ -40,7 +40,9 @@ Needs the SEN API headers ([sento](https://github.com/sen-laboratories/sento), `
 
 The log level is set with the environment variable `SEN_LOG_LEVEL` (`trace`, `debug`, `info`, `warning`, `error`, `off`). The server needs the
 core ontology installed (`sen-oni`: `./scripts/oni.sh ontologies/core`), which also creates the BFS indices on all mounted volumes; the server checks
-them on every volume at start and when a volume is mounted. `create-sen-indices.sh` repairs the indices of a system.
+them on every volume at start and when a volume is mounted. `create-sen-indices.sh` makes the indices of a system, `repair-sen-indices.sh` (`sen repair`, the Repair button of *Check & Repair* in the SEN menu, the command message `sen::cmd::kRepairIndices`)
+makes damaged ones again: an index that does not find files that have the attribute, or stops at an entry of a deleted file (after a crash or a forced stop), is removed, created and
+the attribute of the SEN objects written again (`sen::stats::RepairIndices`).
 
 ### The Deskbar item
 
@@ -71,11 +73,12 @@ server for the options that print information and exit, which need no running se
 > sen version         # SEN Server 1.0.0 development (2026-10-11, build 0)
 > sen info            # the number of SEN objects, types and relations
 > sen types           # the types and relations as a tree, with the number of files
-> sen check           # duplicate SEN:IDs, types that are not installed, missing indices
+> sen check           # duplicate SEN:IDs, types that are not installed, missing or damaged indices
+> sen repair          # make damaged indices of SEN again (--force: all of them, --deep: write every file of the volumes, slow)
 > sen migrate         # the changes to your data that this version needs (renamed relation types...): done and to do; --dry-run only counts
 ```
 
-(`sen_server --version`, `--info`, `--types`, `--check`, `--migrate` do the same.)
+(`sen_server --version`, `--info`, `--types`, `--check`, `--repair`, `--migrate` do the same.)
 
 ### Migrations
 

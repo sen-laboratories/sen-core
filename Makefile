@@ -32,6 +32,7 @@ SRCS := src/relations/RelationHandler.cpp \
 	src/ui/SenUi.cpp \
 	src/ui/StatItem.cpp \
 	src/stats/SenStats.cpp \
+	src/stats/SenIndices.cpp \
 	src/server/SenServer.cpp
 
 RDEFS = src/resources/sen_server.rdef

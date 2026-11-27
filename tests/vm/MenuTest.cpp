@@ -77,7 +77,7 @@ main()
 	auto check = [&](const char* what, bool ok) { printf("%s %s\n", ok ? "ok  " : "FAIL", what); if (!ok) failed++; };
 	int ontologies = Index(top, "Ontologies"), settings = Index(top, "Settings"), restart = Index(top, "Restart SEN Server"), akita = Index(top, "Restart Akita"), about = Index(top, "About" B_UTF8_ELLIPSIS), quit = Index(top, "Quit");
 	int plugins = Index(top, "Plugins"), graph = Index(top, "Graph" B_UTF8_ELLIPSIS), info = Index(top, "Info" B_UTF8_ELLIPSIS),
-		check_ = Index(top, "Check" B_UTF8_ELLIPSIS);
+		check_ = Index(top, "Check & Repair" B_UTF8_ELLIPSIS);
 	// Plugins, Ontologies, Graph, a separator, then Info, Check and Settings
 	check("Plugins and Ontologies are next to each other, above the windows about SEN", plugins >= 0 && ontologies == plugins + 1
 		&& graph == ontologies + 1 && info == graph + 2 && check_ == info + 1 && settings == check_ + 1);

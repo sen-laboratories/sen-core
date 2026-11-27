@@ -7,6 +7,7 @@
 
 #include "../migrations/Migrations.h"
 #include "../stats/SenStats.h"
+#include "../stats/SenIndices.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -18,6 +19,7 @@
 #include <File.h>
 #include <FindDirectory.h>
 #include <Message.h>
+#include <Messenger.h>
 #include <Path.h>
 #include <Roster.h>
 #include <String.h>
@@ -288,6 +290,49 @@ Library(int argc, char* argv[])
 }
 
 
+/**
+ * `--repair [--force] [--deep]`: make the indices of SEN that are damaged again (see SenIndices.h). The running server does it when it is asked with
+ * sen::cmd::kRepairIndices (it knows what it writes itself); without a server it is done here.
+ * @return 0 if all indices are in order now, 1 if not
+ */
+int
+Repair(int argc, char* argv[])
+{
+	bool force = false;
+	bool deep = false;
+	for (int i = 2; i < argc; i++) {
+		if (strcmp(argv[i], "--force") == 0)
+			force = true;
+		else if (strcmp(argv[i], "--deep") == 0)
+			deep = true;
+		else {
+			fprintf(stderr, "unknown argument '%s'\n", argv[i]);
+			return 2;
+		}
+	}
+
+	if (be_roster->IsRunning(sen::kServerSignature)) {
+		BMessage request(sen::cmd::kRepairIndices);
+		request.AddBool(sen::key::kForce, force);
+		request.AddBool(sen::key::kDeep, deep);
+		BMessage reply;
+		// (a deep repair of a large volume takes minutes)
+		status_t result = BMessenger(sen::kServerSignature).SendMessage(&request, &reply, 30 * 60 * 1000000LL, 30 * 60 * 1000000LL);
+		if (result != B_OK) {
+			fprintf(stderr, "the SEN server did not answer: %s\n", strerror(result));
+			return 1;
+		}
+		printf("%s", reply.GetString(sen::key::kDetail, ""));
+		return reply.GetInt32(sen::key::kResult, B_ERROR) == B_OK ? 0 : 1;
+	}
+
+	printf("(the SEN server is not running: repairing here)\n");
+	RepairResult result;
+	status_t status = RepairIndices(&result, force, deep, [](const BString& line) { printf("%s\n", line.String()); fflush(stdout); });
+	return status == B_OK ? 0 : 1;
+}
+
+
 void
 Usage(FILE* out, const char* program)
 {
@@ -297,7 +342,9 @@ Usage(FILE* out, const char* program)
 		"  --version  the name and version of the server\n"
 		"  --info     an overview: SEN objects, types and relations installed\n"
 		"  --types    the installed types and relations as a tree, with the number of files of each\n"
-		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing indices\n"
+		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing or damaged indices\n"
+		"  --repair [--force] [--deep]  make the indices of SEN that are damaged again (a query that does not find files that have the attribute): remove, create,\n"
+		"             write the attributes of the SEN objects again; --force all indices, --deep every file of the volumes (slow); the server does it if it runs\n"
 		"  --migrate  make the data of the user what this version expects (renamed relation types...): the steps that are done and to do\n"
 		"             (--migrate --dry-run only counts; the server runs the steps itself when it starts)\n"
 		"  --migrate <type>  a change that adds to what other programs keep, for the files of a type (a short name like person, or application/x-person):\n"
@@ -326,6 +373,8 @@ RunCommandLine(int argc, char* argv[])
 		return Types();
 	if (strcmp(option, "--check") == 0)
 		return Check();
+	if (strcmp(option, "--repair") == 0)
+		return Repair(argc, argv);
 	if (strcmp(option, "--library") == 0)
 		return Library(argc, argv);
 	if (strcmp(option, "--migrate") == 0) {

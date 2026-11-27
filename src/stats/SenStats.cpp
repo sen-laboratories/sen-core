@@ -4,6 +4,7 @@
  */
 
 #include "SenStats.h"
+#include "SenIndices.h"
 
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
@@ -72,9 +73,8 @@ QueryVolume(const Volume& volume, const char* predicate, const std::function<voi
 	BQuery query;
 	if (query.SetVolume(&bvolume) != B_OK || query.SetPredicate(predicate) != B_OK || query.Fetch() != B_OK)
 		return false;
-	entry_ref ref;
-	while (query.GetNextRef(&ref) == B_OK)
-		each(ref);
+	// (an entry of the index that cannot be read is skipped, not the end of the list: see ReadQuery; the check of the indices tells about it)
+	ReadQuery(query, each);
 	return true;
 }
 
@@ -437,6 +437,7 @@ RunCheck()
 {
 	CheckResult result;
 	result.objects = 0;
+	result.damagedIndices = 0;
 
 	std::vector<Volume> volumes = QueryableVolumes();
 	result.volumes = (int32)volumes.size();
@@ -478,6 +479,22 @@ RunCheck()
 		if (!ok) {
 			Finding finding;
 			finding.summary << "The query for " << sen::attr::kId << " failed on volume " << volume.name;
+			result.findings.push_back(finding);
+		}
+	}
+
+	// the indices themselves: a query that does not find what is there is worse than an error (the relations of the missing files are invisible)
+	for (const Volume& volume : volumes) {
+		Finding finding;
+		for (const IndexState& state : CheckIndices(volume)) {
+			if (!state.Damaged())
+				continue;
+			result.damagedIndices++;
+			finding.details.push_back(state.Describe());
+		}
+		if (!finding.details.empty()) {
+			finding.summary << Plural((int32)finding.details.size(), "index", "indices") << " of SEN on volume " << volume.name
+				<< " damaged: relations can be missing (Check & Repair makes them again)";
 			result.findings.push_back(finding);
 		}
 	}

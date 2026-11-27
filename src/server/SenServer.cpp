@@ -17,6 +17,7 @@
 #include "Reply.h"
 #include "../plugins/PluginChannels.h"
 #include "../relations/RelationHandler.h"
+#include "../stats/SenIndices.h"
 #include "../ui/FileTypesLink.h"
 
 #include <errno.h>
@@ -28,6 +29,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -793,6 +795,31 @@ void SenServer::MessageReceived(BMessage* message)
 			result = sen::enrich::Handle(*message, &detail);
 			reply->AddString(sen::key::kDetail, detail);
 			break;
+		}
+		// maintenance: make the damaged indices of SEN again (SenIndices.h). It takes seconds to minutes and writes attributes of many files, so it does not run in the
+		// thread that answers every other request: a thread of its own answers when it is done. The message is detached from the looper for that: the looper answers a
+		// message that was not answered when it is done with it ("no reply"), before the thread has anything to say; a detached one is deleted by whoever has it.
+		case sen::cmd::kRepairIndices:
+		{
+			BMessage* request = Looper()->DetachCurrentMessage();
+			if (request == NULL) {
+				result = B_ERROR;
+				break;
+			}
+			std::thread([request]() {
+				sen::stats::RepairResult report;
+				status_t status = sen::stats::RepairIndices(&report, request->GetBool(sen::key::kForce, false), request->GetBool(sen::key::kDeep, false));
+				BMessage answer;
+				answer.AddString(sen::key::kDetail, report.Report().String());
+				answer.AddInt32(sen::key::kIndicesDamaged, report.indicesDamaged);
+				answer.AddInt32(sen::key::kIndicesRepaired, report.indicesRepaired);
+				answer.AddInt32(sen::key::kAttributesRewritten, report.attributesRewritten);
+				sen::reply::Finish(&answer, status);
+				request->SendReply(&answer);
+				delete request;
+			}).detach();
+			delete reply;
+			return;	// answered by the thread
 		}
 		default:
 		{

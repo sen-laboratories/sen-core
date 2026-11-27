@@ -11,6 +11,7 @@
 # The ontology installer (sen-oni) and the SEN server create the same indices (the list comes from the ontology), this
 # script is for repairing a system and for the post-install step of the package. Safe to re-run.
 #
+# (When indices exist but queries miss files, see repair-sen-indices.sh.)
 # Usage: create-sen-indices.sh [volume-path...]
 #   volume-path   the mount points to index; defaults to all mounted volumes
 #

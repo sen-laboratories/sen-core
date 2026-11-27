@@ -784,7 +784,7 @@ DeskbarView::_BuildMenu()
 	menu->AddSeparatorItem();
 
 	menu->AddItem(new BMenuItem((BString("Info") << ellipsis).String(), new BMessage(sen::cmd::kUiShowInfo)));
-	menu->AddItem(new BMenuItem((BString("Check") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
+	menu->AddItem(new BMenuItem((BString("Check & Repair") << ellipsis).String(), new BMessage(sen::cmd::kUiShowCheck)));
 	menu->AddItem(new BMenuItem((BString("Settings") << ellipsis).String(), new BMessage(sen::cmd::kUiShowSettings)));
 	menu->AddSeparatorItem();
 	menu->AddItem(new BMenuItem("Restart SEN Server", new BMessage(sen::cmd::kUiRequestRestart)));

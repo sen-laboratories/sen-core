@@ -42,8 +42,8 @@ cp -a $APP bin/sen_settings $STAGE/bin/
 # the server is started with the session, like the mail server (it waits for the Deskbar to put its item there)
 cp -a package/user_launch $STAGE/data/user_launch/sen_server
 
-# the script that repairs the indices of a system (the server and the ontology installer create them, too)
-cp -a create-sen-indices.sh $STAGE/data/sen-core/
+# the scripts that make the indices of a system (the server and the ontology installer create them, too) and repair them when they are damaged
+cp -a create-sen-indices.sh repair-sen-indices.sh $STAGE/data/sen-core/
 
 # the icon of the Library folders is a separate work under the Design Science License: it is shipped unchanged as a file of its own (its Source Data), with the notice
 # and the text of the license (also as a license of the system, where Haiku keeps them)

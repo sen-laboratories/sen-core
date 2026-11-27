@@ -11,7 +11,8 @@
 #   sen version      the same as sen_server --version
 #   sen info         --info:    an overview of SEN objects, types and relations
 #   sen types        --types:   the types and relations as a tree, with the number of files
-#   sen check        --check:   look for inconsistencies
+#   sen check        --check:   look for inconsistencies (damaged indices among them)
+#   sen repair       --repair:  make damaged indices of SEN again (sen repair --force: all, --deep: every file of the volumes)
 #   sen migrate      --migrate: the steps that make the data of the user what this version expects (sen migrate --dry-run: only counts);
 #                    sen migrate person (or application/x-person): a change that the server asks the user about, for the files of that type, on request
 #   sen help         the options
@@ -118,7 +119,7 @@ stop_server()
 }
 
 case "\$1" in
-    version|info|types|check|migrate|help)
+    version|info|types|check|repair|migrate|help)
         option="--\$1"
         shift
         exec "\$(server)" "\$option" "\$@"

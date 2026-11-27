@@ -122,11 +122,13 @@ struct Finding {
 struct CheckResult {
 	int32					objects;	///< SEN objects checked
 	int32					volumes;
+	int32					damagedIndices;		///< indices of SEN that do not agree with the files (see SenIndices.h): what Check & Repair repairs
 	std::vector<Finding>	findings;
 };
 
 /**
- * Look for inconsistencies: volumes without an index for SEN:ID, SEN:IDs that more than one file carries, and files with a SEN:ID whose
+ * Look for inconsistencies: volumes without an index for SEN:ID, indices of SEN that are damaged (a query does not find files that have the
+ * attribute, or stops at an entry of a deleted file: CheckIndices), SEN:IDs that more than one file carries, and files with a SEN:ID whose
  * type is not installed (a broken or missing ontology).
  */
 CheckResult RunCheck();

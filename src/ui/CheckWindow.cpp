@@ -14,6 +14,8 @@
 #include <ScrollView.h>
 #include <StringView.h>
 
+#include <sen/Sen.h>
+
 #include <vector>
 
 namespace sen {
@@ -22,13 +24,16 @@ namespace ui {
 static const uint32 kRunCheck = 'CWck';
 static const uint32 kChecked = 'CWcd';
 static const uint32 kActivate = 'CWac';
+static const uint32 kRepair = 'CWrp';
+static const uint32 kRepaired = 'CWrr';
 
 
 CheckWindow::CheckWindow()
 	:
-	BWindow(BRect(140, 140, 760, 560), "SEN Check", B_TITLED_WINDOW,
+	BWindow(BRect(140, 140, 760, 560), "SEN Check & Repair", B_TITLED_WINDOW,
 		B_NOT_ZOOMABLE | B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
 	fChecking(false),
+	fRepairing(false),
 	fWorker(new Worker("check SEN"))
 {
 	fList = new BOutlineListView("list", B_SINGLE_SELECTION_LIST);
@@ -36,6 +41,8 @@ CheckWindow::CheckWindow()
 	scroll->SetExplicitMinSize(BSize(560, 260));
 	fStatus = new BStringView("status", "");
 	fCheck = new BButton("check", "Check again", new BMessage(kRunCheck));
+	fRepair = new BButton("repair", "Repair indices", new BMessage(kRepair));
+	fRepair->SetEnabled(false);
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
 		.SetInsets(B_USE_WINDOW_INSETS)
@@ -43,6 +50,7 @@ CheckWindow::CheckWindow()
 		.AddGroup(B_HORIZONTAL)
 			.Add(fStatus)
 			.AddGlue()
+			.Add(fRepair)
 			.Add(fCheck)
 		.End()
 	.End();
@@ -68,6 +76,22 @@ CheckWindow::MessageReceived(BMessage* message)
 		case kChecked:
 			_Fill(message);
 			break;
+		case kRepair:
+			_Repair();
+			break;
+		case kRepaired:
+		{
+			status_t status = message->GetInt32("status", B_ERROR);
+			fRepairNote = "";
+			if (status == B_OK)
+				fRepairNote << stats::Plural(message->GetInt32(sen::key::kIndicesRepaired, 0), "index", "indices") << " made again ("
+					<< stats::Plural(message->GetInt32(sen::key::kAttributesRewritten, 0), "attribute", "attributes") << " written again). ";
+			else
+				fRepairNote << "The repair did not succeed: " << message->GetString(sen::key::kDetail, strerror(status)) << " ";
+			fRepairing = false;
+			_Check();
+			break;
+		}
 		case kActivate:
 			Activate();
 			break;
@@ -89,6 +113,43 @@ Check()
 }
 
 
+/** what the worker does for the repair: it asks the server (the message of the script) and waits for the answer, which comes when the repair is done */
+static BMessage*
+Repair()
+{
+	BMessage request(sen::cmd::kRepairIndices);
+	BMessage reply;
+	// (a repair of a large volume can take minutes)
+	status_t status = BMessenger(sen::kServerSignature).SendMessage(&request, &reply, 30 * 60 * 1000000LL, 30 * 60 * 1000000LL);
+
+	BMessage* done = new BMessage(kRepaired);
+	if (status == B_OK)
+		status = reply.GetInt32(sen::key::kResult, B_ERROR);
+	done->AddInt32("status", status);
+	// (the report only for a repair that did not succeed: it says what is still wrong)
+	done->AddString(sen::key::kDetail, reply.GetString(sen::key::kDetail, strerror(status)));
+	done->AddInt32(sen::key::kIndicesRepaired, reply.GetInt32(sen::key::kIndicesRepaired, 0));
+	done->AddInt32(sen::key::kAttributesRewritten, reply.GetInt32(sen::key::kAttributesRewritten, 0));
+	return done;
+}
+
+
+void
+CheckWindow::_Repair()
+{
+	if (fChecking || fRepairing)
+		return;
+	fRepairing = true;
+	fCheck->SetEnabled(false);
+	fRepair->SetEnabled(false);
+	fStatus->SetText("Repairing the indices" B_UTF8_ELLIPSIS);
+	if (fWorker->Post(Repair, BMessenger(this)) != B_OK) {
+		fRepairing = false;
+		fCheck->SetEnabled(true);
+	}
+}
+
+
 void
 CheckWindow::_Check()
 {
@@ -96,6 +157,7 @@ CheckWindow::_Check()
 		return;
 	fChecking = true;
 	fCheck->SetEnabled(false);
+	fRepair->SetEnabled(false);
 	fStatus->SetText("Checking" B_UTF8_ELLIPSIS);
 	_Clear();
 
@@ -139,7 +201,9 @@ CheckWindow::_Fill(BMessage* message)
 	}
 	ExpandAllItems(fList);
 
-	BString status("Checked ");
+	BString status(fRepairNote);
+	fRepairNote = "";
+	status << "Checked ";
 	status << stats::Plural(result->objects, "SEN object", "SEN objects") << " on " << stats::Plural(result->volumes, "volume", "volumes")
 		<< ": ";
 	if (result->findings.empty())
@@ -148,6 +212,7 @@ CheckWindow::_Fill(BMessage* message)
 		status << stats::Plural((int32)result->findings.size(), "problem", "problems") << " found";
 	fStatus->SetText(status.String());
 
+	fRepair->SetEnabled(result->damagedIndices > 0);
 	delete result;
 	fChecking = false;
 	fCheck->SetEnabled(true);
