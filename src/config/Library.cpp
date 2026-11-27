@@ -13,6 +13,7 @@
 #include <FindDirectory.h>
 #include <MimeType.h>
 #include <Node.h>
+#include <NodeInfo.h>
 #include <TypeConstants.h>
 #include <fs_attr.h>
 #include <String.h>
@@ -20,6 +21,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+
+#include <spdlog/spdlog.h>
 #include <unistd.h>
 
 namespace sen {
@@ -147,6 +150,15 @@ LibraryOf(const std::string& context, const std::string& libraryName, BPath* lib
 			|| contextFolder.Append(sen::config::kContextsDir) != B_OK || contextFolder.Append(context.c_str()) != B_OK)
 		return B_ERROR;
 	BEntry entry(contextFolder.Path());
+	// The Default context is always there: Akita does not delete it, but a folder that was removed by other means is made again (a Library has to be found for what is made without a context)
+	if (!entry.Exists() && context == sen::config::kContextDefault) {
+		if (create_directory(contextFolder.Path(), 0755) == B_OK) {
+			BDirectory contextDir(contextFolder.Path());
+			BNodeInfo(&contextDir).SetType(sen::mime::kContext);
+			spdlog::warn("the Default context was gone: made again");
+		}
+		entry.SetTo(contextFolder.Path());
+	}
 	if (!entry.Exists() || !entry.IsDirectory())
 		return B_ENTRY_NOT_FOUND;
 
