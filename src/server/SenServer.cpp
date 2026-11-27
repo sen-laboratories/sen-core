@@ -23,12 +23,16 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <fs_index.h>
 
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <chrono>
+#include <future>
+#include <memory>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -377,20 +381,37 @@ void SenServer::RemoveDeskbarItem()
     if (getenv("SEN_NO_DESKBAR") != NULL)
         return;
 
-    BDeskbar deskbar;
-    if (deskbar.IsRunning() && deskbar.HasItem(sen::deskbar::kItemName))
-        deskbar.RemoveItem(sen::deskbar::kItemName);
+    // The Deskbar answers synchronously and there is no time limit in BDeskbar: a Deskbar that is busy or stuck in a menu kept the server here for good (and the
+    // launch daemon waits for the server when it stops the service). A thread asks, the server waits for it a few seconds at most.
+    auto done = std::make_shared<std::promise<void> >();
+    std::future<void> finished = done->get_future();
+    std::thread([done]() {
+        BDeskbar deskbar;
+        if (deskbar.IsRunning() && deskbar.HasItem(sen::deskbar::kItemName))
+            deskbar.RemoveItem(sen::deskbar::kItemName);
+        done->set_value();
+    }).detach();
+    if (finished.wait_for(std::chrono::seconds(3)) != std::future_status::ready)
+        spdlog::warn("the Deskbar did not answer: quitting with the item of SEN still in it (it goes away with the Deskbar or at the next start)");
 }
 
 bool SenServer::QuitRequested()
 {
     fUi->CloseWindows();
     const bool quit = BApplication::QuitRequested();
-    if (quit)
+    if (quit) {
+        // Nothing may keep the server alive from here on (a thread that is stuck in a query or a plugin, a lock that is never freed): after a time that is
+        // plenty for the orderly end it leaves anyway. A server that does not quit was seen: the launch daemon waited for it, and so did the shell command.
+        std::thread([]() {
+            std::this_thread::sleep_for(std::chrono::seconds(15));
+            spdlog::error("the server did not end 15 seconds after it was asked to quit: leaving");
+            spdlog::shutdown();
+            _exit(0);
+        }).detach();
         sen::plugin::Finish();
-    // (the knot stays when the server does not quit: nobody must find a server without its knot)
-    if (quit)
+        // (the knot stays when the server does not quit: nobody must find a server without its knot)
         RemoveDeskbarItem();
+    }
     return quit;
 }
 
@@ -783,6 +804,7 @@ void SenServer::MessageReceived(BMessage* message)
 		case sen::cmd::kRelationRemove:
 		case sen::cmd::kRelationUpdate:
 		case sen::cmd::kRelationsRemoveAll:
+		case sen::cmd::kRelationsRemoveReferences:
 		case sen::cmd::kClassificationApplySticky: // fallthrough
         {
             relationHandler->MessageReceived(message);
@@ -814,6 +836,21 @@ void SenServer::MessageReceived(BMessage* message)
 				answer.AddInt32(sen::key::kIndicesDamaged, report.indicesDamaged);
 				answer.AddInt32(sen::key::kIndicesRepaired, report.indicesRepaired);
 				answer.AddInt32(sen::key::kAttributesRewritten, report.attributesRewritten);
+				// (the references to files that are gone: found by the check, removed by the server like when Akita deletes a file; the indices are in order now, so the
+				// check can be trusted)
+				int32 dangling = 0;
+				if (status == B_OK) {
+					sen::stats::CheckResult check = sen::stats::RunCheck();
+					BMessenger self(be_app);
+					for (const std::string& id : check.danglingIds) {
+						BMessage remove(sen::cmd::kRelationsRemoveReferences);
+						remove.AddString(sen::attr::kId, id.c_str());
+						BMessage removed;
+						if (self.SendMessage(&remove, &removed, 10000000, 10000000) == B_OK)
+							dangling += removed.GetInt32(sen::key::kCount, 0);
+					}
+				}
+				answer.AddInt32(sen::key::kDanglingRemoved, dangling);
 				sen::reply::Finish(&answer, status);
 				request->SendReply(&answer);
 				delete request;

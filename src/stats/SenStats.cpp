@@ -8,6 +8,7 @@
 
 #include <sen/Sen.h>
 #include <sen/Sensei.h>
+#include <sen/SenLookup.h>
 #include <sen/SenVersion.h>
 
 #include "../relations/QueryUtil.h"
@@ -438,6 +439,7 @@ RunCheck()
 	CheckResult result;
 	result.objects = 0;
 	result.damagedIndices = 0;
+	result.danglingReferences = 0;
 
 	std::vector<Volume> volumes = QueryableVolumes();
 	result.volumes = (int32)volumes.size();
@@ -446,9 +448,13 @@ RunCheck()
 	std::map<std::string, std::vector<BString> > missingTypes;	// a type that is not installed -> a few examples
 	std::map<std::string, int32> missingCounts;
 	std::map<std::string, bool> installedCache;
+	// what the objects refer to (SEN:TO and SEN:META): the id -> how many references, and a file that has one
+	std::map<std::string, std::pair<int32, BString> > referenced;
+	bool complete = true;		// (a volume that is not looked at, or an index that is damaged, would make files that are there look gone)
 
 	for (const Volume& volume : volumes) {
 		if (!volume.HasIndex(sen::attr::kId)) {
+			complete = false;
 			Finding finding;
 			finding.summary << "Volume " << volume.name << " has no index for " << sen::attr::kId
 				<< " (SEN cannot find files by their ID there; run create-sen-indices.sh)";
@@ -464,6 +470,17 @@ RunCheck()
 			result.objects++;
 			idToPaths[id.String()].push_back(PathOf(ref));
 
+			for (const char* list : {sen::attr::kTo, sen::attr::kMeta}) {
+				std::vector<std::string> targets;
+				if (sen::lookup::TargetIds(node, &targets, list) != B_OK)
+					continue;
+				for (const std::string& target : targets) {
+					std::pair<int32, BString>& entry = referenced[target];
+					if (entry.first++ == 0)
+						entry.second = PathOf(ref);
+				}
+			}
+
 			char type[B_MIME_TYPE_LENGTH];
 			if (BNodeInfo(&node).GetType(type) != B_OK || type[0] == '\0')
 				return;
@@ -477,6 +494,7 @@ RunCheck()
 			}
 		});
 		if (!ok) {
+			complete = false;
 			Finding finding;
 			finding.summary << "The query for " << sen::attr::kId << " failed on volume " << volume.name;
 			result.findings.push_back(finding);
@@ -490,11 +508,36 @@ RunCheck()
 			if (!state.Damaged())
 				continue;
 			result.damagedIndices++;
+			// (the files are found through the index of SEN:ID: when it does not find all of them, files that are there look gone. Entries of files that do not have the attribute
+			// any more, and the other indices, do not matter: the references are read from the attributes of the files that are found)
+			if (state.attribute == sen::attr::kId && (state.missing > 0 || state.unreadable > 0))
+				complete = false;
 			finding.details.push_back(state.Describe());
 		}
 		if (!finding.details.empty()) {
 			finding.summary << Plural((int32)finding.details.size(), "index", "indices") << " of SEN on volume " << volume.name
 				<< " damaged: relations can be missing (Check & Repair makes them again)";
+			result.findings.push_back(finding);
+		}
+	}
+
+	// references to files that are gone (only when all SEN objects were found: a volume that was not looked at, or an index of SEN:ID that is damaged, hides files that are there)
+	if (complete) {
+		Finding finding;
+		for (const auto& entry : referenced) {
+			if (idToPaths.find(entry.first) != idToPaths.end())
+				continue;
+			result.danglingReferences += entry.second.first;
+			result.danglingIds.push_back(entry.first);
+			if (finding.details.size() < 5) {
+				BString example("e.g. ");
+				example << entry.second.second;
+				finding.details.push_back(example);
+			}
+		}
+		if (!result.danglingIds.empty()) {
+			finding.summary << Plural(result.danglingReferences, "reference", "references") << " to " << Plural((int32)result.danglingIds.size(), "deleted file", "deleted files")
+				<< " (they were deleted with another program, or while SEN did not run): Check & Repair removes the references";
 			result.findings.push_back(finding);
 		}
 	}

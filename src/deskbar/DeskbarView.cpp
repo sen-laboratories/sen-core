@@ -718,8 +718,10 @@ DeskbarView::_AddClassificationMenus(BMenu* menu)
 			if (query.SetVolume(&volume) != B_OK || query.SetPredicate(predicate.String()) != B_OK || query.Fetch() != B_OK)
 				continue;
 			entry_ref ref;
-			while (query.GetNextRef(&ref) == B_OK)
-				entities.push_back(ref);
+			while (query.GetNextRef(&ref) == B_OK) {
+				if (!sen::trash::IsInTrash(ref))	// (what is thrown away is not offered)
+					entities.push_back(ref);
+			}
 		}
 		std::sort(entities.begin(), entities.end(), [](const entry_ref& a, const entry_ref& b) { return strcasecmp(a.name, b.name) < 0; });
 

@@ -487,9 +487,10 @@ status_t RelationHandler::RemoveRelationTx(const entry_ref& source, const char* 
         return status;
 
     // the opposite direction at the target, if there is one: the same relation (same relation id, or the only one)
+    // (a target in the Trash has it, too: it has to be in step when the file is restored)
     entry_ref target;
     char sourceId[sen::id::kLength];
-    if (QueryForUniqueSenId(targetId, &target) != B_OK || target == source
+    if (QueryForUniqueSenId(targetId, &target, true) != B_OK || target == source
             || GetOrCreateId(&source, sourceId, false) != B_OK) {
         return B_OK;    // the target is gone, or there is nothing to keep in step
     }
@@ -569,6 +570,13 @@ status_t RelationHandler::RemoveIncomingRelations(const entry_ref& target, const
         return B_OK;    // no ID: nothing can point to the file
     if (status != B_OK)
         return status;
+    return RemoveIncomingRelationsOfId(targetId, &target, onlyType, allowReadOnly, tx, removed);
+}
+
+status_t RelationHandler::RemoveIncomingRelationsOfId(const char* targetId, const entry_ref* target, const char* onlyType, bool allowReadOnly,
+                                                      sen::AttrSnapshot* tx, int32* removed)
+{
+    status_t status = B_OK;
 
     // the files that list the target: relations are in SEN:TO, associations and classifications in SEN:META
     std::vector<entry_ref> files;
@@ -576,17 +584,18 @@ status_t RelationHandler::RemoveIncomingRelations(const entry_ref& target, const
         BString predicate("(");
         predicate << sen::idlist::ContainsPredicate(list, targetId).c_str() << ")";
         std::vector<entry_ref> found;
-        if (sen::QueryAllVolumes(predicate.String(), &found) == B_OK)
+        // (also the files in the Trash: what they keep of a file that is gone for good must go, or it is dangling when they are restored)
+        if (sen::QueryAllVolumes(predicate.String(), &found, NULL, true) == B_OK)
             files.insert(files.end(), found.begin(), found.end());
     }
 
     // (a query can report a file more than once, and the same file for both lists: the SEN:ID is the identity)
     std::set<std::string> seen;
     for (const entry_ref& file : files) {
-        if (file == target)
+        if (target != NULL && file == *target)
             continue;
         char fileId[sen::id::kLength];
-        if (GetOrCreateId(&file, fileId, false) != B_OK || !seen.insert(fileId).second)
+        if (GetOrCreateId(&file, fileId, false) != B_OK || !seen.insert(fileId).second || strcmp(fileId, targetId) == 0)
             continue;
 
         BStringList types;
@@ -611,6 +620,41 @@ status_t RelationHandler::RemoveIncomingRelations(const entry_ref& target, const
             (*removed)++;
         }
     }
+    return B_OK;
+}
+
+status_t RelationHandler::RemoveReferences(const BMessage* message, BMessage* reply)
+{
+    BString id;
+    if (message->FindString(sen::attr::kId, &id) != B_OK || id.IsEmpty())
+        return B_BAD_VALUE;
+    entry_ref gone;
+    const bool hasGone = message->FindRef(sen::key::kSourceRef, &gone) == B_OK;
+
+    // another file with the ID (a copy that is kept) is the file as well: what points to the ID stays
+    std::vector<entry_ref> holders;
+    if (QueryAllForSenId(id.String(), &holders) == B_OK) {
+        for (const entry_ref& holder : holders) {
+            if (!hasGone || !(holder == gone)) {
+                spdlog::debug("references to {} are kept: {} has the ID as well", id.String(), holder.name);
+                sen::reply::SetDetail(reply, "another file has the ID: nothing removed");
+                return B_OK;
+            }
+        }
+    }
+
+    sen::AttrSnapshot tx;
+    int32 removed = 0;
+    status_t status = RemoveIncomingRelationsOfId(id.String(), hasGone ? &gone : NULL, NULL, true, &tx, &removed);
+    if (status != B_OK) {
+        tx.Restore();
+        sen::reply::SetDetail(reply, (BString("failed to remove the references to ") << id << ": " << strerror(status)).String());
+        return status;
+    }
+
+    spdlog::debug("removed {} references to the deleted file {}", (int) removed, id.String());
+    reply->what = sen::cmd::kReplyRelations;
+    reply->AddInt32(sen::key::kCount, removed);
     return B_OK;
 }
 
@@ -659,7 +703,8 @@ status_t RelationHandler::RemoveAllRelations(const BMessage* message, BMessage* 
                     allReadOnly = sen::relation::GetSet(relations, targetId.c_str(), set, &each) == B_OK && IsReadOnly(each);
                 }
                 entry_ref targetRef;
-                bool gone = QueryForUniqueSenId(targetId.c_str(), &targetRef) != B_OK;
+                // (gone is gone for good: a file in the Trash keeps its relations until the Trash is emptied)
+                bool gone = QueryForUniqueSenId(targetId.c_str(), &targetRef, true) != B_OK;
                 if (!allReadOnly && !gone)
                     continue;
             }

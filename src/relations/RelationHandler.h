@@ -48,6 +48,12 @@ public:
         status_t    UpdateRelation          (const BMessage* message, BMessage* reply);
         /** remove all relations of a file (of one type if given) */
         status_t    RemoveAllRelations      (const BMessage* message, BMessage* reply);
+        /**
+         * Take away every reference to a file that was deleted for good (the Trash is emptied): what other files have to it in SEN:TO and SEN:META, one-way or not. Request:
+         * sen::attr::kId (the SEN:ID that the file had), sen::key::kSourceRef (the file that is deleted, optional). Nothing is done when another file has the ID (a copy that
+         * is kept): the references are to it as well.
+         */
+        status_t    RemoveReferences        (const BMessage* message, BMessage* reply);
         /** put files (refs) into the sticky classifications, see RelationSticky.cpp */
         status_t    ApplySticky             (const BMessage* message, BMessage* reply);
         /** the classifications that are sticky now (of the contexts only the current one), and their SEN:IDs */
@@ -57,8 +63,12 @@ public:
         /** @return a new TSID, see sen::id::New() */
         BString     GenerateId();
         status_t    GetOrCreateId           (const entry_ref* ref, char* id, bool createIfMissing = false);
-        status_t    QueryForUniqueSenId     (const char* sourceId, entry_ref* ref);
-        /** @brief All files that carry a `SEN:ID`, on all volumes: more than one means copies. */
+        /**
+         * @brief The file that has a `SEN:ID`. A file in the Trash is as good as gone (it comes back when it is restored, with its relations): it is not found,
+         * unless @p includeTrash says that it counts, too (a file that is not in the Trash is taken first).
+         */
+        status_t    QueryForUniqueSenId     (const char* sourceId, entry_ref* ref, bool includeTrash = false);
+        /** @brief All files that carry a `SEN:ID`, on all volumes (also those in the Trash): more than one means copies. */
         status_t    QueryAllForSenId        (const char* senId, std::vector<entry_ref>* refs);
         status_t    QueryForTargetsById     (const char* sourceId, BMessage* idToRef);
 
@@ -173,6 +183,9 @@ private:
          * @param removed gets the number of relations removed added to it
          */
         status_t    RemoveIncomingRelations(const entry_ref& target, const char* onlyType, bool allowReadOnly,
+                                            sen::AttrSnapshot* tx, int32* removed);
+        /** the same for a file that is known by its ID only (it may be gone); @p target, if not NULL, is the file itself, which is left alone */
+        status_t    RemoveIncomingRelationsOfId(const char* targetId, const entry_ref* target, const char* onlyType, bool allowReadOnly,
                                             sen::AttrSnapshot* tx, int32* removed);
         /** whether a file of the ID of this one lists it as a target of a relation of the type (what ResolveReverseRelations() would find) */
         bool        HasReverseRelations(const entry_ref* ref, const char* relationType);

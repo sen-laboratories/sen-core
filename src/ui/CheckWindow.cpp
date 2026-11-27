@@ -41,7 +41,7 @@ CheckWindow::CheckWindow()
 	scroll->SetExplicitMinSize(BSize(560, 260));
 	fStatus = new BStringView("status", "");
 	fCheck = new BButton("check", "Check again", new BMessage(kRunCheck));
-	fRepair = new BButton("repair", "Repair indices", new BMessage(kRepair));
+	fRepair = new BButton("repair", "Repair", new BMessage(kRepair));
 	fRepair->SetEnabled(false);
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_DEFAULT_SPACING)
@@ -85,7 +85,8 @@ CheckWindow::MessageReceived(BMessage* message)
 			fRepairNote = "";
 			if (status == B_OK)
 				fRepairNote << stats::Plural(message->GetInt32(sen::key::kIndicesRepaired, 0), "index", "indices") << " made again ("
-					<< stats::Plural(message->GetInt32(sen::key::kAttributesRewritten, 0), "attribute", "attributes") << " written again). ";
+					<< stats::Plural(message->GetInt32(sen::key::kAttributesRewritten, 0), "attribute", "attributes") << " written again), "
+					<< stats::Plural(message->GetInt32(sen::key::kDanglingRemoved, 0), "reference", "references") << " to deleted files removed. ";
 			else
 				fRepairNote << "The repair did not succeed: " << message->GetString(sen::key::kDetail, strerror(status)) << " ";
 			fRepairing = false;
@@ -130,6 +131,7 @@ Repair()
 	done->AddString(sen::key::kDetail, reply.GetString(sen::key::kDetail, strerror(status)));
 	done->AddInt32(sen::key::kIndicesRepaired, reply.GetInt32(sen::key::kIndicesRepaired, 0));
 	done->AddInt32(sen::key::kAttributesRewritten, reply.GetInt32(sen::key::kAttributesRewritten, 0));
+	done->AddInt32(sen::key::kDanglingRemoved, reply.GetInt32(sen::key::kDanglingRemoved, 0));
 	return done;
 }
 
@@ -142,7 +144,7 @@ CheckWindow::_Repair()
 	fRepairing = true;
 	fCheck->SetEnabled(false);
 	fRepair->SetEnabled(false);
-	fStatus->SetText("Repairing the indices" B_UTF8_ELLIPSIS);
+	fStatus->SetText("Repairing" B_UTF8_ELLIPSIS);
 	if (fWorker->Post(Repair, BMessenger(this)) != B_OK) {
 		fRepairing = false;
 		fCheck->SetEnabled(true);
@@ -212,7 +214,7 @@ CheckWindow::_Fill(BMessage* message)
 		status << stats::Plural((int32)result->findings.size(), "problem", "problems") << " found";
 	fStatus->SetText(status.String());
 
-	fRepair->SetEnabled(result->damagedIndices > 0);
+	fRepair->SetEnabled(result->damagedIndices > 0 || result->danglingReferences > 0);
 	delete result;
 	fChecking = false;
 	fCheck->SetEnabled(true);

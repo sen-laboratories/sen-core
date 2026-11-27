@@ -10,6 +10,7 @@
 #include <String.h>
 
 #include <sen/Sen.h>
+#include <sen/SenTrash.h>
 #include <Query.h>
 #include <Volume.h>
 #include <VolumeRoster.h>
@@ -76,14 +77,19 @@ ReadQuery(BQuery& query, const std::function<void(const entry_ref&)>& each, int3
  * A volume on which the query cannot be run (not supported, or no index for the attribute) is logged and skipped:
  * one volume must not hide the results of the others. Entries of an index that cannot be read are skipped, too (see ReadQuery), and logged.
  *
+ * Files in the Trash are left out (a file that is thrown away is not part of what SEN shows until it is restored, see sen::trash::IsInTrash): menus, the graph and
+ * the lookups of the relations do not see them. What has to reach them all the same (taking the relations to a file away when it is deleted for good, a check of the
+ * indices) asks with @p includeTrash.
+ *
  * @param predicate  the query predicate, see BQuery::SetPredicate
  * @param refs       receives the entries found, in the order of the volumes
  * @param unreadable receives the number of index entries that could not be read, on all volumes (may be NULL): not 0 means that the answer may be
  *                   incomplete, the index is damaged
+ * @param includeTrash also the files that are in the Trash
  * @return B_OK if the query could be run on at least one volume, else the last error
  */
 inline status_t
-QueryAllVolumes(const char* predicate, std::vector<entry_ref>* refs, int32* unreadable = NULL)
+QueryAllVolumes(const char* predicate, std::vector<entry_ref>* refs, int32* unreadable = NULL, bool includeTrash = false)
 {
     BVolumeRoster roster;
     BVolume volume;
@@ -113,7 +119,10 @@ QueryAllVolumes(const char* predicate, std::vector<entry_ref>* refs, int32* unre
 
         anyVolume = true;
         int32 failed = 0;
-        ReadQuery(query, [refs](const entry_ref& ref) { refs->push_back(ref); }, &failed);
+        ReadQuery(query, [refs, includeTrash](const entry_ref& ref) {
+            if (includeTrash || !sen::trash::IsInTrash(ref))
+                refs->push_back(ref);
+        }, &failed);
         if (failed > 0) {
             char name[B_FILE_NAME_LENGTH];
             volume.GetName(name);

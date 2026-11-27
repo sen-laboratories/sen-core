@@ -9,7 +9,9 @@
  * and a Haiku to run on. Every test works in its own folder below $TEST_DIR/_senrel and removes it.
  */
 
+#include <FindDirectory.h>
 #include <MimeType.h>
+#include <Volume.h>
 #include <string.h>
 
 #include <sen/SenOntoCore.h>
@@ -862,9 +864,184 @@ TEST(StickyClassificationsAreAppliedToNewFilesAndRelations)
 	CHECK(!listed);
 }
 
-int
-main()
+// ---- the Trash: a file that is thrown away keeps its relations until the Trash is emptied
+
+/** the folder of the Trash of the volume of a file */
+static BPath
+TrashOf(const entry_ref& ref)
 {
+	BPath trash;
+	BVolume volume(ref.device);
+	find_directory(B_TRASH_DIRECTORY, &trash, true, &volume);
+	return trash;
+}
+
+/** what a move to the Trash does: the file is moved into the Trash folder (it keeps its attributes); the new place is told */
+static status_t
+MoveToTrash(entry_ref* ref)
+{
+	BDirectory trash(TrashOf(*ref).Path());
+	BEntry entry(ref);
+	status_t status = entry.MoveTo(&trash);
+	if (status == B_OK)
+		entry.GetRef(ref);
+	return status;
+}
+
+static status_t
+Restore(entry_ref* ref, const BString& folder)
+{
+	BDirectory directory(folder.String());
+	BEntry entry(ref);
+	status_t status = entry.MoveTo(&directory);
+	if (status == B_OK)
+		entry.GetRef(ref);
+	return status;
+}
+
+/** whether the server finds the file that has the id (it does not look at the Trash) */
+static bool
+ServerFinds(const std::string& id)
+{
+	BMessage find(sen::cmd::kQueryRefForId);
+	find.AddString(sen::attr::kId, id.c_str());
+	BMessage reply;
+	if (BMessenger(sen::kServerSignature).SendMessage(&find, &reply, 10000000, 10000000) != B_OK)
+		return false;
+	entry_ref ref;
+	return SenStatus(reply) == sen::status::kOk && reply.FindRef("ref", &ref) == B_OK;
+}
+
+TEST(AFileInTheTrashKeepsItsRelationsAndTheyComeBackWithIt)
+{
+	Fixture f("trash-keeps", 3);
+	entry_ref label = f.Create("label", kLabelType);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kAssociation, &label);
+	std::string a = IdOf(f.refs[0]), b = IdOf(f.refs[1]), l = IdOf(label);
+	CHECK(ServerFinds(b));
+
+	entry_ref thrown = f.refs[1];
+	CHECK_EQ(MoveToTrash(&thrown), B_OK);
+	CHECK(!ServerFinds(b));								// as good as gone while it is in the Trash...
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 1);		// ...but nothing was taken away: not at the file that points to it
+	CHECK_EQ(Sets(thrown, kReference, a), 1);			// and not at the file itself
+	CHECK(sen::idlist::Contains(List(f.refs[0], sen::attr::kTo), b));
+
+	// a clean-up of stale relations is for what is gone for good
+	BMessage stale(sen::cmd::kRelationsRemoveAll);
+	stale.AddRef(sen::key::kSourceRef, &f.refs[0]);
+	stale.AddBool(sen::key::kStaleOnly, true);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&stale, &reply, 10000000, 10000000);
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 1);
+
+	// the label in the Trash: its association is hidden, and kept
+	entry_ref thrownLabel = label;
+	CHECK_EQ(MoveToTrash(&thrownLabel), B_OK);
+	CHECK(!ServerFinds(l));
+	CHECK(sen::idlist::Contains(List(f.refs[0], sen::attr::kMeta), l));
+
+	// restored: it is all as it was
+	CHECK_EQ(Restore(&thrown, f.dir), B_OK);
+	CHECK_EQ(Restore(&thrownLabel, f.dir), B_OK);
+	CHECK(ServerFinds(b));
+	CHECK(ServerFinds(l));
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 1);
+	CHECK_EQ(Sets(thrown, kReference, a), 1);
+	CHECK(sen::idlist::Contains(List(f.refs[0], sen::attr::kMeta), l));
+}
+
+TEST(RemovingTheReferencesToADeletedFileTakesThemAwayFromEveryFile)
+{
+	// what Akita says when the Trash is emptied (or a file is deleted on the spot): the id of the file that is gone
+	Fixture f("trash-references", 3);
+	entry_ref label = f.Create("label", kLabelType);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);			// two directions
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kAssociation, &label);				// one direction (the label knows nothing of it)
+	Send(sen::cmd::kRelationAdd, &f.refs[2], kAssociation, &label);
+	std::string a = IdOf(f.refs[0]), b = IdOf(f.refs[1]), l = IdOf(label);
+
+	// B goes through the Trash, then it is deleted for good
+	entry_ref thrown = f.refs[1];
+	CHECK_EQ(MoveToTrash(&thrown), B_OK);
+	CHECK_EQ(BEntry(&thrown).Remove(), B_OK);
+	BMessage forget(sen::cmd::kRelationsRemoveReferences);
+	forget.AddString(sen::attr::kId, b.c_str());
+	forget.AddRef(sen::key::kSourceRef, &thrown);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&forget, &reply, 10000000, 10000000);
+	CHECK_EQ(SenStatus(reply), sen::status::kOk);
+	CHECK_EQ(Sets(f.refs[0], kReference, b), 0);
+	CHECK(!sen::idlist::Contains(List(f.refs[0], sen::attr::kTo), b));
+
+	// the label is deleted without the Trash (the file is gone before the server is told, and no file is given)
+	BEntry(&label).Remove();
+	BMessage forgetLabel(sen::cmd::kRelationsRemoveReferences);
+	forgetLabel.AddString(sen::attr::kId, l.c_str());
+	BMessage labelReply;
+	BMessenger(sen::kServerSignature).SendMessage(&forgetLabel, &labelReply, 10000000, 10000000);
+	CHECK_EQ(SenStatus(labelReply), sen::status::kOk);
+	CHECK_EQ(labelReply.GetInt32(sen::key::kCount, -1), 2);
+	CHECK(!sen::idlist::Contains(List(f.refs[0], sen::attr::kMeta), l));
+	CHECK(!sen::idlist::Contains(List(f.refs[2], sen::attr::kMeta), l));
+
+	// a request without an id is refused
+	BMessage nothing(sen::cmd::kRelationsRemoveReferences);
+	BMessage refused;
+	BMessenger(sen::kServerSignature).SendMessage(&nothing, &refused, 10000000, 10000000);
+	CHECK(SenStatus(refused) != sen::status::kOk);
+}
+
+TEST(TheReferencesStayWhileAnotherFileHasTheId)
+{
+	// a copy that is kept stands for the file as well
+	Fixture f("trash-copy", 2);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+	std::string b = IdOf(f.refs[1]);
+	entry_ref copy = f.Create("copy");
+	{
+		BNode node(&copy);
+		BString same(b.c_str());
+		node.WriteAttrString(sen::attr::kId, &same);
+	}
+	BMessage forget(sen::cmd::kRelationsRemoveReferences);
+	forget.AddString(sen::attr::kId, b.c_str());
+	forget.AddRef(sen::key::kSourceRef, &f.refs[1]);
+	BMessage reply;
+	BMessenger(sen::kServerSignature).SendMessage(&forget, &reply, 10000000, 10000000);
+	CHECK_EQ(SenStatus(reply), sen::status::kOk);
+	// (the server may have given the copy an identity of its own already: then there is no second holder, and the file is still there, which the request does not look at
+	// either; what counts is that nothing is removed while a file other than the one that is given has the ID)
+	if (IdOf(copy) == b)
+		CHECK_EQ(Sets(f.refs[0], kReference, b), 1);
+}
+
+/**
+ * Made by relations.sh for the check of references to files that are gone ("dangling-setup", a process of its own: the files that a test process still has open look like
+ * damaged index entries to the check until it ends): two related files, one of them deleted without telling SEN (what a shell command does). Prints the folder, the id of
+ * the deleted file and the file that still points to it.
+ */
+static int
+DanglingSetup()
+{
+	Fixture f("dangling-check", 2);
+	Send(sen::cmd::kRelationAdd, &f.refs[0], kReference, &f.refs[1]);
+	const std::string b = IdOf(f.refs[1]);
+	BEntry(&f.refs[1]).Remove();
+	BPath a(&f.refs[0]);
+	printf("%s %s\n", b.c_str(), a.Path());
+	f.dir = "";		// (the files are kept for the script: it removes them)
+	return Sets(f.refs[0], kReference, b) == 1 ? 0 : 1;
+}
+
+int
+main(int argc, char** argv)
+{
+	if (argc > 1 && strcmp(argv[1], "dangling-setup") == 0) {
+		system((BString("mkdir -p '") << TestDir() << "'").String());
+		return DanglingSetup();
+	}
 	system((BString("mkdir -p '") << TestDir() << "'").String());
 	for (auto& testCase : testing::Cases()) {
 		int before = testing::Failures();

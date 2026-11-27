@@ -123,13 +123,16 @@ struct CheckResult {
 	int32					objects;	///< SEN objects checked
 	int32					volumes;
 	int32					damagedIndices;		///< indices of SEN that do not agree with the files (see SenIndices.h): what Check & Repair repairs
+	int32					danglingReferences;	///< references in SEN:TO and SEN:META to files that do not exist any more (not even in the Trash): Check & Repair removes them
+	std::vector<std::string> danglingIds;		///< the SEN:IDs that they refer to (empty if the check could not be complete: an index is damaged or a volume could not be queried)
 	std::vector<Finding>	findings;
 };
 
 /**
  * Look for inconsistencies: volumes without an index for SEN:ID, indices of SEN that are damaged (a query does not find files that have the
- * attribute, or stops at an entry of a deleted file: CheckIndices), SEN:IDs that more than one file carries, and files with a SEN:ID whose
- * type is not installed (a broken or missing ontology).
+ * attribute, or stops at an entry of a deleted file: CheckIndices), SEN:IDs that more than one file carries, files with a SEN:ID whose
+ * type is not installed (a broken or missing ontology), and references to deleted files (deleted with another program than Akita, or while the server did not run:
+ * Akita removes the references of a file when it is deleted for good; files in the Trash still count as there, their relations stay until it is emptied).
  */
 CheckResult RunCheck();
 

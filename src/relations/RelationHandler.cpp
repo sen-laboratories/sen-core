@@ -205,6 +205,11 @@ void RelationHandler::HandleRequest(BMessage* message)
             result = RemoveAllRelations(message, reply);
             break;
         }
+        case sen::cmd::kRelationsRemoveReferences:
+        {
+            result = RemoveReferences(message, reply);
+            break;
+        }
         case sen::cmd::kClassificationApplySticky:
         {
             result = ApplySticky(message, reply);
@@ -1543,15 +1548,25 @@ status_t RelationHandler::GetOrCreateId(const entry_ref *ref, char* id, bool cre
 status_t RelationHandler::QueryAllForSenId(const char* senId, std::vector<entry_ref>* refs)
 {
     BString predicate(BString(sen::attr::kId) << "==" << senId);
-    return sen::QueryAllVolumes(predicate.String(), refs);
+    return sen::QueryAllVolumes(predicate.String(), refs, NULL, true);
 }
 
-status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound)
+status_t RelationHandler::QueryForUniqueSenId(const char* sourceId, entry_ref* refFound, bool includeTrash)
 {
     BString predicate(BString(sen::attr::kId) << "==" << sourceId);
 
     std::vector<entry_ref> refs;
-    status_t result = sen::QueryAllVolumes(predicate.String(), &refs);
+    status_t result = sen::QueryAllVolumes(predicate.String(), &refs, NULL, includeTrash);
+    if (includeTrash && refs.size() > 1) {
+        // (a file in the Trash and one that is not: the one that is not is the file, the other is a copy that was thrown away)
+        std::vector<entry_ref> live;
+        for (const entry_ref& ref : refs) {
+            if (!sen::trash::IsInTrash(ref))
+                live.push_back(ref);
+        }
+        if (!live.empty())
+            refs.swap(live);
+    }
     if (result != B_OK) {
         spdlog::error("could not execute query for {} == {}: {}", sen::attr::kId, sourceId, strerror(result));
         return result;

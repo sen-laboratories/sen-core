@@ -323,6 +323,9 @@ Repair(int argc, char* argv[])
 			return 1;
 		}
 		printf("%s", reply.GetString(sen::key::kDetail, ""));
+		const int32 dangling = reply.GetInt32(sen::key::kDanglingRemoved, 0);
+		if (dangling > 0)
+			printf("%d reference%s to deleted files removed\n", (int)dangling, dangling == 1 ? "" : "s");
 		return reply.GetInt32(sen::key::kResult, B_ERROR) == B_OK ? 0 : 1;
 	}
 
@@ -342,7 +345,7 @@ Usage(FILE* out, const char* program)
 		"  --version  the name and version of the server\n"
 		"  --info     an overview: SEN objects, types and relations installed\n"
 		"  --types    the installed types and relations as a tree, with the number of files of each\n"
-		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing or damaged indices\n"
+		"  --check    look for inconsistencies: duplicate SEN:IDs, files of types that are not installed, missing or damaged indices, references to files that are gone\n"
 		"  --repair [--force] [--deep]  make the indices of SEN that are damaged again (a query that does not find files that have the attribute): remove, create,\n"
 		"             write the attributes of the SEN objects again; --force all indices, --deep every file of the volumes (slow); the server does it if it runs\n"
 		"  --migrate  make the data of the user what this version expects (renamed relation types...): the steps that are done and to do\n"
